@@ -174,44 +174,6 @@ done
 # Determine the libdir if it's not specified in the args
 [ "$libdir" = "" ] && libdir=$prefix/lib
 
-# Double check mmx (Linux and FreeBSD supported, may end up disabling mmx on other platforms incorrectly)
-if [ "$mmx" = "true" ]
-then
-	case $targetos in
-		Darwin)
-		sysctl -a hw | grep "mmx: 1" > /dev/null || mmx=false
-		;;
-		Linux)
-		grep mmx /proc/cpuinfo > /dev/null 2>&1 || mmx=false
-		;;
-		FreeBSD)
-		[ "$(make -V MACHINE_CPU:Mmmx)" ] || mmx=false
-		;;
-		*)
-		grep mmx /proc/cpuinfo > /dev/null 2>&1 || mmx=false
-		;;
-	esac
-fi
-
-# Double check SSE (Linux and FreeBSD supported, may end up disabling SSE on other platforms incorrectly)
-if [ "$sse" = "true" ]
-then
-	case $targetos in
-		Darwin)
-		sysctl -a hw | grep "sse: 1" > /dev/null || sse=false
-		;;
-		Linux)
-		grep sse /proc/cpuinfo > /dev/null 2>&1 || sse=false
-		;;
-		FreeBSD)
-		[ "$(make -V MACHINE_CPU:Msse)" ] || sse=false
-		;;
-		*)
-		grep sse /proc/cpuinfo > /dev/null 2>&1 || sse=false
-		;;
-	esac
-fi
-
 # Show help if requested
 if [ $help = 1 ]
 then
