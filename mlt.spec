@@ -23,14 +23,14 @@ URL: http://sourceforge.net/projects/%name
 Packager: Maxim Ivanov <redbaron@altlinux.org>
 
 Source: %name-%version.tar
-Patch1: %name-0.3.8-alt-configure.patch
+Patch1: %name-%version-%release.patch
 #Patch2: mlt-0.3.4-alt-mlt-config.patch
 #Patch3: mlt-0.3.2-alt-link.patch
 
 BuildRequires: ImageMagick-tools gcc-c++ jackit-devel ladspa_sdk libSDL-devel
 BuildRequires: libSDL_image-devel libX11-devel libavdevice-devel libavformat-devel
 BuildRequires: libquicktime-devel libsamplerate-devel libsox-devel libswscale-devel
-BuildRequires: libxml2-devel kde4libs-devel 
+BuildRequires: libxml2-devel kde4libs-devel libqt4-devel
 
 %description
 %Name is a multimedia framework designed for television broadcasting.
@@ -116,7 +116,7 @@ Valerie utils.
 
 %prep
 %setup -q
-#%patch1 -p1
+%patch1 -p1
 #%patch2 -p1
 #%patch3 -p1
 
