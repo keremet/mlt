@@ -14,7 +14,7 @@
 
 Name: mlt
 Version: 0.3.8
-Release: alt1
+Release: alt2
 Summary: Multimedia framework designed for television broadcasting
 License: GPL
 Group: Video
@@ -190,6 +190,9 @@ export CFLAGS="%optflags"
 %_bindir/humperdink
 
 %changelog
+* Sat May 16 2009 Maxim Ivanov <redbaron at altlinux.org> 0.3.8-alt2
+- Fix missed libm dynamic link, closes #20024
+
 * Sat Apr 18 2009 Maxim Ivaniv <redbaron at altlinux.org> 0.3.8-alt1
 - 0.3.8
 

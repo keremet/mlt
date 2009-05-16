@@ -1,0 +1,13 @@
+object 19629ba36efcdee0bc3497ad64982ea81bebb43f
+type commit
+tag 0.3.8
+tagger Maxim Ivanov <ivanov.maxim@gmail.com> 1240067635 +0400
+
+0.3.8
+-----BEGIN PGP SIGNATURE-----
+Version: GnuPG v1.4.9 (GNU/Linux)
+
+iEYEABECAAYFAknp7jgACgkQhAA2An3dqf5eIQCgm1st7LeWghXfg72+o34Iy//C
+g08AoLzSHjgQDzR8W33Nz0/QPQf2j4Ka
+=mrXH
+-----END PGP SIGNATURE-----
