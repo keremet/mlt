@@ -12,9 +12,8 @@ OBJS = factory.o \
 
 CFLAGS += -I../..
 
+LDFLAGS += -L../../framework -lmlt
 LDFLAGS += -lm
-
-LDFLAGS+=-L../../framework -lmlt
 
 SRCS := $(OBJS:.o=.c)
 
@@ -34,9 +33,9 @@ clean:
 
 install: all
 	install -m 755 $(TARGET) "$(DESTDIR)$(libdir)/mlt"
-	install -d $(DESTDIR)$(prefix)/share/mlt/oldfilm
-	install -m 644 *.svg "$(DESTDIR)$(prefix)/share/mlt/oldfilm"
-	install -m 644 *.yml "$(DESTDIR)$(prefix)/share/mlt/oldfilm"
+	install -d $(DESTDIR)$(datadir)/mlt/oldfilm
+	install -m 644 *.svg "$(DESTDIR)$(datadir)/mlt/oldfilm"
+	install -m 644 *.yml "$(DESTDIR)$(datadir)/mlt/oldfilm"
 
 
 ifneq ($(wildcard .depend),)

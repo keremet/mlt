@@ -1,0 +1,29 @@
+#!/bin/sh
+
+if [ "$help" = "1" ]
+then
+	cat << EOF
+SWIG options:
+
+  --swig-languages=[all | [java | perl | php | python | ruby | tcl]*]
+                          - High level language bindings (default: none)
+
+EOF
+
+else
+	
+	languages=""
+	touch config.mak
+
+	# Iterate through arguments
+	for i in "$@"
+	do
+		case $i in
+			--swig-languages=* ) languages=${i#--swig-languages=}
+				which swig > /dev/null 2>&1
+				[ $? != 0 ] && echo "Please install swig" && exit 1
+				[ $languages = "all" ] && languages="java perl php python ruby tcl"
+				echo SUBDIRS = ${i#--swig-languages=} > config.mak ;;
+		esac
+	done
+fi

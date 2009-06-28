@@ -85,7 +85,7 @@ distclean:	clean
 		rm -f .depend
 
 clean:	
-		rm -f $(OBJS) $(TARGET) $(NAME)
+		rm -f $(OBJS) $(TARGET) $(NAME) $(SONAME)
 
 install:
 	install -d $(DESTDIR)$(libdir)
@@ -94,15 +94,15 @@ install:
 	ln -sf $(TARGET) $(DESTDIR)$(libdir)/$(NAME)
 	install -d "$(DESTDIR)$(prefix)/include/mlt/framework"
 	install -m 644 $(INCS) "$(DESTDIR)$(prefix)/include/mlt/framework"
-	install -d "$(DESTDIR)$(prefix)/share/mlt"
-	install -m 644 metaschema.yaml "$(DESTDIR)$(prefix)/share/mlt/"
+	install -d "$(DESTDIR)$(datadir)/mlt"
+	install -m 644 metaschema.yaml "$(DESTDIR)$(datadir)/mlt/"
 
 uninstall:
 	rm -f "$(DESTDIR)$(libdir)/$(TARGET)"
 	rm -f "$(DESTDIR)$(libdir)/$(SONAME)"
 	rm -f "$(DESTDIR)$(libdir)/$(NAME)"
 	rm -rf "$(DESTDIR)$(prefix)/include/mlt/framework"
-	rm "$(DESTDIR)$(prefix)/share/mlt/metaschema.yaml"
+	rm -f "$(DESTDIR)$(datadir)/mlt/metaschema.yaml"
 
 ifneq ($(wildcard .depend),)
 include .depend

@@ -1,0 +1,19 @@
+#!/bin/sh
+echo "soversion=2" > config.mak
+echo "mlt++	-I$prefix/include -I$prefix/include/mlt++ -D_REENTRANT	-L$libdir -lmlt++" >> ../../packages.dat
+
+WARNINGS="-W -Wwrite-strings -Wcast-qual -Wpointer-arith -Wcast-align -Wredundant-decls"
+
+targetos=$(uname -s)
+case $targetos in 
+	Darwin)
+		echo LIBSUF=.dylib
+		echo "CXXFLAGS+=-D__DARWIN__ -Wall -fPIC"
+		echo "LIBFLAGS=-dynamiclib -single_module"
+		;;
+	Linux|FreeBSD)
+		echo LIBSUF=.so
+		echo "CXXFLAGS+=-Wall $WARNINGS -fPIC -DPIC"
+		echo "LIBFLAGS=-shared"
+		;;
+esac >> config.mak
