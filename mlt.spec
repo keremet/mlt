@@ -140,6 +140,7 @@ export CFLAGS="%optflags"
 - inigo utility renamed to melt
 - mlt-config removed, use `pkg-config mlt-framework` instead
 - miracle, humperdink and valerie are moved to separate project
+- mlt++ is not part of main tree
 
 * Sat May 16 2009 Maxim Ivanov <redbaron at altlinux.org> 0.3.8-alt2
 - Fix missed libm dynamic link, closes #20024
