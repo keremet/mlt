@@ -5,6 +5,8 @@ TARGET = ../libmltcore$(LIBSUF)
 OBJS = factory.o \
 	   producer_colour.o \
 	   producer_consumer.o \
+	   producer_hold.o \
+	   producer_loader.o \
 	   producer_noise.o \
 	   producer_ppm.o \
 	   filter_brightness.o \
@@ -33,7 +35,7 @@ ASM_OBJS =
 
 CFLAGS += -I../..
 
-LDFLAGS+=-L../../framework -lmlt
+LDFLAGS += -L../../framework -lmlt -lm -lpthread
 
 SRCS := $(OBJS:.o=.c)
 
@@ -56,7 +58,10 @@ clean:
 
 install: all
 	install -m 755 $(TARGET) "$(DESTDIR)$(libdir)/mlt"
-	install -m 644 ../data_fx.properties "$(DESTDIR)$(prefix)/share/mlt"
+	install -d "$(DESTDIR)$(prefix)/share/mlt/core"
+	install -m 644 data_fx.properties "$(DESTDIR)$(datadir)/mlt/core"
+	install -m 644 loader.dict "$(DESTDIR)$(datadir)/mlt/core"
+	install -m 644 loader.ini "$(DESTDIR)$(datadir)/mlt/core"
 
 ifneq ($(wildcard .depend),)
 include .depend

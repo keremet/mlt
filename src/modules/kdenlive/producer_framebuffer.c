@@ -38,17 +38,75 @@ static int framebuffer_get_image( mlt_frame this, uint8_t **image, mlt_image_for
 
 	// Get the filter object and properties
 	mlt_producer producer = mlt_frame_pop_service( this );
-	mlt_frame first_frame = mlt_frame_pop_service( this );
-
-	mlt_properties producer_properties = MLT_PRODUCER_PROPERTIES( producer );
+	int index = ( int )mlt_frame_pop_service( this );
+	mlt_properties properties = MLT_PRODUCER_PROPERTIES( producer );
 
 	// Frame properties objects
 	mlt_properties frame_properties = MLT_FRAME_PROPERTIES( this );
+	mlt_frame first_frame = mlt_properties_get_data( properties, "first_frame", NULL );
+
+	// Get producer parameters
+	int strobe = mlt_properties_get_int( properties, "strobe" );
+	int freeze = mlt_properties_get_int( properties, "freeze" );
+	int freeze_after = mlt_properties_get_int( properties, "freeze_after" );
+	int freeze_before = mlt_properties_get_int( properties, "freeze_before" );
+
+	// Determine the position
+	mlt_position first_position = (first_frame != NULL) ? mlt_frame_get_position( first_frame ) : -1;
+	mlt_position need_first = freeze;
+
+	if ( !freeze || freeze_after || freeze_before )
+	{
+		double prod_speed = mlt_properties_get_double( properties, "_speed" );
+		double actual_position = prod_speed * (double) mlt_producer_position( producer );
+
+		if ( mlt_properties_get_int( properties, "reverse" ) )
+			actual_position = mlt_producer_get_playtime( producer ) - actual_position;
+
+		if ( strobe < 2 )
+		{
+			need_first = floor( actual_position );
+		}
+		else
+		{
+			// Strobe effect wanted, calculate frame position
+			need_first = floor( actual_position );
+			need_first -= need_first % strobe;
+		}
+		if ( freeze )
+		{
+			if ( freeze_after && need_first > freeze ) need_first = freeze;
+			else if ( freeze_before && need_first < freeze ) need_first = freeze;
+		}
+	}
+
+	if ( need_first != first_position )
+	{
+		// Bust the cached frame
+		first_frame = NULL;
+		mlt_properties_set_data( properties, "first_frame", NULL, 0, NULL, NULL );
+	}
+
+	// Get the cached frame
+	if ( first_frame == NULL )
+	{
+		// Get the frame to cache from the real producer
+		mlt_producer real_producer = mlt_properties_get_data( properties, "producer", NULL );
+
+		// Seek the producer to the correct place
+		mlt_producer_seek( real_producer, need_first );
+
+		// Get the frame
+		mlt_service_get_frame( MLT_PRODUCER_SERVICE( real_producer ), &first_frame, index );
+
+		// Cache the frame
+		mlt_properties_set_data( properties, "first_frame", first_frame, 0, ( mlt_destructor )mlt_frame_close, NULL );
+	}
 	mlt_properties first_frame_properties = MLT_FRAME_PROPERTIES( first_frame );
 
+	// Determine output buffer size
 	*width = mlt_properties_get_int( frame_properties, "width" );
 	*height = mlt_properties_get_int( frame_properties, "height" );
-
 	int size;
 	switch ( *format )
 	{
@@ -64,22 +122,18 @@ static int framebuffer_get_image( mlt_frame this, uint8_t **image, mlt_image_for
 			break;
 	}
 
-	uint8_t *output = mlt_properties_get_data( producer_properties, "output_buffer", NULL );
-
+	// Get output buffer
+	uint8_t *output = mlt_properties_get_data( properties, "output_buffer", NULL );
 	if( output == NULL )
 	{
 		output = mlt_pool_alloc( size );
 
 		// Let someone else clean up
-		mlt_properties_set_data( producer_properties, "output_buffer", output, size, mlt_pool_release, NULL ); 
+		mlt_properties_set_data( properties, "output_buffer", output, size, mlt_pool_release, NULL ); 
 	}
 
+	// Which frames are buffered?
 	uint8_t *first_image = mlt_properties_get_data( first_frame_properties, "image", NULL );
-
-	// which frames are buffered?
-
-	int error = 0;
-
 	if( first_image == NULL )
 	{
 		mlt_properties props = MLT_FRAME_PROPERTIES( this );
@@ -87,9 +141,9 @@ static int framebuffer_get_image( mlt_frame this, uint8_t **image, mlt_image_for
 		mlt_properties_set_double( test_properties, "consumer_aspect_ratio", mlt_properties_get_double( props, "consumer_aspect_ratio" ) );
 		mlt_properties_set( test_properties, "rescale.interp", mlt_properties_get( props, "rescale.interp" ) );
 
-		error = mlt_frame_get_image( first_frame, &first_image, format, width, height, writable );
+		int error = mlt_frame_get_image( first_frame, &first_image, format, width, height, writable );
 
-		if( error != 0 ) {
+		if ( error != 0 ) {
 			fprintf(stderr, "first_image == NULL get image died\n");
 			return error;
 		}
@@ -98,14 +152,13 @@ static int framebuffer_get_image( mlt_frame this, uint8_t **image, mlt_image_for
 	// Start with a base image
 	memcpy( output, first_image, size );
 
+	// Set the output image
 	*image = output;
 	mlt_properties_set_data( frame_properties, "image", output, size, NULL, NULL );
 
 	// Make sure that no further scaling is done
 	mlt_properties_set( frame_properties, "rescale.interps", "none" );
 	mlt_properties_set( frame_properties, "scale", "off" );
-
-	mlt_frame_close( first_frame );
 
 	return 0;
 }
@@ -114,75 +167,12 @@ static int producer_get_frame( mlt_producer this, mlt_frame_ptr frame, int index
 {
 	// Construct a new frame
 	*frame = mlt_frame_init( MLT_PRODUCER_SERVICE( this ) );
-	mlt_properties properties = MLT_PRODUCER_PROPERTIES( this );
-
 	if( frame != NULL )
 	{
-		mlt_frame first_frame = mlt_properties_get_data( properties, "first_frame", NULL );
-
-		mlt_position first_position = (first_frame != NULL) ? mlt_frame_get_position( first_frame ) : -1;
-
-		// Get the real producer
-		mlt_producer real_producer = mlt_properties_get_data( properties, "producer", NULL );
-
-		// get properties		
-		int strobe = mlt_properties_get_int( properties, "strobe");
-		int freeze = mlt_properties_get_int( properties, "freeze");
-		int freeze_after = mlt_properties_get_int( properties, "freeze_after");
-		int freeze_before = mlt_properties_get_int( properties, "freeze_before");
-
-		mlt_position need_first;
-
-		if (!freeze || freeze_after || freeze_before) {
-			double prod_speed = mlt_properties_get_double( properties, "_speed");
-			double actual_position = prod_speed * (double) mlt_producer_position( this );
-
-			if (mlt_properties_get_int( properties, "reverse")) actual_position = mlt_producer_get_playtime(this) - actual_position;
-
-			if (strobe < 2)
-			{ 
-				need_first = floor( actual_position );
-			}
-			else 
-			{
-				// Strobe effect wanted, calculate frame position
-				need_first = floor( actual_position );
-				need_first -= need_first%strobe;
-			}
-			if (freeze)
-			{
-				if (freeze_after && need_first > freeze) need_first = freeze;
-				else if (freeze_before && need_first < freeze) need_first = freeze;
-			}
-		}
-		else need_first = freeze;
-
-		if( need_first != first_position )
-		{
-			mlt_frame_close( first_frame );
-			first_position = -1;
-			first_frame = NULL;
-		}
-
-		if( first_frame == NULL )
-		{
-			// Seek the producer to the correct place
-			mlt_producer_seek( real_producer, need_first );
-
-			// Get the frame
-			mlt_service_get_frame( MLT_PRODUCER_SERVICE( real_producer ), &first_frame, index );
-		}
-
-		// Make sure things are in their place
-		mlt_properties_set_data( properties, "first_frame", first_frame, 0, NULL, NULL );
-
 		// Stack the producer and producer's get image
-		mlt_frame_push_service( *frame, first_frame );
-		mlt_properties_inc_ref( MLT_FRAME_PROPERTIES( first_frame ) );
-
+		mlt_frame_push_service( *frame, (void*) index );
 		mlt_frame_push_service( *frame, this );
 		mlt_frame_push_service( *frame, framebuffer_get_image );
-
 
 		// Give the returned frame temporal identity
 		mlt_frame_set_position( *frame, mlt_producer_position( this ) );
@@ -199,14 +189,14 @@ mlt_producer producer_framebuffer_init( mlt_profile profile, mlt_service_type ty
 	this = calloc( 1, sizeof( struct mlt_producer_s ) );
 	mlt_producer_init( this, NULL );
 
-	// Wrap fezzik
+	// Wrap loader
 	mlt_producer real_producer;
 	
 	// Check if a speed was specified.
 	/** 
 
 	* Speed must be appended to the filename with '?'. To play your video at 50%:
-	 inigo framebuffer:my_video.mpg?0.5
+	 melt framebuffer:my_video.mpg?0.5
 
 	* Stroboscope effect can be obtained by adding a stobe=x parameter, where
 	 x is the number of frames that will be ignored.
@@ -231,7 +221,7 @@ mlt_producer producer_framebuffer_init( mlt_profile profile, mlt_service_type ty
 			*ptr = '\0';
 	}
 		
-	real_producer = mlt_factory_producer( profile, "fezzik", props );
+	real_producer = mlt_factory_producer( profile, NULL, props );
 	free( props );
 
 	if (speed == 0.0) speed = 1.0;
@@ -241,8 +231,8 @@ mlt_producer producer_framebuffer_init( mlt_profile profile, mlt_service_type ty
 		// Get the properties of this producer
 		mlt_properties properties = MLT_PRODUCER_PROPERTIES( this );
 
-		// Fezzik normalised it for us already
-		mlt_properties_set_int( properties, "fezzik_normalised", 1);
+		// The loader normalised it for us already
+		mlt_properties_set_int( properties, "loader_normalised", 1);
 		mlt_properties_set( properties, "resource", arg);
 
 		// Store the producer and fitler

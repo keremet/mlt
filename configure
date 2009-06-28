@@ -1,6 +1,6 @@
 #!/bin/sh
 
-export version=0.3.8
+export version=0.4.3
 export soversion=1
 
 show_help()
@@ -16,14 +16,16 @@ General build options:
 
   --prefix=directory      - install prefix for path (default: $prefix)
   --libdir=directory      - lib directory (default: $prefix/lib)
+  --datadir=directory     - data directory (default: $prefix/share)
+  --mandir=directory      - man documentation directory (default: $prefix/share/man)
   --enable-gpl            - Enable GPL components
   --disable-debug         - Compile without debug support (default: on)
   --disable-mmx           - Compile without MMX support (default: on)
   --disable-sse           - Compile without SSE support (default: on)
-  --arch='arch'             - Compile for a specific architecture (default: none)
+  --arch='arch'           - Compile for a specific architecture (default: none)
   --cpu='cpu'             - Compile for a specific CPU (default: none)
 
-Module disables options:
+Module disable options:
 
 EOF
 
@@ -46,6 +48,8 @@ build_config()
 		echo "prefix=$prefix"
 		echo "libdir=$libdir"
 		echo "bindir=$prefix/bin"
+		echo "datadir=$datadir"
+		echo "mandir=$mandir"
 		echo "targetos=$targetos"
 
 		[ "$mmx" = "true" ] && 
@@ -79,6 +83,7 @@ build_config()
 		echo "SHFLAGS=-shared"
 		echo "LIBDL=-ldl"
 		echo "RDYNAMIC=-rdynamic"
+		echo "LDFLAGS+=-Wl,--no-undefined -Wl,--as-needed"
 		;;
 		FreeBSD)
 		[ "$(uname -m)" = "x86_64" ] && echo "ARCH_X86_64=1" && echo "CFLAGS+=-DARCH_X86_64"
@@ -86,6 +91,7 @@ build_config()
 		echo "CFLAGS+=-pthread"
 		echo "SHFLAGS=-shared"
 		echo "RDYNAMIC=-rdynamic"
+		echo "LDFLAGS+=-Wl,--no-undefined -Wl,--as-needed"
 		;;
 		*)
 		;;
@@ -108,19 +114,31 @@ build_config()
 
 build_pkgconfig()
 {
-	for i in framework valerie miracle
-	do
-		echo prefix="$prefix" > mlt-$i.pc
-		(
-			echo exec_prefix=$prefix
-			echo libdir=$libdir
-			echo includedir=$prefix/include
-			echo version=$version
-			echo cflags=`grep ^$i packages.dat | cut -f 2`
-			echo libs=`grep ^$i packages.dat | cut -f 3`
-		) >> mlt-$i.pc
-		cat mlt-$i.pc.in >>mlt-$i.pc
-	done
+	echo prefix="$prefix" > mlt-framework.pc
+	(
+		echo exec_prefix=$prefix
+		echo libdir=$libdir
+		echo includedir=$prefix/include
+		echo datadir=$datadir
+		echo mandir=$mandir
+		echo version=$version
+		echo cflags=`grep ^framework packages.dat | cut -f 2`
+		echo libs=`grep ^framework packages.dat | cut -f 3`
+	) >> mlt-framework.pc
+	cat mlt-framework.pc.in >>mlt-framework.pc
+
+	echo prefix="$prefix" > mlt++.pc
+	(
+		echo exec_prefix=$prefix
+		echo libdir=$libdir
+		echo includedir=$prefix/include
+		echo datadir=$datadir
+		echo mandir=$mandir
+		echo version=$version
+		echo cflags=`grep ^mlt++ packages.dat | cut -f 2`
+		echo libs=`grep ^mlt++ packages.dat | cut -f 3`
+	) >> mlt++.pc
+	cat mlt++.pc.in >>mlt++.pc
 }
 
 # Debug mode
@@ -130,6 +148,8 @@ set +x
 export build_dir=`dirname $0`
 export prefix=/usr/local
 export libdir=""
+export datadir=""
+export mandir=""
 export help=0
 export debug=true
 export mmx=true
@@ -162,6 +182,8 @@ do
 		--help )			help=1 ;;
 		--prefix=* )		prefix="${i#--prefix=}" ;;
 		--libdir=* )		libdir="${i#--libdir=}" ;;
+		--datadir=* )		datadir="${i#--datadir=}" ;;
+		--mandir=* )		mandir="${i#--mandir=}" ;;
 		--disable-debug )	debug=false ;;
 		--disable-mmx )		mmx=false; sse=false ;;
 		--disable-sse )		sse=false ;;
@@ -173,8 +195,10 @@ done
 
 # Determine the libdir if it's not specified in the args
 [ "$libdir" = "" ] && libdir=$prefix/lib
+[ "$datadir" = "" ] && datadir=$prefix/share
+[ "$mandir" = "" ] && mandir=$prefix/share/man
 
-# Double check mmx (Linux and FreeBSD supported, may end up disabling mmx on other platforms incorrectly)
+# Double check MMX (Darwin, Linux and FreeBSD supported, may end up disabling MMX on other platforms incorrectly)
 if [ "$mmx" = "true" ]
 then
 	case $targetos in
@@ -193,7 +217,7 @@ then
 	esac
 fi
 
-# Double check SSE (Linux and FreeBSD supported, may end up disabling SSE on other platforms incorrectly)
+# Double check SSE (Darwin, Linux and FreeBSD supported, may end up disabling SSE on other platforms incorrectly)
 if [ "$sse" = "true" ]
 then
 	case $targetos in
@@ -225,7 +249,7 @@ else
 fi
 
 # Iterate through each of the components
-for i in framework modules inigo valerie miracle humperdink
+for i in framework modules melt mlt++ swig
 do
 	if [ -x src/$i/configure ]
 	then

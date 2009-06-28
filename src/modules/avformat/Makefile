@@ -1,5 +1,15 @@
 include ../../../config.mak
+
+CFLAGS += -I../..
+
+LDFLAGS += -L../../framework -lmlt -lpthread
+
 include config.mak
+
+LDFLAGS += -lavformat$(AVFORMAT_SUFFIX)
+LDFLAGS += -lavcodec$(AVFORMAT_SUFFIX)
+LDFLAGS += -lavutil$(AVFORMAT_SUFFIX)
+LDFLAGS += -lavdevice$(AVFORMAT_SUFFIX) $(EXTRA_LIBS)
 
 ifndef CODECS
 TARGET = ../libmltffmpeg$(LIBSUF)
@@ -25,22 +35,16 @@ OBJS += producer_avformat.o \
 CFLAGS += -DCODECS
 endif
 
-CFLAGS+=-I../..
-
-LDFLAGS+=-L../../framework
-
-LDFLAGS+=-lavformat$(AVFORMAT_SUFFIX) -lavcodec$(AVFORMAT_SUFFIX) -lavutil$(AVFORMAT_SUFFIX) -lavdevice$(AVFORMAT_SUFFIX) $(EXTRA_LIBS) -lmlt
-
 ifdef SWSCALE
-	CFLAGS+=-DSWSCALE
-	LDFLAGS+=-lswscale$(AVFORMAT_SUFFIX)
+CFLAGS += -DSWSCALE
+LDFLAGS += -lswscale$(AVFORMAT_SUFFIX)
 endif
 
 ifdef LOCAL_FFMPEG
-	LOCAL_FFMPEG_OBJS = ffmpeg/libavformat/libavformat$(AVFORMAT_SUFFIX) \
-	                    ffmpeg/libavcodec/libavcodec$(AVFORMAT_SUFFIX) \
-	                    ffmpeg/libavutil/libavutil$(AVFORMAT_SUFFIX) \
-	                    ffmpeg/libavutil/libavdevice$(AVFORMAT_SUFFIX)
+LOCAL_FFMPEG_OBJS = ffmpeg/libavformat/libavformat$(AVFORMAT_SUFFIX) \
+                    ffmpeg/libavcodec/libavcodec$(AVFORMAT_SUFFIX) \
+                    ffmpeg/libavutil/libavutil$(AVFORMAT_SUFFIX) \
+                    ffmpeg/libavutil/libavdevice$(AVFORMAT_SUFFIX)
 endif
 
 SRCS := $(OBJS:.o=.c)
@@ -69,13 +73,13 @@ clean:
 
 install: all
 	install -m 755 $(TARGET) "$(DESTDIR)$(libdir)/mlt"
-	install -d "$(DESTDIR)$(prefix)/share/mlt/avformat"
-	install -m 644 producer_avformat.yml "$(DESTDIR)$(prefix)/share/mlt/avformat"
+	install -d "$(DESTDIR)$(datadir)/mlt/avformat"
+	install -m 644 producer_avformat.yml "$(DESTDIR)$(datadir)/mlt/avformat"
 
 uninstall:
 	rm "$(DESTDIR)$(libdir)/mlt/libmltavformat$(LIBSUF)" 2> /dev/null || true
 	rm "$(DESTDIR)$(libdir)/mlt/libmltffmpeg$(LIBSUF)" 2> /dev/null || true
-	rm -rf "$(DESTDIR)$(prefix)/share/mlt/avformat"
+	rm -rf "$(DESTDIR)$(datadir)/mlt/avformat"
 
 ifneq ($(wildcard .depend),)
 include .depend
