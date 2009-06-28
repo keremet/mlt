@@ -1,2 +1,2 @@
-tar: @version@:.
-diff: @version@:. alt-patched:.
+tar: upstream:.
+diff: upstream:. alt-patched:.

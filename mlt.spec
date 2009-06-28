@@ -1,4 +1,6 @@
+%define _unpackaged_files_terminate_build 1
 %def_disable debug
+%def_disable luma16bpp #if enabled produce 16bpp lumas instead of 8bpp
 
 %ifarch %ix86 x86_64
 %def_enable mmx
@@ -8,13 +10,13 @@
 %def_disable sse
 %endif
 
-%define luma_bpp 16
+
 %define Name MLT
 %define lname lib%name
 
 Name: mlt
-Version: 0.3.8
-Release: alt2
+Version: 0.4.2
+Release: alt1.git2b33565
 Summary: Multimedia framework designed for television broadcasting
 License: GPL
 Group: Video
@@ -24,8 +26,6 @@ Packager: Maxim Ivanov <redbaron@altlinux.org>
 
 Source: %name-%version.tar
 Patch1: %name-%version-%release.patch
-#Patch2: mlt-0.3.4-alt-mlt-config.patch
-#Patch3: mlt-0.3.2-alt-link.patch
 
 BuildRequires: ImageMagick-tools gcc-c++ jackit-devel ladspa_sdk libSDL-devel
 BuildRequires: libSDL_image-devel libX11-devel libavdevice-devel libavformat-devel
@@ -60,59 +60,20 @@ Requires: %lname = %version-%release
 %description -n %lname-devel
 Development files for %Name framework.
 
-%package -n miracle
-Summary: Multi-unit video playout server with realtime effects
-License: GPL
-Group: Video
-Requires: libmiracle = %version-%release
-
-%description -n miracle
-Miracle is a multi-unit video playout server with realtime effects.
-
-%package -n libmiracle
-Summary: Miracle library
-License: GPL
+%package -n %lname++
+Summary: C++ wrapping for the MLT library
 Group: System/Libraries
 
-%description -n libmiracle
-Library for Miracle.
+%description -n %lname++
+This mlt sub-project provides a C++ wrapping for the MLT library.
 
-%package -n libmiracle-devel
-Summary: Development files for Miracle library
-License: GPL
-Group: Development/C
-Requires: libmiracle = %version-%release
-Requires: %lname-devel = %version-%release
-Requires: libvalerie-devel = %version-%release
+%package -n %lname++-devel
+Summary: Development files for %lname.
+Group: Development/C++
+Requires: %lname = %version-%release
 
-%description -n libmiracle-devel
-Development files for Mirace library.
-
-%package -n libvalerie
-Summary: Valerie library
-License: GPL
-Group: System/Libraries
-
-%description -n libvalerie
-Library for Valerie.
-
-%package -n libvalerie-devel
-Summary: Development files for Valerie library
-License: GPL
-Group: Development/C
-Requires: libvalerie = %version-%release
-Requires: %lname-devel = %version-%release
-
-%description -n libvalerie-devel
-Development files for Valerie library.
-
-%package -n valerie-utils
-Summary: Valerie utils
-Group: Video
-License: GPL
-
-%description -n valerie-utils
-Valerie utils.
+%description -n %lname++-devel
+Development files for %lname.
 
 %prep
 %setup -q
@@ -137,7 +98,9 @@ export CFLAGS="%optflags"
 	%{subst_enable sse} \
 	%{subst_enable debug} \
 	--luma-compress \
+        %if_disabled luma16bpp
 	--luma-8bpp \
+        %endif
 	--kde-includedir=%_K4includedir \
         --kde-libdir=%_K4lib
 
@@ -147,49 +110,37 @@ export CFLAGS="%optflags"
 %make DESTDIR=%buildroot install
 
 %files -n %name-utils
-%doc docs/inigo.txt
-%_bindir/inigo
+#%doc docs/melt.txt
+%_bindir/melt
 
 %files -n %lname
-%doc docs/services.txt docs/westley.txt
+#%doc docs/services.txt docs/westley.txt
 %_libdir/%lname.so.*
 %_libdir/%name
 %_datadir/%name
 
 %files -n %lname-devel
-%doc docs/framework.txt
-%dir %_includedir/%name
+#%doc docs/framework.txt
+%_includedir/%name
 %_includedir/%name/framework
-%_bindir/%name-config
 %_libdir/%lname.so
 %_pkgconfigdir/%name-framework.pc
 
-%files -n miracle
-%doc docs/dvcp.txt docs/testing.txt
-%_bindir/miracle
+%files -n %lname++
+%_libdir/%lname++.so.*
 
-%files -n libmiracle
-%_libdir/libmiracle.so.*
-
-%files -n libmiracle-devel
-%_includedir/%name/miracle
-%_libdir/libmiracle.so
-%_pkgconfigdir/%name-miracle.pc
-
-%files -n libvalerie
-%_libdir/libvalerie.so.*
-
-%files -n libvalerie-devel
-%_includedir/%name/valerie
-%_libdir/libvalerie.so
-%_pkgconfigdir/%name-valerie.pc
-
-%files -n valerie-utils
-%doc docs/valerie.txt
-%_bindir/albino
-%_bindir/humperdink
+%files -n %lname++-devel
+%_includedir/%name++
+%_libdir/%lname++.so
+%_pkgconfigdir/%name++.pc
 
 %changelog
+* Sun Jun 28 2009 Maxim Ivanov <redbaron at altlinux.org> 0.4.2-alt1.git2b33565
+- Bump to 0.4.2
+- inigo utility renamed to melt
+- mlt-config removed, use `pkg-config mlt-framework` instead
+- miracle, humperdink and valerie are moved to separate project
+
 * Sat May 16 2009 Maxim Ivanov <redbaron at altlinux.org> 0.3.8-alt2
 - Fix missed libm dynamic link, closes #20024
 
