@@ -1,12 +1,13 @@
+CFLAGS += -I../..
+
+LDFLAGS += -L../../framework -lmlt -lpthread -lm
+
 include ../../../config.mak
 include config.mak
 
 TARGET = ../libmltgtk2$(LIBSUF)
 
 OBJS = factory.o
-
-CFLAGS += -I../..
-LDFLAGS += -L../../framework -lmlt -lpthread -lm
 
 ifdef USE_GTK2
 OBJS += consumer_gtk2.o
@@ -30,6 +31,9 @@ ifdef USE_PANGO
 OBJS += producer_pango.o
 CFLAGS += `pkg-config pangoft2 --cflags`
 LDFLAGS += `pkg-config pangoft2 --libs`
+ifeq ($(targetos),FreeBSD)
+LDFLAGS += -liconv
+endif
 endif
 
 SRCS := $(OBJS:.o=.c)

@@ -23,6 +23,7 @@
 #include <framework/mlt_deque.h>
 #include <framework/mlt_factory.h>
 #include <framework/mlt_filter.h>
+#include <framework/mlt_log.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -63,7 +64,6 @@ struct consumer_sdl_s
 	SDL_Rect rect;
 	uint8_t *buffer;
 	int bpp;
-	int filtered;
 };
 
 /** Forward references to static functions.
@@ -182,20 +182,6 @@ int consumer_start( mlt_consumer parent )
 
 		this->bpp = mlt_properties_get_int( this->properties, "bpp" );
 
-		// Attach a colour space converter
-		if ( preview_off && !this->filtered )
-		{
-			mlt_profile profile = mlt_service_profile( MLT_CONSUMER_SERVICE( parent ) );
-			mlt_filter filter = mlt_factory_filter( profile, "avcolour_space", NULL );
-			if ( filter )
-			{
-				mlt_properties_set_int( MLT_FILTER_PROPERTIES( filter ), "forced", mlt_image_yuv422 );
-				mlt_service_attach( MLT_CONSUMER_SERVICE( parent ), filter );
-				mlt_filter_close( filter );
-			}
-			this->filtered = 1;
-		}
-	
 		if ( sdl_started == 0 && display_off == 0 )
 		{
 			if ( SDL_Init( SDL_INIT_VIDEO | SDL_INIT_NOPARACHUTE ) < 0 )
@@ -383,7 +369,7 @@ static int consumer_play_audio( consumer_sdl this, mlt_frame frame, int init_aud
 		request.userdata = (void *)this;
 		if ( SDL_OpenAudio( &request, &got ) != 0 )
 		{
-			fprintf( stderr, "SDL failed to open audio: %s\n", SDL_GetError() );
+			mlt_log_error( MLT_CONSUMER_SERVICE( this ), "SDL failed to open audio: %s\n", SDL_GetError() );
 			init_audio = 2;
 		}
 		else if ( got.size != 0 )
