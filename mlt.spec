@@ -15,8 +15,8 @@
 %define lname lib%name
 
 Name: mlt
-Version: 0.4.2
-Release: alt1.git2b33565
+Version: 0.4.4
+Release: alt1
 Summary: Multimedia framework designed for television broadcasting
 License: GPL
 Group: Video
@@ -135,6 +135,9 @@ export CFLAGS="%optflags"
 %_pkgconfigdir/%name++.pc
 
 %changelog
+* Fri Jul 31 2009 Denis Smirnov <mithraen@altlinux.ru> 0.4.4-alt1
+- 0.4.4
+
 * Sun Jun 28 2009 Maxim Ivanov <redbaron at altlinux.org> 0.4.2-alt1.git2b33565
 - Bump to 0.4.2
 - inigo utility renamed to melt
