@@ -1,6 +1,7 @@
 /*
  * kdenlivetitle_wrapper.h -- kdenlivetitle wrapper
  * Copyright (c) 2009 Marco Gittler <g.marco@freenet.de>
+ * Copyright (c) 2009 Jean-Baptiste Mardelle <jb@kdenlive.org>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -17,35 +18,34 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
-#include <QtCore/QObject>
-#include <QtCore/QString>
+#include <framework/mlt.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+  
+#include <framework/mlt_producer.h>
+#include <framework/mlt_cache.h>
 #include <framework/mlt_frame.h>
-#include <QtXml/QDomElement>
-#include <QtCore/QRectF>
-#include <QtGui/QColor>
-#include <QtGui/QWidget>
 
-class QApplication;
-class QGraphicsScene;
-class QTransform;
 
-class Title: public QObject
+struct producer_ktitle_s
 {
-
-public:
-	Title( const char *filename);
-	virtual ~Title();
-	void drawKdenliveTitle( uint8_t*, int, int, double, const char*, const char* );
-	void loadFromXml( const char *templateXml, const QString templateText );
-
-private:
-	QString m_filename;
-	QGraphicsScene *m_scene;
-	QRectF m_start, m_end;
-	QString colorToString( const QColor& );
-	QString rectFToString( const QRectF& );
-	QRectF stringToRect( const QString & );
-	QColor stringToColor( const QString & );
-	QTransform stringToTransform( const QString & );
+	struct mlt_producer_s parent;
+	uint8_t *current_image;
+	int current_width;
+	int current_height;
+	pthread_mutex_t mutex;
 };
+
+typedef struct producer_ktitle_s *producer_ktitle;
+
+extern void drawKdenliveTitle( producer_ktitle self, mlt_frame frame, int, int, double, int );
+
+
+#ifdef __cplusplus
+}
+#endif
+
+
 

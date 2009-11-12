@@ -23,6 +23,7 @@
 using namespace Mlt;
 
 Frame::Frame( mlt_frame frame ) :
+	Properties( false ),
 	instance( frame )
 {
 	inc_ref( );
@@ -72,9 +73,9 @@ unsigned char *Frame::fetch_image( mlt_image_format f, int w, int h, int writabl
 	return image;
 }
 
-int16_t *Frame::get_audio( mlt_audio_format &format, int &frequency, int &channels, int &samples )
+void *Frame::get_audio( mlt_audio_format &format, int &frequency, int &channels, int &samples )
 {
-	int16_t *audio = NULL;
+	void *audio = NULL;
 	mlt_frame_get_audio( get_frame( ), &audio, &format, &frequency, &channels, &samples );
 	return audio;
 }
