@@ -259,7 +259,7 @@ static int consumer_start( mlt_consumer this )
 			}
 			else
 			{
-				fprintf( stderr, "%s: Invalid size property %s - ignoring.\n", __FILE__, size );
+				mlt_log_warning( MLT_CONSUMER_SERVICE( this ), "Invalid size property %s - ignoring.\n", size );
 			}
 		}
 		
@@ -430,7 +430,7 @@ static AVStream *add_audio_stream( mlt_consumer this, AVFormatContext *oc, int c
 	}
 	else
 	{
-		fprintf( stderr, "%s: Could not allocate a stream for audio\n", __FILE__ );
+		mlt_log_error( MLT_CONSUMER_SERVICE( this ), "Could not allocate a stream for audio\n" );
 	}
 
 	return st;
@@ -480,7 +480,7 @@ static int open_audio( AVFormatContext *oc, AVStream *st, int audio_outbuf_size 
 	}
 	else
 	{
-		fprintf( stderr, "%s: Unable to encode audio - disabling audio output.\n", __FILE__ );
+		mlt_log_warning( NULL, "%s: Unable to encode audio - disabling audio output.\n", __FILE__ );
 	}
 
 	return audio_input_frame_size;
@@ -488,7 +488,8 @@ static int open_audio( AVFormatContext *oc, AVStream *st, int audio_outbuf_size 
 
 static void close_audio( AVFormatContext *oc, AVStream *st )
 {
-	avcodec_close( st->codec );
+	if ( st && st->codec )
+		avcodec_close( st->codec );
 }
 
 /** Add a video output stream 
@@ -612,7 +613,7 @@ static AVStream *add_video_stream( mlt_consumer this, AVFormatContext *oc, int c
 			int start, end, q;
 			int e = sscanf( rc_override, "%d,%d,%d", &start, &end, &q );
 			if ( e != 3 )
-				fprintf( stderr, "%s: Error parsing rc_override\n", __FILE__ );
+				mlt_log_warning( MLT_CONSUMER_SERVICE( this ), "Error parsing rc_override\n" );
 			c->rc_override = av_realloc( c->rc_override, sizeof( RcOverride ) * ( i + 1 ) );
 			c->rc_override[i].start_frame = start;
 			c->rc_override[i].end_frame = end;
@@ -674,7 +675,7 @@ static AVStream *add_video_stream( mlt_consumer this, AVFormatContext *oc, int c
 					fseek( f, 0, SEEK_SET );
 					logbuffer = av_malloc( size + 1 );
 					if ( !logbuffer )
-						fprintf( stderr, "%s: Could not allocate log buffer\n", __FILE__ );
+						mlt_log_fatal( MLT_CONSUMER_SERVICE( this ), "Could not allocate log buffer\n" );
 					else
 					{
 						size = fread( logbuffer, 1, size, f );
@@ -689,7 +690,7 @@ static AVStream *add_video_stream( mlt_consumer this, AVFormatContext *oc, int c
 	}
 	else
 	{
-		fprintf( stderr, "%s: Could not allocate a stream for video\n", __FILE__ );
+		mlt_log_error( MLT_CONSUMER_SERVICE( this ), "Could not allocate a stream for video\n" );
 	}
  
 	return st;
@@ -749,7 +750,8 @@ static int open_video(AVFormatContext *oc, AVStream *st)
 
 void close_video(AVFormatContext *oc, AVStream *st)
 {
-	avcodec_close(st->codec);
+	if ( st && st->codec )
+		avcodec_close(st->codec);
 }
 
 static inline long time_difference( struct timeval *time1 )
@@ -790,7 +792,7 @@ static void *consumer_thread( void *arg )
 	int img_height = height;
 
 	// Get default audio properties
-	mlt_audio_format aud_fmt = mlt_audio_pcm;
+	mlt_audio_format aud_fmt = mlt_audio_s16;
 	int channels = mlt_properties_get_int( properties, "channels" );
 	int frequency = mlt_properties_get_int( properties, "frequency" );
 	int16_t *pcm = NULL;
@@ -888,7 +890,7 @@ static void *consumer_thread( void *arg )
 		if ( p != NULL )
 			audio_codec_id = p->id;
 		else
-			fprintf( stderr, "%s: audio codec %s unrecognised - ignoring\n", __FILE__, acodec );
+			mlt_log_warning( MLT_CONSUMER_SERVICE( this ), "audio codec %s unrecognised - ignoring\n", acodec );
 	}
 
 	// Check for video codec overides
@@ -900,7 +902,7 @@ static void *consumer_thread( void *arg )
 		if ( p != NULL )
 			video_codec_id = p->id;
 		else
-			fprintf( stderr, "%s: video codec %s unrecognised - ignoring\n", __FILE__, vcodec );
+			mlt_log_warning( MLT_CONSUMER_SERVICE( this ), "video codec %s unrecognised - ignoring\n", vcodec );
 	}
 
 	// Write metadata
@@ -949,14 +951,18 @@ static void *consumer_thread( void *arg )
 		if ( video_st && !open_video( oc, video_st ) )
 			video_st = NULL;
 		if ( audio_st )
+		{
 			audio_input_frame_size = open_audio( oc, audio_st, audio_outbuf_size );
+			if ( !audio_input_frame_size )
+				audio_st = NULL;
+		}
 
 		// Open the output file, if needed
 		if ( !( fmt->flags & AVFMT_NOFILE ) ) 
 		{
 			if ( url_fopen( &oc->pb, filename, URL_WRONLY ) < 0 ) 
 			{
-				fprintf( stderr, "%s: Could not open '%s'\n", __FILE__, filename );
+				mlt_log_error( MLT_CONSUMER_SERVICE( this ), "Could not open '%s'\n", filename );
 				mlt_properties_set_int( properties, "running", 0 );
 			}
 		}
@@ -967,7 +973,7 @@ static void *consumer_thread( void *arg )
 	}
 	else
 	{
-		fprintf( stderr, "%s: Invalid output format parameters\n", __FILE__ );
+		mlt_log_error( MLT_CONSUMER_SERVICE( this ), "Invalid output format parameters\n" );
 		mlt_properties_set_int( properties, "running", 0 );
 	}
 
@@ -1004,7 +1010,7 @@ static void *consumer_thread( void *arg )
 			if ( !terminated && audio_st )
 			{
 				samples = mlt_sample_calculator( fps, frequency, count ++ );
-				mlt_frame_get_audio( frame, &pcm, &aud_fmt, &frequency, &channels, &samples );
+				mlt_frame_get_audio( frame, (void**) &pcm, &aud_fmt, &frequency, &channels, &samples );
 
 				// Create the fifo if we don't have one
 				if ( fifo == NULL )
@@ -1047,15 +1053,17 @@ static void *consumer_thread( void *arg )
 					pkt.size = avcodec_encode_audio( c, audio_outbuf, audio_outbuf_size, buffer );
 					// Write the compressed frame in the media file
 					if ( c->coded_frame && c->coded_frame->pts != AV_NOPTS_VALUE )
+					{
 						pkt.pts = av_rescale_q( c->coded_frame->pts, c->time_base, audio_st->time_base );
-					mlt_log_debug( MLT_CONSUMER_SERVICE( this ), "audio pkt pts %lld frame pts %lld", pkt.pts, c->coded_frame->pts );
+						mlt_log_debug( MLT_CONSUMER_SERVICE( this ), "audio pkt pts %lld frame pts %lld", pkt.pts, c->coded_frame->pts );
+					}
 					pkt.flags |= PKT_FLAG_KEY;
 					pkt.stream_index= audio_st->index;
 					pkt.data= audio_outbuf;
 
-					if ( pkt.size )
-						if ( av_interleaved_write_frame( oc, &pkt ) != 0) 
-							fprintf( stderr, "%s: Error while writing audio frame\n", __FILE__ );
+					if ( pkt.size > 0 )
+						if ( av_interleaved_write_frame( oc, &pkt ) != 0 )
+							mlt_log_error( MLT_CONSUMER_SERVICE( this ), "error writing audio frame\n" );
 
 					mlt_log_debug( MLT_CONSUMER_SERVICE( this ), " frame_size %d\n", c->frame_size );
 					if ( audio_codec_id == CODEC_ID_VORBIS )
@@ -1175,7 +1183,7 @@ static void *consumer_thread( void *arg )
 	 					out_size = avcodec_encode_video(c, video_outbuf, video_outbuf_size, output );
 
 	 					// If zero size, it means the image was buffered
-	 					if (out_size > 0) 
+						if ( out_size > 0 )
 						{
 							AVPacket pkt;
 							av_init_packet( &pkt );
@@ -1195,12 +1203,12 @@ static void *consumer_thread( void *arg )
 							video_pts = (double)video_st->pts.val * av_q2d( video_st->time_base );
 							
 							// Dual pass logging
-							if ( mlt_properties_get_data( properties, "_logfile", NULL ) && c->stats_out)
+							if ( mlt_properties_get_data( properties, "_logfile", NULL ) && c->stats_out )
 								fprintf( mlt_properties_get_data( properties, "_logfile", NULL ), "%s", c->stats_out );
 	 					} 
 						else
 						{
-							fprintf( stderr, "%s: error with video encode\n", __FILE__ );
+							mlt_log_warning( MLT_CONSUMER_SERVICE( this ), "error with video encode\n" );
 						}
  					}
  					frame_count++;
@@ -1299,7 +1307,7 @@ static void *consumer_thread( void *arg )
 	}
 #endif
 
-	// close each codec 
+	// close each codec
 	if (video_st)
 		close_video(oc, video_st);
 	if (audio_st)
@@ -1351,6 +1359,11 @@ static void *consumer_thread( void *arg )
 		remove( full );
 		free( full );
 		file = "x264_2pass.log.temp";
+		full = malloc( strlen( cwd ) + strlen( file ) + 2 );
+		sprintf( full, "%s/%s", cwd, file );
+		remove( full );
+		free( full );
+		file = "x264_2pass.log.mbtree";
 		full = malloc( strlen( cwd ) + strlen( file ) + 2 );
 		sprintf( full, "%s/%s", cwd, file );
 		remove( full );

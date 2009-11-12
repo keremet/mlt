@@ -24,6 +24,8 @@
 
 %{
 #include <mlt++/Mlt.h>
+int mlt_log_get_level( void );
+void mlt_log_set_level( int );
 %}
 
 /** These methods return objects which should be gc'd.
@@ -35,7 +37,8 @@ namespace Mlt {
 %newobject Factory::filter( Profile &, char *, char * );
 %newobject Factory::transition( Profile &, char *, char * );
 %newobject Factory::consumer( Profile &, char *, char * );
-%newobject Properties::listen( char *, void *, mlt_listener );
+%newobject Properties::listen( const char *, void *, mlt_listener );
+%newobject Properties::parse_yaml( const char * );
 %newobject Service::producer( );
 %newobject Service::consumer( );
 %newobject Service::get_frame( int );
@@ -55,6 +58,7 @@ namespace Mlt {
 %newobject Repository::producers( );
 %newobject Repository::transitions( );
 %newobject Repository::metadata( mlt_service_type, const char * );
+%newobject Repository::languages( );
 }
 
 /** Classes to wrap.
@@ -62,6 +66,8 @@ namespace Mlt {
 
 %include <framework/mlt_types.h>
 %include <framework/mlt_factory.h>
+int mlt_log_get_level( void );
+void mlt_log_set_level( int );
 %include <MltFactory.h>
 %include <MltRepository.h>
 %include <MltEvent.h>
