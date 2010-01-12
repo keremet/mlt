@@ -16,7 +16,7 @@
 
 Name: mlt
 Version: 0.4.6
-Release: alt1
+Release: alt2
 Summary: Multimedia framework designed for television broadcasting
 License: GPL
 Group: Video
@@ -30,7 +30,7 @@ Patch1: %name-%version-%release.patch
 BuildRequires: ImageMagick-tools gcc-c++ jackit-devel ladspa_sdk libSDL-devel
 BuildRequires: libSDL_image-devel libX11-devel libavdevice-devel libavformat-devel
 BuildRequires: libquicktime-devel libsamplerate-devel libsox-devel libswscale-devel
-BuildRequires: libxml2-devel kde4libs-devel libqt4-devel
+BuildRequires: libxml2-devel kde4libs-devel libqt4-devel swig python-devel
 
 %description
 %Name is a multimedia framework designed for television broadcasting.
@@ -75,6 +75,13 @@ Requires: %lname = %version-%release
 %description -n %lname++-devel
 Development files for %lname.
 
+%package -n python-module-%name
+Summary: Python package to work with MLT
+Group: Development/Python
+
+%description -n python-module-%name
+This module allows to work with MLT using python..
+
 %prep
 %setup -q
 %patch1 -p1
@@ -102,12 +109,16 @@ export CFLAGS="%optflags"
 	--luma-8bpp \
         %endif
 	--kde-includedir=%_K4includedir \
-        --kde-libdir=%_K4lib
+        --kde-libdir=%_K4lib \
+        --swig-languages=python
 
 %make_build
 
 %install
 %make DESTDIR=%buildroot install
+install -d %buildroot%python_sitelibdir
+install -pm 0644 src/swig/python/%name.py %buildroot%python_sitelibdir/
+install -pm 0755 src/swig/python/_%name.so %buildroot%python_sitelibdir/
 
 %files -n %name-utils
 #%doc docs/melt.txt
@@ -134,7 +145,13 @@ export CFLAGS="%optflags"
 %_libdir/%lname++.so
 %_pkgconfigdir/%name++.pc
 
+%files -n python-module-%name
+%python_sitelibdir/*
+
 %changelog
+* Tue Jan 12 2010 Slava Dubrovskiy <dubrsl@altlinux.org> 0.4.6-alt2
+- Add subpackage python-module-%name
+
 * Thu Nov 12 2009 Maxim Ivanov <redbaron at altlinux.org> 0.4.6-alt1
 - 0.4.6
 - mlt++.so.2 -> mlt++.so.3 soname change
