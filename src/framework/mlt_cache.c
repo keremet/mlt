@@ -30,7 +30,7 @@
 #include <pthread.h>
 
 /** the maximum number of data objects to cache per line */
-#define CACHE_SIZE (10)
+#define MAX_CACHE_SIZE (10)
 
 /** \brief Cache item class
  *
@@ -78,9 +78,10 @@ typedef struct mlt_cache_item_s
 struct mlt_cache_s
 {
 	int count;             /**< the number of items currently in the cache */
+	int size;              /**< the maximum number of items permitted in the cache <= \p MAX_CACHE_SIZE */
 	void* *current;        /**< pointer to the current array of pointers */
-	void* A[ CACHE_SIZE ];
-	void* B[ CACHE_SIZE ];
+	void* A[ MAX_CACHE_SIZE ];
+	void* B[ MAX_CACHE_SIZE ];
 	pthread_mutex_t mutex; /**< a mutex to prevent multi-threaded race conditions */
 	mlt_properties active; /**< a list of cache items some of which may no longer
 	                            be in \p current but to which there are
@@ -119,7 +120,6 @@ static void cache_object_close( mlt_cache cache, void *object, void* data )
 
 	// Fetch the cache item from the active list by its owner's address
 	sprintf( key, "%p", object );
-	pthread_mutex_lock( &cache->mutex );
 	mlt_cache_item item = mlt_properties_get_data( cache->active, key, NULL );
 	if ( item )
 	{
@@ -155,7 +155,6 @@ static void cache_object_close( mlt_cache cache, void *object, void* data )
 			}
 		}
 	}
-	pthread_mutex_unlock( &cache->mutex );
 }
 
 /** Close a cache item.
@@ -170,11 +169,16 @@ static void cache_object_close( mlt_cache cache, void *object, void* data )
 void mlt_cache_item_close( mlt_cache_item item )
 {
 	if ( item )
+	{
+		pthread_mutex_lock( &item->cache->mutex );
 		cache_object_close( item->cache, item->object, item->data );
+		pthread_mutex_unlock( &item->cache->mutex );
+	}
 }
 
 /** Create a new cache.
  *
+ * The default size is \p MAX_CACHE_SIZE.
  * \public \memberof mlt_cache_s
  * \return a new cache or NULL if there was an error
  */
@@ -184,6 +188,7 @@ mlt_cache mlt_cache_init()
 	mlt_cache result = calloc( 1, sizeof( struct mlt_cache_s ) );
 	if ( result )
 	{
+		result->size = MAX_CACHE_SIZE;
 		result->current = result->A;
 		pthread_mutex_init( &result->mutex, NULL );
 		result->active = mlt_properties_new();
@@ -192,10 +197,25 @@ mlt_cache mlt_cache_init()
 	return result;
 }
 
+/** Set the numer of items to cache.
+ *
+ * This must be called before using the cache. The size can not be more
+ * than \p MAX_CACHE_SIZE.
+ * \public \memberof mlt_cache_s
+ * \param cache the cache to adjust
+ * \param size the new size of the cache
+ */
+
+void mlt_cache_set_size( mlt_cache cache, int size )
+{
+	if ( size <= MAX_CACHE_SIZE )
+		cache->size = size;
+}
+
 /** Destroy a cache.
  *
  * \public \memberof mlt_cache_s
- * \param cache the cache to detroy
+ * \param cache the cache to destroy
  */
 
 void mlt_cache_close( mlt_cache cache )
@@ -236,9 +256,7 @@ void mlt_cache_purge( mlt_cache cache, void *object )
 
 			if ( o == object )
 			{
-				pthread_mutex_unlock( &cache->mutex );
 				cache_object_close( cache, o, NULL );
-				pthread_mutex_lock( &cache->mutex );
 			}
 			else
 			{
@@ -293,7 +311,7 @@ static void** shuffle_get_hit( mlt_cache cache, void *object )
 	void **hit = NULL;
 	void **alt = cache->current == cache->A ? cache->B : cache->A;
 
-	if ( cache->count > 0 && cache->count < CACHE_SIZE )
+	if ( cache->count > 0 && cache->count < cache->size )
 	{
 		// first determine if we have a hit
 		while ( i-- && !hit )
@@ -349,13 +367,11 @@ void mlt_cache_put( mlt_cache cache, void *object, void* data, int size, mlt_des
 	if ( hit )
 	{
 		// release the old data
-		pthread_mutex_unlock( &cache->mutex );
 		cache_object_close( cache, *hit, NULL );
-		pthread_mutex_lock( &cache->mutex );
 		// the MRU end gets the updated data
 		hit = &alt[ cache->count - 1 ];
 	}
-	else if ( cache->count < CACHE_SIZE )
+	else if ( cache->count < cache->size )
 	{
 		// more room in cache, add it to MRU end
 		hit = &alt[ cache->count++ ];
@@ -363,9 +379,7 @@ void mlt_cache_put( mlt_cache cache, void *object, void* data, int size, mlt_des
 	else
 	{
 		// release the entry at the LRU end
-		pthread_mutex_unlock( &cache->mutex );
 		cache_object_close( cache, cache->current[0], NULL );
-		pthread_mutex_lock( &cache->mutex );
 
 		// The MRU end gets the new item
 		hit = &alt[ cache->count - 1 ];

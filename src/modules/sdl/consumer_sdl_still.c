@@ -206,7 +206,7 @@ static int consumer_stop( mlt_consumer parent )
 	{
 		int preview_off = mlt_properties_get_int( MLT_CONSUMER_PROPERTIES( parent ), "preview_off" );
 		int sdl_started = mlt_properties_get_int( MLT_CONSUMER_PROPERTIES( parent ), "sdl_started" );
-
+	
 		// Kill the thread and clean up
 		this->running = 0;
 
@@ -523,7 +523,9 @@ static int consumer_play_video( consumer_sdl this, mlt_frame frame )
 		}
 
 		// Flip it into sight
+		pthread_mutex_lock( &mlt_sdl_mutex );
 		SDL_Flip( this->sdl_screen );
+		pthread_mutex_unlock( &mlt_sdl_mutex );
 	}
 
 	sdl_unlock_display();

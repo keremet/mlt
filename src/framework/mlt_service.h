@@ -52,11 +52,13 @@
  * \properties \em disable Set this on a filter to disable it while keeping it in the object model.
  * \properties \em _profile stores the mlt_profile for a service
  * \properties \em _unique_id is a unique identifier
+ * \properties \em _need_previous_next boolean that instructs producers to get
+ * preceding and following frames inside of \p mlt_service_get_frame
  */
 
 struct mlt_service_s
 {
-	struct mlt_properties_s parent; /**< \private */
+	struct mlt_properties_s parent; /**< \private A service extends properties. */
 
 	/** Get a frame of data (virtual function).
 	 *
@@ -93,8 +95,11 @@ extern void mlt_service_apply_filters( mlt_service self, mlt_frame frame, int in
 extern mlt_filter mlt_service_filter( mlt_service self, int index );
 extern mlt_profile mlt_service_profile( mlt_service self );
 extern void mlt_service_close( mlt_service self );
+
 extern void mlt_service_cache_put( mlt_service self, const char *name, void* data, int size, mlt_destructor destructor );
 extern mlt_cache_item mlt_service_cache_get( mlt_service self, const char *name );
+extern void mlt_service_cache_set_size( mlt_service self, const char *name, int size );
+extern void mlt_service_cache_purge( mlt_service self );
 
 #endif
 

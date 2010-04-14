@@ -46,6 +46,8 @@
 #define PIX_FMT_YUYV422 PIX_FMT_YUV422
 #endif
 
+#define AUDIO_ENCODE_BUFFER_SIZE (48000 * 2)
+
 //
 // This structure should be extended and made globally available in mlt
 //
@@ -348,7 +350,7 @@ static int consumer_is_stopped( mlt_consumer this )
 /** Process properties as AVOptions and apply to AV context obj
 */
 
-static void apply_properties( void *obj, mlt_properties properties, int flags )
+static void apply_properties( void *obj, mlt_properties properties, int flags, int alloc )
 {
 	int i;
 	int count = mlt_properties_count( properties ); 
@@ -358,9 +360,9 @@ static void apply_properties( void *obj, mlt_properties properties, int flags )
 		const AVOption *opt = av_find_opt( obj, opt_name, NULL, flags, flags );
 		if ( opt != NULL )
 #if LIBAVCODEC_VERSION_INT >= ((52<<16)+(7<<8)+0)
-			av_set_string3( obj, opt_name, mlt_properties_get( properties, opt_name), 0, NULL );
+			av_set_string3( obj, opt_name, mlt_properties_get( properties, opt_name), alloc, NULL );
 #elif LIBAVCODEC_VERSION_INT >= ((51<<16)+(59<<8)+0)
-			av_set_string2( obj, opt_name, mlt_properties_get( properties, opt_name), 0 );
+			av_set_string2( obj, opt_name, mlt_properties_get( properties, opt_name), alloc );
 #else
 			av_set_string( obj, opt_name, mlt_properties_get( properties, opt_name) );
 #endif
@@ -388,13 +390,16 @@ static AVStream *add_audio_stream( mlt_consumer this, AVFormatContext *oc, int c
 
 		c->codec_id = codec_id;
 		c->codec_type = CODEC_TYPE_AUDIO;
+		c->sample_fmt = SAMPLE_FMT_S16;
 
+#if 0 // disabled until some audio codecs are multi-threaded
 		// Setup multi-threading
 		int thread_count = mlt_properties_get_int( properties, "threads" );
 		if ( thread_count == 0 && getenv( "MLT_AVFORMAT_THREADS" ) )
 			thread_count = atoi( getenv( "MLT_AVFORMAT_THREADS" ) );
 		if ( thread_count > 1 )
 			avcodec_thread_init( c, thread_count );		
+#endif
 	
 		if (oc->oformat->flags & AVFMT_GLOBALHEADER) 
 			c->flags |= CODEC_FLAG_GLOBAL_HEADER;
@@ -411,7 +416,14 @@ static AVStream *add_audio_stream( mlt_consumer this, AVFormatContext *oc, int c
 		}
 
 		// Process properties as AVOptions
-		apply_properties( c, properties, AV_OPT_FLAG_AUDIO_PARAM | AV_OPT_FLAG_ENCODING_PARAM );
+		char *apre = mlt_properties_get( properties, "apre" );
+		if ( apre )
+		{
+			mlt_properties p = mlt_properties_load( apre );
+			apply_properties( c, p, AV_OPT_FLAG_AUDIO_PARAM | AV_OPT_FLAG_ENCODING_PARAM, 1 );
+			mlt_properties_close( p );
+		}
+		apply_properties( c, properties, AV_OPT_FLAG_AUDIO_PARAM | AV_OPT_FLAG_ENCODING_PARAM, 0 );
 
 		int audio_qscale = mlt_properties_get_int( properties, "aq" );
         if ( audio_qscale > QSCALE_NONE )
@@ -522,7 +534,14 @@ static AVStream *add_video_stream( mlt_consumer this, AVFormatContext *oc, int c
 			avcodec_thread_init( c, thread_count );		
 	
 		// Process properties as AVOptions
-		apply_properties( c, properties, AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM );
+		char *vpre = mlt_properties_get( properties, "vpre" );
+		if ( vpre )
+		{
+			mlt_properties p = mlt_properties_load( vpre );
+			apply_properties( c, p, AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM, 1 );
+			mlt_properties_close( p );
+		}
+		apply_properties( c, properties, AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM, 0 );
 
 		// Set options controlled by MLT
 		c->width = mlt_properties_get_int( properties, "width" );
@@ -825,7 +844,7 @@ static void *consumer_thread( void *arg )
 	mlt_image_format img_fmt = mlt_image_yuv422;
 
 	// For receiving audio samples back from the fifo
-	int16_t *buffer = av_malloc( 48000 * 2 );
+	int16_t *buffer = av_malloc( AUDIO_ENCODE_BUFFER_SIZE );
 	int count = 0;
 
 	// Allocate the context
@@ -863,15 +882,27 @@ static void *consumer_thread( void *arg )
 
 	// Check for user selected format first
 	if ( format != NULL )
+#if LIBAVFORMAT_VERSION_INT < ((52<<16)+(45<<8)+0)
 		fmt = guess_format( format, NULL, NULL );
+#else
+		fmt = av_guess_format( format, NULL, NULL );
+#endif
 
 	// Otherwise check on the filename
 	if ( fmt == NULL && filename != NULL )
+#if LIBAVFORMAT_VERSION_INT < ((52<<16)+(45<<8)+0)
 		fmt = guess_format( NULL, filename, NULL );
+#else
+		fmt = av_guess_format( NULL, filename, NULL );
+#endif
 
 	// Otherwise default to mpeg
 	if ( fmt == NULL )
+#if LIBAVFORMAT_VERSION_INT < ((52<<16)+(45<<8)+0)
 		fmt = guess_format( "mpeg", NULL, NULL );
+#else
+		fmt = av_guess_format( "mpeg", NULL, NULL );
+#endif
 
 	// We need a filename - default to stdout?
 	if ( filename == NULL || !strcmp( filename, "" ) )
@@ -946,7 +977,14 @@ static void *consumer_thread( void *arg )
 		oc->max_delay= ( int )( mlt_properties_get_double( properties, "muxdelay" ) * AV_TIME_BASE );
 
 		// Process properties as AVOptions
-		apply_properties( oc, properties, AV_OPT_FLAG_ENCODING_PARAM );
+		char *fpre = mlt_properties_get( properties, "fpre" );
+		if ( fpre )
+		{
+			mlt_properties p = mlt_properties_load( fpre );
+			apply_properties( oc, p, AV_OPT_FLAG_ENCODING_PARAM, 1 );
+			mlt_properties_close( p );
+		}
+		apply_properties( oc, properties, AV_OPT_FLAG_ENCODING_PARAM, 0 );
 
 		if ( video_st && !open_video( oc, video_st ) )
 			video_st = NULL;
@@ -989,7 +1027,8 @@ static void *consumer_thread( void *arg )
 	gettimeofday( &ante, NULL );
 
 	// Loop while running
-	while( mlt_properties_get_int( properties, "running" ) && !terminated )
+	while( mlt_properties_get_int( properties, "running" ) &&
+	       ( !terminated || ( video_st && mlt_deque_count( queue ) ) ) )
 	{
 		// Get the frame
 		frame = mlt_consumer_rt_frame( this );
@@ -1040,17 +1079,20 @@ static void *consumer_thread( void *arg )
 			// Write interleaved audio and video frames
 			if ( !video_st || ( video_st && audio_st && audio_pts < video_pts ) )
 			{
-				if ( ( channels * audio_input_frame_size ) < sample_fifo_used( fifo ) )
+				if ( ( video_st && terminated ) || ( channels * audio_input_frame_size ) < sample_fifo_used( fifo ) )
 				{
- 					AVCodecContext *c;
+					AVCodecContext *c = audio_st->codec;
 					AVPacket pkt;
+					int n = FFMIN( FFMIN( channels * audio_input_frame_size, sample_fifo_used( fifo ) ), AUDIO_ENCODE_BUFFER_SIZE );
+
+					if ( n > 0 )
+						sample_fifo_fetch( fifo, buffer, n );
+					else
+						memset( buffer, 0, AUDIO_ENCODE_BUFFER_SIZE );
+					
 					av_init_packet( &pkt );
-
-					c = audio_st->codec;
-
-					sample_fifo_fetch( fifo, buffer, channels * audio_input_frame_size );
-
 					pkt.size = avcodec_encode_audio( c, audio_outbuf, audio_outbuf_size, buffer );
+					
 					// Write the compressed frame in the media file
 					if ( c->coded_frame && c->coded_frame->pts != AV_NOPTS_VALUE )
 					{
@@ -1133,11 +1175,7 @@ static void *consumer_thread( void *arg )
 							for ( i = 0; i < height; i ++ )
 							{
 								n = ( width + 7 ) / 8;
-								p = output->data[ 0 ] + i * output->linesize[ 0 ];
-
-								#ifndef __DARWIN__
-								p += 3;
-								#endif
+								p = output->data[ 0 ] + i * output->linesize[ 0 ] + 3;
 
 								switch( width % 8 )
 								{
@@ -1178,6 +1216,7 @@ static void *consumer_thread( void *arg )
 						// Set frame interlace hints
 						output->interlaced_frame = !mlt_properties_get_int( frame_properties, "progressive" );
 						output->top_field_first = mlt_properties_get_int( frame_properties, "top_field_first" );
+						output->pts = frame_count;
 
 	 					// Encode the image
 	 					out_size = avcodec_encode_video(c, video_outbuf, video_outbuf_size, output );
@@ -1206,9 +1245,9 @@ static void *consumer_thread( void *arg )
 							if ( mlt_properties_get_data( properties, "_logfile", NULL ) && c->stats_out )
 								fprintf( mlt_properties_get_data( properties, "_logfile", NULL ), "%s", c->stats_out );
 	 					} 
-						else
+						else if ( out_size < 0 )
 						{
-							mlt_log_warning( MLT_CONSUMER_SERVICE( this ), "error with video encode\n" );
+							mlt_log_warning( MLT_CONSUMER_SERVICE( this ), "error with video encode %d\n", frame_count );
 						}
  					}
  					frame_count++;
@@ -1226,7 +1265,7 @@ static void *consumer_thread( void *arg )
 			mlt_log_debug( MLT_CONSUMER_SERVICE( this ), "\n" );
 		}
 
-		if ( real_time_output == 1 && frames % 12 == 0 )
+		if ( real_time_output == 1 && frames % 2 == 0 )
 		{
 			long passed = time_difference( &ante );
 			if ( fifo != NULL )
@@ -1300,15 +1339,22 @@ static void *consumer_thread( void *arg )
 			// write the compressed frame in the media file
 			if ( av_interleaved_write_frame( oc, &pkt ) != 0 )
 			{
-				fprintf( stderr, "%s: Error while writing flushed video frame\n". __FILE__ );
+				mlt_log_error( MLT_CONSUMER_SERVICE(this), "error while writing flushing video frame\n" );
 				break;
 			}
 		}
 	}
 #endif
 
+	// XXX ugly hack to prevent x264 from crashing on multi-threaded encoding
+	int pass = mlt_properties_get_int( properties, "pass" );
+	int thread_count = mlt_properties_get_int( properties, "threads" );
+	if ( thread_count == 0 && getenv( "MLT_AVFORMAT_THREADS" ) )
+		thread_count = atoi( getenv( "MLT_AVFORMAT_THREADS" ) );
+	int multithreaded_x264 = ( video_codec_id == CODEC_ID_H264 && thread_count > 1 );
+	
 	// close each codec
-	if (video_st)
+	if ( video_st && !multithreaded_x264 )
 		close_video(oc, video_st);
 	if (audio_st)
 		close_audio(oc, audio_st);
@@ -1345,7 +1391,7 @@ static void *consumer_thread( void *arg )
 
 	mlt_consumer_stopped( this );
 
-	if ( mlt_properties_get_int( properties, "pass" ) == 2 )
+	if ( pass == 2 )
 	{
 		// Remove the dual pass log file
 		if ( mlt_properties_get( properties, "_logfilename" ) )

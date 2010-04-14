@@ -30,6 +30,19 @@
 #define SIGMOD_STEPS 1000
 #define POSITION_VALUE(p,s,e) (s+((double)(e-s)*p ))
 //static double pow2[SIGMOD_STEPS];
+static float geometry_to_float(char *val, mlt_position pos )
+{
+    float ret=0.0;
+    struct mlt_geometry_item_s item;
+
+	mlt_geometry geom=mlt_geometry_init();
+    mlt_geometry_parse(geom,val,-1,-1,-1);
+    mlt_geometry_fetch(geom,&item , pos );
+    ret=item.x;
+    mlt_geometry_close(geom);
+
+    return ret;
+}
 
 static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *format, int *width, int *height, int writable )
 {
@@ -40,30 +53,22 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 
 	if ( error == 0 && *image )
 	{
-		mlt_position in = mlt_filter_get_in( filter );
-		//mlt_position out = mlt_filter_get_out( filter );
-		mlt_position time = mlt_frame_get_position( this );
-		
-		mlt_geometry geom=mlt_geometry_init();
-		struct mlt_geometry_item_s item;
 		float smooth, radius, cx, cy, opac;
-		char *val=mlt_properties_get(MLT_FILTER_PROPERTIES( filter ), "geometry" );
-		mlt_geometry_parse(geom,val,-1,-1,-1);
-		mlt_geometry_fetch(geom,&item,time-in);
-		smooth=item.x;
-		radius=item.y;
-		cx=item.w;
-		cy=item.h;
-		opac=item.mix;
-		mlt_geometry_close(geom);
-		
+		mlt_properties filter_props = MLT_FILTER_PROPERTIES( filter ) ;
+		mlt_position pos = mlt_properties_get_position( filter_props, "_pos" );
+
+		smooth = geometry_to_float ( mlt_properties_get( filter_props , "smooth" ) , pos ) * 100.0 ;
+		radius = geometry_to_float ( mlt_properties_get( filter_props , "radius" ) , pos ) * *width;
+		cx = geometry_to_float ( mlt_properties_get( filter_props , "x" ) , pos ) * *width;
+		cy = geometry_to_float ( mlt_properties_get( filter_props , "y" ) , pos ) * *height;
+		opac = geometry_to_float ( mlt_properties_get( filter_props , "opacity" ) , pos );
 		int video_width = *width;
 		int video_height = *height;
 		
 		int x,y;
 		int w2=cx,h2=cy;
 		double delta=1.0;
-		double max_opac=opac/100.0;
+		double max_opac=opac;
 
 		for (y=0;y<video_height;y++){
 			int h2_pow2=pow(y-h2,2.0);
@@ -100,6 +105,10 @@ static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
 {
 	
 	mlt_frame_push_service( frame, this );
+	
+	// Determine the time position of this frame
+	mlt_properties_set_position( MLT_FILTER_PROPERTIES( this ), "_pos", mlt_frame_get_position( frame ) -  mlt_filter_get_in( this ) );
+	
 	mlt_frame_push_get_image( frame, filter_get_image );
 	return frame;
 }
@@ -118,7 +127,12 @@ mlt_filter filter_vignette_init( mlt_profile profile, mlt_service_type type, con
 		*/
 		
 		this->process = filter_process;
-		mlt_properties_set( MLT_FILTER_PROPERTIES( this ), "geometry", "80:50%:50%:50%:0" );
+		mlt_properties_set( MLT_FILTER_PROPERTIES( this ), "smooth", "0.8" );
+		mlt_properties_set( MLT_FILTER_PROPERTIES( this ), "radius", "0.5" );
+		mlt_properties_set( MLT_FILTER_PROPERTIES( this ), "x", "0.5" );
+		mlt_properties_set( MLT_FILTER_PROPERTIES( this ), "y", "0.5" );
+		mlt_properties_set( MLT_FILTER_PROPERTIES( this ), "opacity", "0.0" );
+
 		//mlt_properties_set( MLT_FILTER_PROPERTIES( this ), "end", "" );
 
 	}
