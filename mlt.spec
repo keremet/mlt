@@ -15,7 +15,7 @@
 %define lname lib%name
 
 Name: mlt
-Version: 0.4.6
+Version: 0.5.2
 Release: alt1
 Summary: Multimedia framework designed for television broadcasting
 License: GPL
@@ -135,6 +135,9 @@ export CFLAGS="%optflags"
 %_pkgconfigdir/%name++.pc
 
 %changelog
+* Wed Apr 14 2010 Maxim Ivanov <redbaron at altlinux.org> 0.5.2-alt1
+- 0.5.2
+
 * Thu Nov 12 2009 Maxim Ivanov <redbaron at altlinux.org> 0.4.6-alt1
 - 0.4.6
 - mlt++.so.2 -> mlt++.so.3 soname change
