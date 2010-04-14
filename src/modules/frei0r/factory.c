@@ -30,7 +30,7 @@
 #include <stdlib.h>
 #include <limits.h>
 
-#define FREI0R_PLUGIN_PATH "/usr/lib/frei0r-1:/usr/local/lib/frei0r-1:/usr/lib64/frei0r-1:/opt/local/lib/frei0r-1"
+#define FREI0R_PLUGIN_PATH "/usr/lib/frei0r-1:/usr/lib64/frei0r-1:/opt/local/lib/frei0r-1:/usr/local/lib/frei0r-1:$HOME/.frei0r-1/lib"
 
 extern mlt_filter filter_frei0r_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
 extern mlt_frame filter_process( mlt_filter this, mlt_frame frame );
@@ -71,6 +71,8 @@ static mlt_properties fill_param_info ( mlt_service_type type, const char *servi
 	if (!handle) return NULL;
 	void (*plginfo)(f0r_plugin_info_t*)=dlsym(handle,"f0r_get_plugin_info");
 	void (*param_info)(f0r_param_info_t*,int param_index)=dlsym(handle,"f0r_get_param_info");
+	void (*f0r_init)(void)=dlsym(handle,"f0r_init");
+	void (*f0r_deinit)(void)=dlsym(handle,"f0r_deinit");
 	if (!plginfo || !param_info) {
 		dlclose(handle);
 		return NULL;
@@ -80,6 +82,7 @@ static mlt_properties fill_param_info ( mlt_service_type type, const char *servi
 	char string[48];
 	int j=0;
 
+	f0r_init();
 	plginfo(&info);
 	snprintf ( string, sizeof(string) , "%d.%d" , info.major_version , info.minor_version );
 	mlt_properties_set ( metadata, "schema_version" , "0.1" );
@@ -139,6 +142,7 @@ static mlt_properties fill_param_info ( mlt_service_type type, const char *servi
 			mlt_properties_set ( pnum , "readonly" , "no" );
 		}
 	}
+	f0r_deinit();
 	dlclose(handle);
 	free(name);
 
@@ -253,13 +257,17 @@ static void * create_frei0r_item ( mlt_profile profile, mlt_service_type type, c
 	);
 	void* ret=NULL;
 	while (dircount--){
-		char soname[1024]="";
+		char soname[PATH_MAX];
 
 		char *save_firstptr = NULL;
 		char *firstname=strtok_r(strdup(id),".",&save_firstptr);
+		char* directory = mlt_tokeniser_get_string (tokeniser, dircount);
 
 		firstname=strtok_r(NULL,".",&save_firstptr);
-		sprintf(soname,"%s/%s.so", mlt_tokeniser_get_string( tokeniser , dircount ) , firstname );
+		if (strncmp(directory, "$HOME", 5))
+			snprintf(soname, PATH_MAX, "%s/%s.so", directory, firstname);
+		else
+			snprintf(soname, PATH_MAX, "%s%s/%s.so", getenv("HOME"), strchr(directory, '/'), firstname);
 
 		if (firstname){
 
@@ -286,24 +294,24 @@ MLT_REPOSITORY
 		getenv("MLT_FREI0R_PLUGIN_PATH") ? getenv("MLT_FREI0R_PLUGIN_PATH") : FREI0R_PLUGIN_PATH,
 		":"
 	);
-	char temp[ 1024 ];
-	sprintf( temp, "%s/frei0r/blacklist.txt", mlt_environment( "MLT_DATA" ) );
-	mlt_properties blacklist = mlt_properties_load( temp );
+	char dirname[PATH_MAX];
+	snprintf( dirname, PATH_MAX, "%s/frei0r/blacklist.txt", mlt_environment( "MLT_DATA" ) );
+	mlt_properties blacklist = mlt_properties_load( dirname );
 
 	while (dircount--){
 
 		mlt_properties direntries = mlt_properties_new();
-		char* dirname = mlt_tokeniser_get_string ( tokeniser , dircount ) ;
+		char* directory = mlt_tokeniser_get_string (tokeniser, dircount);
+		
+		if (strncmp(directory, "$HOME", 5))
+			snprintf(dirname, PATH_MAX, "%s", directory);
+		else
+			snprintf(dirname, PATH_MAX, "%s%s", getenv("HOME"), strchr(directory, '/'));
 		mlt_properties_dir_list(direntries, dirname ,"*.so",1);
 
 		for (i=0; i<mlt_properties_count(direntries);i++){
 			char* name=mlt_properties_get_value(direntries,i);
 			char* shortname=name+strlen(dirname)+1;
-			char fname[1024]="";
-
-			strcat(fname,dirname);
-			strcat(fname,shortname);
-
 			char *save_firstptr = NULL;
 			char pluginname[1024]="frei0r.";
 			char* firstname = strtok_r ( shortname , "." , &save_firstptr );
@@ -320,14 +328,29 @@ MLT_REPOSITORY
 					f0r_plugin_info_t info;
 					plginfo(&info);
 					if (firstname && info.plugin_type==F0R_PLUGIN_TYPE_SOURCE){
+						if (mlt_properties_get(mlt_repository_producers(repository), pluginname))
+						{
+							dlclose(handle);
+							continue;
+						}
 						MLT_REGISTER( producer_type, pluginname, create_frei0r_item );
 						MLT_REGISTER_METADATA( producer_type, pluginname, fill_param_info, strdup(name) );
 					}
 					else if (firstname && info.plugin_type==F0R_PLUGIN_TYPE_FILTER){
+						if (mlt_properties_get(mlt_repository_filters(repository), pluginname))
+						{
+							dlclose(handle);
+							continue;
+						}
 						MLT_REGISTER( filter_type, pluginname, create_frei0r_item );
 						MLT_REGISTER_METADATA( filter_type, pluginname, fill_param_info, strdup(name) );
 					}
 					else if (firstname && info.plugin_type==F0R_PLUGIN_TYPE_MIXER2 ){
+						if (mlt_properties_get(mlt_repository_transitions(repository), pluginname))
+						{
+							dlclose(handle);
+							continue;
+						}
 						MLT_REGISTER( transition_type, pluginname, create_frei0r_item );
 						MLT_REGISTER_METADATA( transition_type, pluginname, fill_param_info, strdup(name) );
 					}

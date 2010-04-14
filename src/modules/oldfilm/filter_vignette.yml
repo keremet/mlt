@@ -22,12 +22,52 @@ bugs: # this can be just for documentation, or the tool may disclose it to help 
   - need to do some speed improvement.
 
 parameters:
-  - identifier: geometry # 'argument' is a reserved name for a value supplied to the factory
-    title: Geometry Value  # the title can be used as a label for the widget
-    type: geometry
-    description: Start position, "smooth":"radius","X"x"Y","maxopac"
+  - identifier: smooth
+    title: Feathering
+    type: float
     readonly: no
     required: yes
     mutable: no
-    format: %d:%d:%dx%d:%d
-    default: 80:50%:50%:50%:0
+    minimum: 0.0
+    maximum: 1.0
+    default: 0.8
+
+  - identifier: radius
+    title: Radius
+    type: float
+    readonly: no
+    required: yes
+    mutable: no
+    minimum: 0.0
+    maximum: 1.0
+    default: 0.5
+
+  - identifier: x
+    title: X Position
+    type: float
+    readonly: no
+    required: yes
+    mutable: no
+    minimum: 0.0
+    maximum: 1.0
+    default: 0.5
+
+  - identifier: y
+    title: Y Position
+    type: float
+    readonly: no
+    required: yes
+    mutable: no
+    minimum: 0.0
+    maximum: 1.0
+    default: 0.5
+
+  - identifier: opacity
+    title: Opacity
+    type: float
+    readonly: no
+    required: yes
+    mutable: no
+    minimum: 0.0
+    maximum: 1.0
+    default: 0.0

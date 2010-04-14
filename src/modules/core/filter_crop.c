@@ -21,6 +21,7 @@
 #include <framework/mlt_filter.h>
 #include <framework/mlt_frame.h>
 #include <framework/mlt_log.h>
+#include <framework/mlt_profile.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -63,19 +64,43 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 	int top     = mlt_properties_get_int( properties, "crop.top" );
 	int bottom  = mlt_properties_get_int( properties, "crop.bottom" );
 
-	// We only know how to process yuv422 at the moment
+	// Request the image at its original resolution
 	if ( left || right || top || bottom )
-		*format = mlt_image_yuv422;
-
+	{
+		mlt_properties_set_int( properties, "rescale_width", mlt_properties_get_int( properties, "crop.original_width" ) );
+		mlt_properties_set_int( properties, "rescale_height", mlt_properties_get_int( properties, "crop.original_height" ) );
+	}
+	
 	// Now get the image
 	error = mlt_frame_get_image( this, image, format, width, height, writable );
 
 	int owidth  = *width - left - right;
 	int oheight = *height - top - bottom;
+	owidth = owidth < 0 ? 0 : owidth;
+	oheight = oheight < 0 ? 0 : oheight;
 
 	if ( ( owidth != *width || oheight != *height ) &&
 		error == 0 && *image != NULL && owidth > 0 && oheight > 0 )
 	{
+		int bpp;
+
+		switch ( *format )
+		{
+			case mlt_image_yuv422:
+				bpp = 2;
+				break;
+			case mlt_image_rgb24:
+				bpp = 3;
+				break;
+			case mlt_image_rgb24a:
+			case mlt_image_opengl:
+				bpp = 4;
+				break;
+			default:
+				// XXX: we only know how to crop packed formats
+				return 1;
+		}
+
 		// Provides a manual override for misreported field order
 		if ( mlt_properties_get( properties, "meta.top_field_first" ) )
 		{
@@ -85,16 +110,13 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 
 		if ( top % 2 )
 			mlt_properties_set_int( properties, "top_field_first", !mlt_properties_get_int( properties, "top_field_first" ) );
-
-		left  -= left % 2;
-		owidth = *width - left - right;
-
+		
 		// Create the output image
-		uint8_t *output = mlt_pool_alloc( owidth * ( oheight + 1 ) * 2 );
+		uint8_t *output = mlt_pool_alloc( owidth * ( oheight + 1 ) * bpp );
 		if ( output )
 		{
 			// Call the generic resize
-			crop( *image, output, 2, *width, *height, left, right, top, bottom );
+			crop( *image, output, bpp, *width, *height, left, right, top, bottom );
 
 			// Now update the frame
 			*image = output;
@@ -143,10 +165,45 @@ static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
 		int width  = mlt_properties_get_int( frame_props, "real_width" );
 		int height = mlt_properties_get_int( frame_props, "real_height" );
 
+		if ( mlt_properties_get_int( filter_props, "center" ) )
+		{
+			double aspect_ratio = mlt_frame_get_aspect_ratio( frame );
+			if ( aspect_ratio == 0.0 )
+				aspect_ratio = mlt_properties_get_double( frame_props, "consumer_aspect_ratio" );
+			double input_ar = aspect_ratio * width / height;
+			double output_ar = mlt_profile_dar( mlt_service_profile( MLT_FILTER_SERVICE(this) ) );
+			int bias = mlt_properties_get_int( filter_props, "center_bias" );
+			
+			if ( input_ar > output_ar )
+			{
+				left = right = ( width - rint( output_ar * height / aspect_ratio ) ) / 2;
+				if ( abs(bias) > left )
+					bias = bias < 0 ? -left : left;
+				left -= bias;
+				right += bias;
+			}
+			else
+			{
+				top = bottom = ( height - rint( aspect_ratio * width / output_ar ) ) / 2;
+				if ( abs(bias) > top )
+					bias = bias < 0 ? -top : top;
+				top -= bias;
+				bottom += bias;
+			}
+		}		
+
+		left  -= left % 2;
+		right -= right % 2;
+		if ( width - left - right < 8 )
+			left = right = 0;
+		if ( height - top - bottom < 8 )
+			top = bottom = 0;
 		mlt_properties_set_int( frame_props, "crop.left", left );
 		mlt_properties_set_int( frame_props, "crop.right", right );
 		mlt_properties_set_int( frame_props, "crop.top", top );
 		mlt_properties_set_int( frame_props, "crop.bottom", bottom );
+		mlt_properties_set_int( frame_props, "crop.original_width", width );
+		mlt_properties_set_int( frame_props, "crop.original_height", height );
 		mlt_properties_set_int( frame_props, "real_width", width - left - right );
 		mlt_properties_set_int( frame_props, "real_height", height - top - bottom );
 	}

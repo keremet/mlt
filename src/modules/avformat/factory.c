@@ -29,10 +29,11 @@ extern mlt_filter filter_avcolour_space_init( void *arg );
 extern mlt_filter filter_avdeinterlace_init( void *arg );
 extern mlt_filter filter_avresample_init( char *arg );
 extern mlt_filter filter_swscale_init( mlt_profile profile, char *arg );
-extern mlt_producer producer_avformat_init( mlt_profile profile, char *file );
+extern mlt_producer producer_avformat_init( mlt_profile profile, const char *service, char *file );
 
 // ffmpeg Header files
 #include <avformat.h>
+#include <avdevice.h>
 
 // A static flag used to determine if avformat has been initialised
 static int avformat_initialised = 0;
@@ -89,6 +90,7 @@ static void avformat_init( )
 		avformat_initialised = 1;
 		pthread_mutex_init( &avformat_mutex, NULL );
 		av_register_all( );
+		avdevice_register_all();
 		mlt_factory_register_for_clean_up( NULL, avformat_destroy );
 		av_log_set_level( mlt_log_get_level() );
 	}
@@ -98,15 +100,17 @@ static void *create_service( mlt_profile profile, mlt_service_type type, const c
 {
 	avformat_init( );
 #ifdef CODECS
-	if ( !strcmp( id, "avformat" ) )
+	if ( !strncmp( id, "avformat", 8 ) )
 	{
 		if ( type == producer_type )
-			return producer_avformat_init( profile, arg );
+			return producer_avformat_init( profile, id, arg );
 		else if ( type == consumer_type )
 			return consumer_avformat_init( profile, arg );
 	}
 #endif
 #ifdef FILTERS
+	if ( !strcmp( id, "avcolor_space" ) )
+		return filter_avcolour_space_init( arg );
 	if ( !strcmp( id, "avcolour_space" ) )
 		return filter_avcolour_space_init( arg );
 	if ( !strcmp( id, "avdeinterlace" ) )
@@ -151,6 +155,7 @@ MLT_REPOSITORY
 #ifdef CODECS
 	MLT_REGISTER( consumer_type, "avformat", create_service );
 	MLT_REGISTER( producer_type, "avformat", create_service );
+	MLT_REGISTER( producer_type, "avformat-novalidate", create_service );
 	MLT_REGISTER_METADATA( producer_type, "avformat", avformat_metadata, NULL );
 #endif
 #ifdef FILTERS

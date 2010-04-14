@@ -27,8 +27,9 @@
 #include <pthread.h>
 #include <SDL/SDL.h>
 #include <SDL/SDL_syswm.h>
+#include <assert.h>
 
-pthread_mutex_t mlt_sdl_mutex = PTHREAD_MUTEX_INITIALIZER;
+extern pthread_mutex_t mlt_sdl_mutex;
 
 typedef struct consumer_sdl_s *consumer_sdl;
 
@@ -44,6 +45,7 @@ struct consumer_sdl_s
 	int running;
 	int sdl_flags;
 	double last_speed;
+	mlt_position last_position;
 
 	pthread_cond_t refresh_cond;
 	pthread_mutex_t refresh_mutex;
@@ -87,8 +89,9 @@ mlt_consumer consumer_sdl_preview_init( mlt_profile profile, mlt_service_type ty
 		// Create child consumers
 		this->play = mlt_factory_consumer( profile, "sdl", arg );
 		this->still = mlt_factory_consumer( profile, "sdl_still", arg );
-		mlt_properties_set( MLT_CONSUMER_PROPERTIES( parent ), "real_time", "0" );
-		mlt_properties_set( MLT_CONSUMER_PROPERTIES( parent ), "rescale", "nearest" );
+		mlt_properties_set( properties, "real_time", "0" );
+		mlt_properties_set( properties, "rescale", "nearest" );
+		mlt_properties_set( properties, "deinterlace_method", "onefield" );
 		parent->close = consumer_close;
 		parent->start = consumer_start;
 		parent->stop = consumer_stop;
@@ -111,6 +114,7 @@ void consumer_frame_show_cb( mlt_consumer sdl, mlt_consumer parent, mlt_frame fr
 {
 	consumer_sdl this = parent->child;
 	this->last_speed = mlt_properties_get_double( MLT_FRAME_PROPERTIES( frame ), "_speed" );
+	this->last_position = mlt_frame_get_position( frame );
 	mlt_events_fire( MLT_CONSUMER_PROPERTIES( parent ), "consumer-frame-show", frame, NULL );
 }
 
@@ -205,6 +209,7 @@ static int consumer_start( mlt_consumer parent )
 
 		mlt_properties_set_int( play, "put_mode", 1 );
 		mlt_properties_set_int( still, "put_mode", 1 );
+		mlt_properties_set_int( play, "terminate_on_pause", 1 );
 
 		// Start the still producer just to initialise the gui
 		mlt_consumer_start( this->still );
@@ -245,7 +250,7 @@ static int consumer_stop( mlt_consumer parent )
 		this->joined = 1;
 
 		if ( app_locked && lock ) lock( );
-
+		
 		pthread_mutex_lock( &mlt_sdl_mutex );
 		SDL_Quit( );
 		pthread_mutex_unlock( &mlt_sdl_mutex );
@@ -265,8 +270,9 @@ static void *consumer_thread( void *arg )
 	// Identify the arg
 	consumer_sdl this = arg;
 
-	// Get the consumer
+	// Get the consumer and producer
 	mlt_consumer consumer = &this->parent;
+	mlt_producer producer = MLT_PRODUCER( mlt_service_get_producer( MLT_CONSUMER_SERVICE( consumer ) ) );
 
 	// Get the properties
 	mlt_properties properties = MLT_CONSUMER_PROPERTIES( consumer );
@@ -275,6 +281,9 @@ static void *consumer_thread( void *arg )
 	int first = 1;
 	mlt_frame frame = NULL;
 	int last_position = -1;
+	int eof_threshold = 10 + mlt_properties_get_int( MLT_CONSUMER_PROPERTIES( this->play ), "buffer" );
+	int prefill = mlt_properties_get_int( MLT_CONSUMER_PROPERTIES( this->play ), "prefill" );
+	int buffer = mlt_properties_get_int( MLT_CONSUMER_PROPERTIES( this->play ), "buffer" );
 
 	// Determine if the application is dealing with the preview
 	int preview_off = mlt_properties_get_int( properties, "preview_off" );
@@ -326,30 +335,64 @@ static void *consumer_thread( void *arg )
 				last_position = -1;
 			}
 
-			// If we're not the first frame and both consumers are stopped, then stop ourselves
-			if ( !first && mlt_consumer_is_stopped( this->play ) && mlt_consumer_is_stopped( this->still ) )
-			{
-				this->running = 0;
-				mlt_frame_close( frame );
-			}
-			// Allow a little grace time before switching consumers on speed changes
-			else if ( this->ignore_change -- > 0 && this->active != NULL && !mlt_consumer_is_stopped( this->active ) )
-			{
-				mlt_consumer_put_frame( this->active, frame );
-			}
 			// If we aren't playing normally, then use the still
-			else if ( speed != 1 )
+			if ( speed != 1 )
 			{
-				if ( !mlt_consumer_is_stopped( this->play ) )
+				mlt_position duration = mlt_producer_get_playtime( producer );
+
+				// Do not interrupt the normal consumer near the end
+				if ( !mlt_consumer_is_stopped( this->play ) && ( duration - this->last_position ) > eof_threshold )
 					mlt_consumer_stop( this->play );
+
+				// Switch to the still consumer
 				if ( mlt_consumer_is_stopped( this->still ) )
 				{
+					// If near the end, wait for the normal consumer to play out its buffers
+					assert( this->active == this->play );
+					if ( ! mlt_consumer_is_stopped( this->play ) && speed == 0.0 )
+					{
+						// This frame with speed=0 will tell normal consumer to terminate
+						mlt_consumer_put_frame( this->play, frame );
+
+						if ( ( duration - this->last_position ) > ( prefill > 0 ? prefill : buffer ) )
+						{
+							while ( ! mlt_consumer_is_stopped( this->play ) )
+							{
+								struct timespec tm = { 0, 10000000L }; // 10 ms
+								nanosleep( &tm, NULL );
+							}
+						}
+						mlt_consumer_stop( this->play );
+
+						// We want to be positioned at the end
+						if ( duration - this->last_position < 10 )
+							this->last_position = duration - 1;
+					}
+					else
+					{
+						// We will need a new frame at the correct position
+						mlt_frame_close( frame );
+					}
+
+					// Get a new frame at the sought position
+					if ( producer )
+						mlt_producer_seek( producer, this->last_position );
+					frame = mlt_consumer_get_frame( consumer );
+
+					// Start the still consumer
 					this->last_speed = speed;
 					this->active = this->still;
 					this->ignore_change = 0;
 					mlt_consumer_start( this->still );
 				}
-				mlt_consumer_put_frame( this->still, frame );
+				// Use the still consumer
+				if ( frame )
+					mlt_consumer_put_frame( this->still, frame );
+			}
+			// Allow a little grace time before switching consumers on speed changes
+			else if ( this->ignore_change -- > 0 && this->active != NULL && !mlt_consumer_is_stopped( this->active ) )
+			{
+				mlt_consumer_put_frame( this->active, frame );
 			}
 			// Otherwise use the normal player
 			else
@@ -360,7 +403,7 @@ static void *consumer_thread( void *arg )
 				{
 					this->last_speed = speed;
 					this->active = this->play;
-					this->ignore_change = 25;
+					this->ignore_change = 0;
 					mlt_consumer_start( this->play );
 				}
 				mlt_consumer_put_frame( this->play, frame );

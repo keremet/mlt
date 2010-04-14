@@ -1,4 +1,4 @@
-CFLAGS += -I../../ -DARCH_X86
+CFLAGS += -I../../
 
 LDFLAGS += -L../../framework -lmlt
 
@@ -8,9 +8,11 @@ TARGET = ../libmltxine$(LIBSUF)
 
 OBJS = factory.o \
 	   deinterlace.o \
+	   yadif.o \
 	   filter_deinterlace.o
 
 ifdef MMX_FLAGS
+CFLAGS += -DARCH_X86
 OBJS += cpu_accel.o
 endif
 
