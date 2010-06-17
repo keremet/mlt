@@ -24,7 +24,7 @@
 
 Name: mlt
 Version: 0.5.4
-Release: alt2
+Release: alt1.M51.1
 Summary: Multimedia framework designed for television broadcasting
 License: GPL
 Group: Video
@@ -152,6 +152,9 @@ install -pm 0755 src/swig/python/_%name.so %buildroot%python_sitelibdir/
 %python_sitelibdir/*
 
 %changelog
+* Thu Jun 17 2010 Sergey V Turchin <zerg@altlinux.org> 0.5.4-alt1.M51.1
+- built for M51
+
 * Thu Jun 17 2010 Sergey V Turchin <zerg@altlinux.org> 0.5.4-alt2
 - fix build flags
 
