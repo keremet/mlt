@@ -98,13 +98,6 @@ This module allows to work with MLT using python..
 install -m 0644 %SOURCE1 src/mlt++/config.h
 
 %build
-%ifarch x86_64
-%add_optflags -DARCH_X86_64
-%else
-%ifarch %ix86
-%add_optflags -DARCH_X86
-%endif
-%endif
 %configure \
 	--arch=%_arch \
 	--enable-gpl \
