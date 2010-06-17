@@ -24,7 +24,7 @@
 
 Name: mlt
 Version: 0.5.4
-Release: alt1
+Release: alt2
 Summary: Multimedia framework designed for television broadcasting
 License: GPL
 Group: Video
@@ -98,8 +98,8 @@ This module allows to work with MLT using python..
 install -m 0644 %SOURCE1 src/mlt++/config.h
 
 %build
+export CC=gcc CXX=g++ CFLAGS="%optflags"
 %configure \
-	--arch=%_arch \
 	--enable-gpl \
 	--enable-motion-est \
 	--avformat-swscale \
@@ -152,6 +152,9 @@ install -pm 0755 src/swig/python/_%name.so %buildroot%python_sitelibdir/
 %python_sitelibdir/*
 
 %changelog
+* Thu Jun 17 2010 Sergey V Turchin <zerg@altlinux.org> 0.5.4-alt2
+- fix build flags
+
 * Thu Jun 17 2010 Sergey V Turchin <zerg@altlinux.org> 0.5.4-alt1
 - 0.5.4
 
