@@ -1,2 +1,3 @@
-tar: upstream:.
-diff: upstream:. alt-patched:.
+tar: mlt name=mlt-@version@
+copy?: *.patch
+copy?: *.h

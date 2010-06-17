@@ -1,21 +1,29 @@
+%define set_disable() %{expand:%%force_disable %{1}} %{expand:%%undefine _enable_%{1}}
+%define set_enable() %{expand:%%force_enable %{1}} %{expand:%%undefine _disable_%{1}}
+
 %define _unpackaged_files_terminate_build 1
 %def_disable debug
 %def_disable luma16bpp #if enabled produce 16bpp lumas instead of 8bpp
 
-%ifarch %ix86 x86_64
-%def_enable mmx
-%def_enable sse
-%else
 %def_disable mmx
 %def_disable sse
+%def_disable sse2
+%ifarch x86_64
+%set_enable mmx
+%set_enable sse
+%set_enable sse2
 %endif
-
+%ifarch %ix86
+%set_enable mmx
+%set_enable sse
+%set_disable sse2
+%endif
 
 %define Name MLT
 %define lname lib%name
 
 Name: mlt
-Version: 0.5.2
+Version: 0.5.4
 Release: alt1
 Summary: Multimedia framework designed for television broadcasting
 License: GPL
@@ -25,7 +33,8 @@ URL: http://sourceforge.net/projects/%name
 Packager: Maxim Ivanov <redbaron@altlinux.org>
 
 Source: %name-%version.tar
-Patch1: %name-%version-%release.patch
+Source1: mlt++-config.h
+Patch1: mlt-0.5.4-alt-configure-mmx.patch
 
 BuildRequires: ImageMagick-tools gcc-c++ jackit-devel ladspa_sdk libSDL-devel
 BuildRequires: libSDL_image-devel libX11-devel libavdevice-devel libavformat-devel
@@ -85,8 +94,8 @@ This module allows to work with MLT using python..
 %prep
 %setup -q
 %patch1 -p1
-#%patch2 -p1
-#%patch3 -p1
+
+install -m 0644 %SOURCE1 src/mlt++/config.h
 
 %build
 %ifarch x86_64
@@ -96,13 +105,14 @@ This module allows to work with MLT using python..
 %add_optflags -DARCH_X86
 %endif
 %endif
-export CFLAGS="%optflags"
 %configure \
+	--arch=%_arch \
 	--enable-gpl \
 	--enable-motion-est \
 	--avformat-swscale \
 	%{subst_enable mmx} \
 	%{subst_enable sse} \
+	%{subst_enable sse2} \
 	%{subst_enable debug} \
 	--luma-compress \
         %if_disabled luma16bpp
@@ -149,6 +159,9 @@ install -pm 0755 src/swig/python/_%name.so %buildroot%python_sitelibdir/
 %python_sitelibdir/*
 
 %changelog
+* Thu Jun 17 2010 Sergey V Turchin <zerg@altlinux.org> 0.5.4-alt1
+- 0.5.4
+
 * Wed Apr 14 2010 Maxim Ivanov <redbaron at altlinux.org> 0.5.2-alt1
 - 0.5.2
 
