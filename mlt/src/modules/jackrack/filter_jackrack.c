@@ -58,6 +58,11 @@ static void initialise_jack_ports( mlt_properties properties )
 			(mlt_destructor) jack_rack_destroy, NULL );
 		mlt_properties_set( properties, "_rack_client_name", rack_name );
 	}
+	else
+	{
+		// We have to set this to something to prevent re-initialization.
+		mlt_properties_set_data( properties, "jackrack", jack_client, 0, NULL, NULL );
+	}
 		
 	// Allocate buffers and ports
 	jack_ringbuffer_t **output_buffers = mlt_pool_alloc( sizeof( jack_ringbuffer_t *) * channels );
@@ -189,7 +194,7 @@ static int jack_process (jack_nframes_t frames, void * data)
 		// Do not start returning audio until we have sent first mlt frame
 		if ( sync && i == 0 && frame_size > 0 )
 			total_size += ring_size;
-		mlt_log_debug( MLT_FILTER_SERVICE(filter), "sync %d frame_size %d ring_size %d jack_size %d\n", sync, frame_size, ring_size, jack_size );
+		mlt_log_debug( MLT_FILTER_SERVICE(filter), "sync %d frame_size %d ring_size %zd jack_size %zd\n", sync, frame_size, ring_size, jack_size );
 		
 		if ( ! sync || ( frame_size > 0  && total_size >= frame_size ) )
 		{

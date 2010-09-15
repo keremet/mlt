@@ -493,9 +493,6 @@ int mlt_frame_get_image( mlt_frame this, uint8_t **buffer, mlt_image_format *for
 		mlt_properties_set_int( properties, "test_image", 1 );
 	}
 
-	mlt_properties_set_int( properties, "scaled_width", *width );
-	mlt_properties_set_int( properties, "scaled_height", *height );
-
 	return error;
 }
 
@@ -517,7 +514,7 @@ uint8_t *mlt_frame_get_alpha_mask( mlt_frame this )
 			alpha = mlt_properties_get_data( &this->parent, "alpha", NULL );
 		if ( alpha == NULL )
 		{
-			int size = mlt_properties_get_int( &this->parent, "scaled_width" ) * mlt_properties_get_int( &this->parent, "scaled_height" );
+			int size = mlt_properties_get_int( &this->parent, "width" ) * mlt_properties_get_int( &this->parent, "height" );
 			alpha = mlt_pool_alloc( size );
 			memset( alpha, 255, size );
 			mlt_properties_set_data( &this->parent, "alpha", alpha, size, mlt_pool_release, NULL );
@@ -692,10 +689,18 @@ unsigned char *mlt_frame_get_waveform( mlt_frame this, int w, int h )
 	int16_t *pcm = NULL;
 	mlt_properties properties = MLT_FRAME_PROPERTIES( this );
 	mlt_audio_format format = mlt_audio_s16;
-	int frequency = 32000; // lower frequency available?
+	int frequency = 16000;
 	int channels = 2;
-	double fps = mlt_profile_fps( NULL );
+	mlt_producer producer = mlt_frame_get_original_producer( this );
+	double fps = mlt_producer_get_fps( mlt_producer_cut_parent( producer ) );
 	int samples = mlt_sample_calculator( fps, frequency, mlt_frame_get_position( this ) );
+
+	// Increase audio resolution proportional to requested image size
+	while ( samples < w )
+	{
+		frequency += 16000;
+		samples = mlt_sample_calculator( fps, frequency, mlt_frame_get_position( this ) );
+	}
 
 	// Get the pcm data
 	mlt_frame_get_audio( this, (void**)&pcm, &format, &frequency, &channels, &samples );
@@ -709,33 +714,34 @@ unsigned char *mlt_frame_get_waveform( mlt_frame this, int w, int h )
 
 	// Render vertical lines
 	int16_t *ubound = pcm + samples * channels;
-	int skip = samples / w - 1;
+	int skip = samples / w;
+	skip = !skip ? 1 : skip;
+	unsigned char gray = 0xFF / skip;
 	int i, j, k;
 
 	// Iterate sample stream and along x coordinate
-	for ( i = 0; i < w && pcm < ubound; i++ )
+	for ( i = 0; pcm < ubound; i++ )
 	{
 		// pcm data has channels interleaved
-		for ( j = 0; j < channels; j++ )
+		for ( j = 0; j < channels; j++, pcm++ )
 		{
 			// Determine sample's magnitude from 2s complement;
 			int pcm_magnitude = *pcm < 0 ? ~(*pcm) + 1 : *pcm;
 			// The height of a line is the ratio of the magnitude multiplied by
-			// half the vertical resolution
-			int height = ( int )( ( double )( pcm_magnitude ) / 32768 * h / 2 );
-			// Determine the starting y coordinate - left channel above center,
-			// right channel below - currently assumes 2 channels
-			int displacement = ( h / 2 ) - ( 1 - j ) * height;
+			// the vertical resolution of a single channel
+				int height = h * pcm_magnitude / channels / 2 / 32768;
+			// Determine the starting y coordinate - left top, right bottom
+			int displacement = h * (j * 2 + 1) / channels / 2 - ( *pcm < 0 ? 0 : height );
 			// Position buffer pointer using y coordinate, stride, and x coordinate
-			unsigned char *p = &bitmap[ i + displacement * w ];
+			unsigned char *p = bitmap + i / skip + displacement * w;
 
 			// Draw vertical line
-			for ( k = 0; k < height; k++ )
-				p[ w * k ] = 0xFF;
-
-			pcm++;
+			for ( k = 0; k < height + 1; k++ )
+				if ( *pcm < 0 )
+					p[ w * k ] = ( k == 0 ) ? 0xFF : p[ w * k ] + gray;
+				else
+					p[ w * k ] = ( k == height ) ? 0xFF : p[ w * k ] + gray;
 		}
-		pcm += skip * channels;
 	}
 
 	return bitmap;

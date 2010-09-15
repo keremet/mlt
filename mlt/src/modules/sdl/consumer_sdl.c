@@ -31,6 +31,7 @@
 #include <SDL/SDL.h>
 #include <SDL/SDL_syswm.h>
 #include <sys/time.h>
+#include "consumer_sdl_osx.h"
 
 extern pthread_mutex_t mlt_sdl_mutex;
 
@@ -461,8 +462,9 @@ static int consumer_play_video( consumer_sdl this, mlt_frame frame )
 		// Get the image, width and height
 		mlt_frame_get_image( frame, &image, &vfmt, &width, &height, 0 );
 		mlt_properties_set_int( MLT_FRAME_PROPERTIES( frame ), "format", vfmt );
-		mlt_events_fire( properties, "consumer-frame-show", frame, NULL );
 		
+		void *pool = mlt_cocoa_autorelease_init();
+
 		// Handle events
 		if ( this->sdl_screen != NULL )
 		{
@@ -610,6 +612,8 @@ static int consumer_play_video( consumer_sdl this, mlt_frame frame )
 		}
 
 		sdl_unlock_display();
+		mlt_cocoa_autorelease_close( pool );
+		mlt_events_fire( properties, "consumer-frame-show", frame, NULL );
 	}
 	else if ( this->running )
 	{

@@ -28,6 +28,7 @@
 #include <QtGui/QGraphicsScene>
 #include <QtGui/QGraphicsTextItem>
 #include <QtSvg/QGraphicsSvgItem>
+#include <QtSvg/QSvgRenderer>
 #include <QtGui/QTextCursor>
 #include <QtGui/QTextDocument>
 #include <QtGui/QStyleOptionGraphicsItem>
@@ -259,17 +260,33 @@ void loadFromXml( mlt_producer producer, QGraphicsScene *scene, const char *temp
 			else if ( items.item( i ).attributes().namedItem( "type" ).nodeValue() == "QGraphicsPixmapItem" )
 			{
 				const QString url = items.item( i ).namedItem( "content" ).attributes().namedItem( "url" ).nodeValue();
-				QImage img( url );
+				const QString base64 = items.item(i).namedItem("content").attributes().namedItem("base64").nodeValue();
+				QImage img;
+				if (base64.isEmpty()){
+					img.load(url);
+				}else{
+					img.loadFromData(QByteArray::fromBase64(base64.toAscii()));
+				}
 				ImageItem *rec = new ImageItem(img);
 				scene->addItem( rec );
 				gitem = rec;
 			}
 			else if ( items.item( i ).attributes().namedItem( "type" ).nodeValue() == "QGraphicsSvgItem" )
 			{
-				const QString url = items.item( i ).namedItem( "content" ).attributes().namedItem( "url" ).nodeValue();
-				QGraphicsSvgItem *rec = new QGraphicsSvgItem(url);
-				scene->addItem(rec);
-				gitem = rec;
+				QString url = items.item(i).namedItem("content").attributes().namedItem("url").nodeValue();
+				QString base64 = items.item(i).namedItem("content").attributes().namedItem("base64").nodeValue();
+				QGraphicsSvgItem *rec = NULL;
+				if (base64.isEmpty()){
+					rec = new QGraphicsSvgItem(url);
+				}else{
+					rec = new QGraphicsSvgItem();
+					QSvgRenderer *renderer= new QSvgRenderer(QByteArray::fromBase64(base64.toAscii()), rec );
+					rec->setSharedRenderer(renderer);
+				}
+				if (rec){
+					scene->addItem(rec);
+					gitem = rec;
+				}
 			}
 		}
 		//pos and transform
@@ -339,6 +356,7 @@ void drawKdenliveTitle( producer_ktitle self, mlt_frame frame, int width, int he
 {
   	// Obtain the producer 
 	mlt_producer producer = &self->parent;
+	mlt_profile profile = mlt_service_profile ( MLT_PRODUCER_SERVICE( producer ) ) ;
 	mlt_properties producer_props = MLT_PRODUCER_PROPERTIES( producer );
 
 	// Obtain properties of frame
@@ -453,6 +471,25 @@ void drawKdenliveTitle( producer_ktitle self, mlt_frame frame, int width, int he
 			QPointF bottomRight = start.bottomRight() + ( end.bottomRight() - start.bottomRight() ) * percentage;
 			const QRectF r1( topleft, bottomRight );
 			scene->render( &p1, source, r1, Qt::IgnoreAspectRatio );
+			if ( profile && !profile->progressive ){
+				int line=0;
+				double percentage_next_filed	= ( position + 0.5 ) / anim_out;
+				QPointF topleft_next_field = start.topLeft() + ( end.topLeft() - start.topLeft() ) * percentage_next_filed;
+				QPointF bottomRight_next_field = start.bottomRight() + ( end.bottomRight() - start.bottomRight() ) * percentage_next_filed;
+				const QRectF r2( topleft_next_field, bottomRight_next_field );
+				QImage img1( width, height, QImage::Format_ARGB32 );
+				img1.fill( 0 );
+				QPainter p2;
+				p2.begin(&img1);
+				p2.setRenderHints( QPainter::Antialiasing | QPainter::TextAntialiasing | QPainter::HighQualityAntialiasing );
+				scene->render(&p2,source,r2,  Qt::IgnoreAspectRatio );
+				p2.end();
+				int next_field_line = (  mlt_properties_get_int( producer_props, "top_field_first" ) ? 1 : 0 );
+				for (line = next_field_line ;line<height;line+=2){
+						memcpy(img.scanLine(line),img1.scanLine(line),img.bytesPerLine());
+				}
+
+			}
 		}
 		p1.end();
 

@@ -23,6 +23,7 @@
 
 extern mlt_consumer consumer_null_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
 extern mlt_filter filter_audioconvert_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
+extern mlt_filter filter_audiowave_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
 extern mlt_filter filter_brightness_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
 extern mlt_filter filter_channelcopy_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
 extern mlt_filter filter_crop_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
@@ -35,6 +36,7 @@ extern mlt_filter filter_luma_init( mlt_profile profile, mlt_service_type type, 
 extern mlt_filter filter_mirror_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
 extern mlt_filter filter_mono_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
 extern mlt_filter filter_obscure_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
+extern mlt_filter filter_panner_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
 extern mlt_filter filter_region_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
 extern mlt_filter filter_rescale_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
 extern mlt_filter filter_resize_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
@@ -55,9 +57,11 @@ MLT_REPOSITORY
 {
 	MLT_REGISTER( consumer_type, "null", consumer_null_init );
 	MLT_REGISTER( filter_type, "audioconvert", filter_audioconvert_init );
+	MLT_REGISTER( filter_type, "audiowave", filter_audiowave_init );
 	MLT_REGISTER( filter_type, "brightness", filter_brightness_init );
 	MLT_REGISTER( filter_type, "channelcopy", filter_channelcopy_init );
-	MLT_REGISTER( filter_type, "crop", filter_crop_init );
+    MLT_REGISTER( filter_type, "channelswap", filter_channelcopy_init );
+    MLT_REGISTER( filter_type, "crop", filter_crop_init );
 	MLT_REGISTER( filter_type, "data_feed", filter_data_feed_init );
 	MLT_REGISTER( filter_type, "data_show", filter_data_show_init );
 	MLT_REGISTER( filter_type, "gamma", filter_gamma_init );
@@ -68,6 +72,7 @@ MLT_REPOSITORY
 	MLT_REGISTER( filter_type, "mirror", filter_mirror_init );
 	MLT_REGISTER( filter_type, "mono", filter_mono_init );
 	MLT_REGISTER( filter_type, "obscure", filter_obscure_init );
+	MLT_REGISTER( filter_type, "panner", filter_panner_init );
 	MLT_REGISTER( filter_type, "region", filter_region_init );
 	MLT_REGISTER( filter_type, "rescale", filter_rescale_init );
 	MLT_REGISTER( filter_type, "resize", filter_resize_init );

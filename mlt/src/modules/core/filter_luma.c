@@ -23,6 +23,7 @@
 #include <framework/mlt_frame.h>
 #include <framework/mlt_producer.h>
 #include <framework/mlt_transition.h>
+#include <framework/mlt_log.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,9 +41,16 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 	mlt_frame b_frame = mlt_properties_get_data( properties, "frame", NULL );
 	mlt_properties b_frame_props = b_frame ? MLT_FRAME_PROPERTIES( b_frame ) : NULL;
 	int out = mlt_properties_get_int( properties, "period" );
-	
-	if ( out == 0 )
-		out = 24;
+	int cycle = mlt_properties_get_int( properties, "cycle" );
+	int duration = mlt_properties_get_int( properties, "duration" );
+	char *name = mlt_properties_get( properties, "_unique_id" );
+	mlt_position position = mlt_properties_get_position( MLT_FRAME_PROPERTIES(this), name );
+
+	out = out? out + 1 : 25;
+	if ( cycle )
+		out = cycle;
+	if ( duration < 1 || duration > out )
+		duration = out;
 	*format = mlt_image_yuv422;
 
 	if ( b_frame == NULL || mlt_properties_get_int( b_frame_props, "width" ) != *width || mlt_properties_get_int( b_frame_props, "height" ) != *height )
@@ -60,45 +68,31 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 		{
 			mlt_properties luma_properties = MLT_TRANSITION_PROPERTIES( luma );
 			mlt_properties_set_int( luma_properties, "in", 0 );
-			mlt_properties_set_int( luma_properties, "out", out );
+			mlt_properties_set_int( luma_properties, "out", duration - 1 );
 			mlt_properties_set_int( luma_properties, "reverse", 1 );
 			mlt_properties_set_data( properties, "luma", luma, 0, ( mlt_destructor )mlt_transition_close, NULL );
 		}
-
-		// Prime the filter with the first image to prevent a transition from the white
-		// of a test card.
-		error = mlt_frame_get_image( this, image, format, width, height, 1 );
-		if ( error == 0 )
-		{
-			mlt_properties a_props = MLT_FRAME_PROPERTIES( this );
-			int size = 0;
-			uint8_t *src = mlt_properties_get_data( a_props, "image", &size );
-			uint8_t *dst = mlt_pool_alloc( size );
-	
-			if ( dst != NULL )
-			{
-				mlt_properties b_props = MLT_FRAME_PROPERTIES( b_frame );
-				memcpy( dst, src, size );
-				mlt_properties_set_data( b_props, "image", dst, size, mlt_pool_release, NULL );
-				mlt_properties_set_int( b_props, "width", *width );
-				mlt_properties_set_int( b_props, "height", *height );
-				mlt_properties_set_int( b_props, "format", *format );
-			}
-		}
 	}
 
-	if ( luma != NULL && 
-		( mlt_properties_get( properties, "blur" ) != NULL || 
-		  (int)mlt_frame_get_position( this ) % ( out + 1 ) != out ) )
+	mlt_position modulo_pos = position % out;
+	mlt_log_debug( MLT_FILTER_SERVICE(filter), "pos %d mod period %d\n", position, modulo_pos );
+	if ( luma != NULL &&
+	     ( mlt_properties_get( properties, "blur" ) != NULL ||
+		   ( position >= duration && modulo_pos < duration - 1 ) ) )
 	{
 		mlt_properties luma_properties = MLT_TRANSITION_PROPERTIES( luma );
 		mlt_properties_pass( luma_properties, properties, "luma." );
+		int in = position / out * out + mlt_frame_get_position( this ) - position;
+		mlt_properties_set_int( luma_properties, "in", in );
+		mlt_properties_set_int( luma_properties, "out", in + duration - 1 );
 		mlt_transition_process( luma, this, b_frame );
 	}
 
 	error = mlt_frame_get_image( this, image, format, width, height, 1 );
 
-	if ( error == 0 )
+	// We only need a copy of the last frame in the cycle, but we could miss it
+	// with realtime frame-dropping, so we copy the last several frames of the cycle.
+	if ( error == 0 && modulo_pos > out - duration )
 	{
 		mlt_properties a_props = MLT_FRAME_PROPERTIES( this );
 		int size = 0;
@@ -107,6 +101,7 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 
 		if ( dst != NULL )
 		{
+			mlt_log_debug( MLT_FILTER_SERVICE(filter), "copying frame %d\n", modulo_pos );
 			mlt_properties b_props = MLT_FRAME_PROPERTIES( b_frame );
 			memcpy( dst, src, size );
 			mlt_properties_set_data( b_props, "image", dst, size, mlt_pool_release, NULL );
@@ -124,6 +119,12 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 
 static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
 {
+	// Get a unique name to store the frame position
+	char *name = mlt_properties_get( MLT_FILTER_PROPERTIES( this ), "_unique_id" );
+
+	// Assign the current position to the name
+	mlt_properties_set_position( MLT_FRAME_PROPERTIES( frame ), name, mlt_frame_get_position( frame ) );
+
 	// Push the filter on to the stack
 	mlt_frame_push_service( frame, this );
 

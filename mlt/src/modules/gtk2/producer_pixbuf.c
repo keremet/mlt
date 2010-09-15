@@ -24,6 +24,12 @@
 #include <framework/mlt_log.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
 
+#include "config.h"
+
+#ifdef USE_EXIF
+#include <libexif/exif-data.h>
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -217,7 +223,7 @@ static void refresh_image( producer_pixbuf this, mlt_frame frame, int width, int
 	this->image = mlt_cache_item_data( this->image_cache, NULL );
 
 	// Check if user wants us to reload the image
-	if ( mlt_properties_get_int( producer_props, "force_reload" ) ) 
+	if ( mlt_properties_get_int( producer_props, "force_reload" ) )
 	{
 		pixbuf = NULL;
 		this->image = NULL;
@@ -266,7 +272,8 @@ static void refresh_image( producer_pixbuf this, mlt_frame frame, int width, int
 				this->image = NULL;
 		}
 	}
-
+	int disable_exif = mlt_properties_get_int( producer_props, "disable_exif" );
+	
     // optimization for subsequent iterations on single picture
 	if ( width != 0 && ( image_idx != this->image_idx || width != this->width || height != this->height ) )
 		this->image = NULL;
@@ -274,13 +281,69 @@ static void refresh_image( producer_pixbuf this, mlt_frame frame, int width, int
 		pixbuf = NULL;
 	mlt_log_debug( MLT_PRODUCER_SERVICE( producer ), "image %p pixbuf %p idx %d image_idx %d pixbuf_idx %d width %d\n",
 		this->image, pixbuf, image_idx, this->image_idx, this->pixbuf_idx, width );
-	if ( !pixbuf && !this->image )
+	if ( !pixbuf || mlt_properties_get_int( producer_props, "_disable_exif" ) != disable_exif )
 	{
 		this->image = NULL;
 		pixbuf = gdk_pixbuf_new_from_file( mlt_properties_get_value( this->filenames, image_idx ), &error );
 
 		if ( pixbuf )
 		{
+#ifdef USE_EXIF
+			// Read the exif value for this file
+			if ( disable_exif == 0) {
+				ExifData *d = exif_data_new_from_file( mlt_properties_get_value( this->filenames, image_idx ) );
+				ExifEntry *entry;
+				int exif_orientation = 0;
+
+				/* get orientation and rotate image accordingly if necessary */
+				if (d) {
+					if ( ( entry = exif_content_get_entry ( d->ifd[EXIF_IFD_0], EXIF_TAG_ORIENTATION ) ) )
+						exif_orientation = exif_get_short (entry->data, exif_data_get_byte_order (d));
+
+					/* Free the EXIF data */
+					exif_data_unref(d);
+				}
+
+				if ( exif_orientation > 1 )
+				{
+					GdkPixbuf *processed = NULL;
+					GdkPixbufRotation matrix = GDK_PIXBUF_ROTATE_NONE;
+
+					// Rotate image according to exif data
+					switch ( exif_orientation ) {
+					  case 2:
+					      processed = gdk_pixbuf_flip ( pixbuf, TRUE );
+					      break;
+					  case 3:
+					      matrix = GDK_PIXBUF_ROTATE_UPSIDEDOWN;
+					      processed = pixbuf;
+					      break;
+					  case 4:
+					      processed = gdk_pixbuf_flip ( pixbuf, FALSE );
+					      break;
+					  case 5:
+					      matrix = GDK_PIXBUF_ROTATE_COUNTERCLOCKWISE;
+					      processed = gdk_pixbuf_flip ( pixbuf, TRUE );
+					      break;
+					  case 6:
+					      matrix = GDK_PIXBUF_ROTATE_CLOCKWISE;
+					      processed = pixbuf;
+					      break;
+					  case 7:
+					      matrix = GDK_PIXBUF_ROTATE_CLOCKWISE;
+					      processed = gdk_pixbuf_flip ( pixbuf, TRUE );
+					      break;
+					  case 8:
+					      matrix = GDK_PIXBUF_ROTATE_COUNTERCLOCKWISE;
+					      processed = pixbuf;
+					      break;
+					}
+					if ( processed )
+						pixbuf = gdk_pixbuf_rotate_simple( processed, matrix );
+				}
+			}
+#endif
+
 			// Register this pixbuf for destruction and reuse
 			mlt_cache_item_close( pixbuf_cache );
 			mlt_service_cache_put( MLT_PRODUCER_SERVICE( producer ), "pixbuf.pixbuf", pixbuf, 0, ( mlt_destructor )g_object_unref );
@@ -290,6 +353,7 @@ static void refresh_image( producer_pixbuf this, mlt_frame frame, int width, int
 			mlt_events_block( producer_props, NULL );
 			mlt_properties_set_int( producer_props, "_real_width", gdk_pixbuf_get_width( pixbuf ) );
 			mlt_properties_set_int( producer_props, "_real_height", gdk_pixbuf_get_height( pixbuf ) );
+			mlt_properties_set_int( producer_props, "_disable_exif", disable_exif );
 			mlt_events_unblock( producer_props, NULL );
 
 			// Store the width/height of the pixbuf temporarily

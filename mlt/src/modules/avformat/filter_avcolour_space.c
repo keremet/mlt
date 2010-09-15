@@ -76,11 +76,24 @@ static void av_convert_image( uint8_t *out, uint8_t *in, int out_fmt, int in_fmt
 {
 	AVPicture input;
 	AVPicture output;
+	int flags = SWS_BILINEAR | SWS_ACCURATE_RND;
+
+	if ( out_fmt == PIX_FMT_YUYV422 )
+		flags |= SWS_FULL_CHR_H_INP;
+	else
+		flags |= SWS_FULL_CHR_H_INT;
+#ifdef USE_MMX
+	flags |= SWS_CPU_CAPS_MMX;
+#endif
+#ifdef USE_SSE
+	flags |= SWS_CPU_CAPS_MMX2;
+#endif
+
 	avpicture_fill( &input, in, in_fmt, width, height );
 	avpicture_fill( &output, out, out_fmt, width, height );
 #ifdef SWSCALE
 	struct SwsContext *context = sws_getContext( width, height, in_fmt,
-		width, height, out_fmt, SWS_FAST_BILINEAR, NULL, NULL, NULL);
+		width, height, out_fmt, flags, NULL, NULL, NULL);
 	sws_scale( context, input.data, input.linesize, 0, height,
 		output.data, output.linesize);
 	sws_freeContext( context );
@@ -101,8 +114,9 @@ static int convert_image( mlt_frame frame, uint8_t **image, mlt_image_format *fo
 
 	if ( *format != output_format )
 	{
-		mlt_log_debug( NULL, "[filter avcolor_space] %s -> %s\n",
-			mlt_image_format_name( *format ), mlt_image_format_name( output_format ) );
+		mlt_log_debug( NULL, "[filter avcolor_space] %s -> %s @ %dx%d\n",
+			mlt_image_format_name( *format ), mlt_image_format_name( output_format ),
+			width, height );
 
 		int in_fmt = convert_mlt_to_av_cs( *format );
 		int out_fmt = convert_mlt_to_av_cs( output_format );
@@ -145,6 +159,36 @@ static int convert_image( mlt_frame frame, uint8_t **image, mlt_image_format *fo
 		*format = output_format;
 		mlt_properties_set_data( properties, "image", output, size, mlt_pool_release, NULL );
 		mlt_properties_set_int( properties, "format", output_format );
+
+		if ( output_format == mlt_image_rgb24a || output_format == mlt_image_opengl )
+		{
+			register int len = width * height;
+			int alpha_size = 0;
+			uint8_t *alpha = mlt_frame_get_alpha_mask( frame );
+			mlt_properties_get_data( properties, "alpha", &alpha_size );
+
+			if ( alpha && alpha_size >= len )
+			{
+				// Merge the alpha mask from into the RGBA image using Duff's Device
+				register uint8_t *s = alpha;
+				register uint8_t *d = *image + 3; // start on the alpha component
+				register int n = ( len + 7 ) / 8;
+
+				switch ( len % 8 )
+				{
+					case 0:	do { *d = *s++; d += 4;
+					case 7:		 *d = *s++; d += 4;
+					case 6:		 *d = *s++; d += 4;
+					case 5:		 *d = *s++; d += 4;
+					case 4:		 *d = *s++; d += 4;
+					case 3:		 *d = *s++; d += 4;
+					case 2:		 *d = *s++; d += 4;
+					case 1:		 *d = *s++; d += 4;
+							}
+							while ( --n > 0 );
+				}
+			}
+		}
 	}
 	return error;
 }
@@ -163,6 +207,7 @@ static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
 
 mlt_filter filter_avcolour_space_init( void *arg )
 {
+#ifdef SWSCALE
 #if (LIBSWSCALE_VERSION_INT >= ((0<<16)+(7<<8)+2))
 	// Test to see if swscale accepts the arg as resolution
 	if ( arg )
@@ -174,13 +219,13 @@ mlt_filter filter_avcolour_space_init( void *arg )
 		else
 			return NULL;
 	}		
-
+#else
+	return NULL;
+#endif
+#endif
 	mlt_filter this = mlt_filter_new( );
 	if ( this != NULL )
 		this->process = filter_process;
 	return this;
-#else
-	return NULL;
-#endif
 }
 

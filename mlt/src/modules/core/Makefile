@@ -14,6 +14,7 @@ OBJS = factory.o \
 	   producer_noise.o \
 	   producer_ppm.o \
 	   filter_audioconvert.o \
+	   filter_audiowave.o \
 	   filter_brightness.o \
 	   filter_channelcopy.o \
 	   filter_crop.o \
@@ -26,6 +27,7 @@ OBJS = factory.o \
 	   filter_mirror.o \
 	   filter_mono.o \
 	   filter_obscure.o \
+	   filter_panner.o \
 	   filter_region.o \
 	   filter_rescale.o \
 	   filter_resize.o \

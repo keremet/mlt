@@ -118,7 +118,7 @@ static void resize_image( uint8_t *output, int owidth, int oheight, uint8_t *inp
 	while ( iheight -- )
 	{
 		// We're in the input range for this row.
-		memcpy( out_line, in_line, iwidth * bpp );
+		memcpy( out_line, in_line, istride );
 
 		// Move to next input line
 		in_line += istride;
@@ -140,6 +140,8 @@ static uint8_t *frame_resize_image( mlt_frame this, int owidth, int oheight, int
 	// Get the input image, width and height
 	uint8_t *input = mlt_properties_get_data( properties, "image", NULL );
 	uint8_t *alpha = mlt_frame_get_alpha_mask( this );
+	int alpha_size = 0;
+	mlt_properties_get_data( properties, "alpha", &alpha_size );
 
 	int iwidth = mlt_properties_get_int( properties, "width" );
 	int iheight = mlt_properties_get_int( properties, "height" );
@@ -161,11 +163,14 @@ static uint8_t *frame_resize_image( mlt_frame this, int owidth, int oheight, int
 		mlt_properties_set_int( properties, "height", oheight );
 
 		// We should resize the alpha too
-		alpha = resize_alpha( alpha, owidth, oheight, iwidth, iheight, alpha_value );
-		if ( alpha != NULL )
+		if ( alpha && alpha_size >= iwidth * iheight )
 		{
-			mlt_properties_set_data( properties, "alpha", alpha, owidth * oheight, ( mlt_destructor )mlt_pool_release, NULL );
-			this->get_alpha_mask = NULL;
+			alpha = resize_alpha( alpha, owidth, oheight, iwidth, iheight, alpha_value );
+			if ( alpha )
+			{
+				mlt_properties_set_data( properties, "alpha", alpha, owidth * oheight, ( mlt_destructor )mlt_pool_release, NULL );
+				this->get_alpha_mask = NULL;
+			}
 		}
 
 		// Return the output
@@ -257,6 +262,8 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 	mlt_properties_set_int( properties, "resize_height", *height );
 
 	// Now get the image
+	if ( *format == mlt_image_yuv422 )
+		owidth -= owidth % 2;
 	error = mlt_frame_get_image( this, image, format, &owidth, &oheight, writable );
 
 	if ( error == 0 && *image )

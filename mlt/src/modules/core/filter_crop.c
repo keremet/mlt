@@ -30,15 +30,16 @@
 
 static void crop( uint8_t *src, uint8_t *dest, int bpp, int width, int height, int left, int right, int top, int bottom )
 {
-	int stride = ( width - left - right ) * bpp;
+	int src_stride = ( width  ) * bpp;
+	int dest_stride = ( width - left - right ) * bpp;
 	int y      = height - top - bottom + 1;
-	uint8_t *s = &src[ ( ( top * width ) + left ) * bpp ];
+	src += top * src_stride + left * bpp;
 
 	while ( --y )
 	{
-		memcpy( dest, s, stride );
-		dest += stride;
-		s += stride + ( right + left ) * bpp;
+		memcpy( dest, src, dest_stride );
+		dest += dest_stride;
+		src += src_stride;
 	}
 }
 
@@ -70,7 +71,7 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 		mlt_properties_set_int( properties, "rescale_width", mlt_properties_get_int( properties, "crop.original_width" ) );
 		mlt_properties_set_int( properties, "rescale_height", mlt_properties_get_int( properties, "crop.original_height" ) );
 	}
-	
+
 	// Now get the image
 	error = mlt_frame_get_image( this, image, format, width, height, writable );
 
@@ -84,6 +85,15 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 	{
 		int bpp;
 
+		// Subsampled YUV is messy and less precise.
+		if ( *format == mlt_image_yuv422 )
+		{
+			*format = mlt_image_rgb24;
+			mlt_frame_get_image( this, image, format, width, height, writable );
+		}
+	
+		mlt_log_debug( NULL, "[filter crop] %s %dx%d -> %dx%d\n", mlt_image_format_name(*format),
+				 *width, *height, owidth, oheight);
 		switch ( *format )
 		{
 			case mlt_image_yuv422:
@@ -120,14 +130,16 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 
 			// Now update the frame
 			*image = output;
-			mlt_properties_set_data( properties, "image", output, owidth * ( oheight + 1 ) * 2, ( mlt_destructor )mlt_pool_release, NULL );
+			mlt_properties_set_data( properties, "image", output, owidth * ( oheight + 1 ) * bpp, ( mlt_destructor )mlt_pool_release, NULL );
 			mlt_properties_set_int( properties, "width", owidth );
 			mlt_properties_set_int( properties, "height", oheight );
 		}
 
 		// We should resize the alpha too
 		uint8_t *alpha = mlt_frame_get_alpha_mask( this );
-		if ( alpha != NULL )
+		int alpha_size = 0;
+		mlt_properties_get_data( properties, "alpha", &alpha_size );
+		if ( alpha && alpha_size >= ( *width * *height ) )
 		{
 			uint8_t *newalpha = mlt_pool_alloc( owidth * oheight );
 			if ( newalpha )
@@ -192,8 +204,9 @@ static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
 			}
 		}		
 
-		left  -= left % 2;
-		right -= right % 2;
+		// Coerce the output to an even width because subsampled YUV with odd widths is too
+		// risky for downstream processing to handle correctly.
+		left += ( width - left - right ) & 1;
 		if ( width - left - right < 8 )
 			left = right = 0;
 		if ( height - top - bottom < 8 )

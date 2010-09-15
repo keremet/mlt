@@ -573,6 +573,12 @@ static int producer_open( producer_avformat this, mlt_profile profile, char *fil
 					mlt_properties_set_double( properties, "aspect_ratio",
 						get_aspect_ratio( context->streams[ video_index ], codec_context, NULL ) );
 				}
+				struct SwsContext *context = sws_getContext( codec_context->width, codec_context->height, codec_context->pix_fmt,
+					codec_context->width, codec_context->height, PIX_FMT_YUYV422, SWS_BILINEAR, NULL, NULL, NULL);
+				if ( context )
+					sws_freeContext( context );
+				else
+					error = 1;
 			}
 
 			// Read Metadata
@@ -679,11 +685,20 @@ static void get_audio_streams_info( producer_avformat this )
 static inline void convert_image( AVFrame *frame, uint8_t *buffer, int pix_fmt, mlt_image_format *format, int width, int height )
 {
 #ifdef SWSCALE
+	int flags = SWS_BILINEAR | SWS_ACCURATE_RND;
+
+#ifdef USE_MMX
+	flags |= SWS_CPU_CAPS_MMX;
+#endif
+#ifdef USE_SSE
+	flags |= SWS_CPU_CAPS_MMX2;
+#endif
+
 	if ( pix_fmt == PIX_FMT_RGB32 )
 	{
 		*format = mlt_image_rgb24a;
 		struct SwsContext *context = sws_getContext( width, height, pix_fmt,
-			width, height, PIX_FMT_RGBA, SWS_FAST_BILINEAR, NULL, NULL, NULL);
+			width, height, PIX_FMT_RGBA, flags, NULL, NULL, NULL);
 		AVPicture output;
 		avpicture_fill( &output, buffer, PIX_FMT_RGBA, width, height );
 		sws_scale( context, frame->data, frame->linesize, 0, height,
@@ -693,7 +708,7 @@ static inline void convert_image( AVFrame *frame, uint8_t *buffer, int pix_fmt, 
 	else if ( *format == mlt_image_yuv420p )
 	{
 		struct SwsContext *context = sws_getContext( width, height, pix_fmt,
-			width, height, PIX_FMT_YUV420P, SWS_FAST_BILINEAR, NULL, NULL, NULL);
+			width, height, PIX_FMT_YUV420P, flags, NULL, NULL, NULL);
 		AVPicture output;
 		output.data[0] = buffer;
 		output.data[1] = buffer + width * height;
@@ -708,7 +723,7 @@ static inline void convert_image( AVFrame *frame, uint8_t *buffer, int pix_fmt, 
 	else if ( *format == mlt_image_rgb24 )
 	{
 		struct SwsContext *context = sws_getContext( width, height, pix_fmt,
-			width, height, PIX_FMT_RGB24, SWS_FAST_BILINEAR, NULL, NULL, NULL);
+			width, height, PIX_FMT_RGB24, flags | SWS_FULL_CHR_H_INT, NULL, NULL, NULL);
 		AVPicture output;
 		avpicture_fill( &output, buffer, PIX_FMT_RGB24, width, height );
 		sws_scale( context, frame->data, frame->linesize, 0, height,
@@ -718,7 +733,7 @@ static inline void convert_image( AVFrame *frame, uint8_t *buffer, int pix_fmt, 
 	else if ( *format == mlt_image_rgb24a || *format == mlt_image_opengl )
 	{
 		struct SwsContext *context = sws_getContext( width, height, pix_fmt,
-			width, height, PIX_FMT_RGBA, SWS_FAST_BILINEAR, NULL, NULL, NULL);
+			width, height, PIX_FMT_RGBA, flags | SWS_FULL_CHR_H_INT, NULL, NULL, NULL);
 		AVPicture output;
 		avpicture_fill( &output, buffer, PIX_FMT_RGBA, width, height );
 		sws_scale( context, frame->data, frame->linesize, 0, height,
@@ -728,7 +743,7 @@ static inline void convert_image( AVFrame *frame, uint8_t *buffer, int pix_fmt, 
 	else
 	{
 		struct SwsContext *context = sws_getContext( width, height, pix_fmt,
-			width, height, PIX_FMT_YUYV422, SWS_FAST_BILINEAR, NULL, NULL, NULL);
+			width, height, PIX_FMT_YUYV422, flags | SWS_FULL_CHR_H_INP, NULL, NULL, NULL);
 		AVPicture output;
 		avpicture_fill( &output, buffer, PIX_FMT_YUYV422, width, height );
 		sws_scale( context, frame->data, frame->linesize, 0, height,
@@ -780,8 +795,6 @@ static int allocate_buffer( mlt_properties frame_properties, AVCodecContext *cod
 
 	*width = codec_context->width;
 	*height = codec_context->height;
-	mlt_properties_set_int( frame_properties, "width", *width );
-	mlt_properties_set_int( frame_properties, "height", *height );
 
 	if ( codec_context->pix_fmt == PIX_FMT_RGB32 )
 		size = *width * ( *height + 1 ) * 4;
@@ -846,14 +859,16 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 	if ( this->image_cache )
 	{
 		mlt_cache_item item = mlt_cache_get( this->image_cache, (void*) position );
-		*buffer = mlt_cache_item_data( item, format );
+		*buffer = mlt_cache_item_data( item, (int*) format );
 		if ( *buffer )
 		{
 			// Set the resolution
 			*width = codec_context->width;
 			*height = codec_context->height;
-			mlt_properties_set_int( frame_properties, "width", *width );
-			mlt_properties_set_int( frame_properties, "height", *height );
+
+			// Workaround 1088 encodings missing cropping info.
+			if ( *height == 1088 && mlt_profile_dar( mlt_service_profile( MLT_PRODUCER_SERVICE( producer ) ) ) == 16.0/9.0 )
+				*height = 1080;
 
 			// Cache hit
 			int size;
@@ -876,7 +891,7 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 			}
 			mlt_properties_set_data( frame_properties, "avformat.image_cache", item, 0, ( mlt_destructor )mlt_cache_item_close, NULL );
 			mlt_properties_set_data( frame_properties, "image", *buffer, size, NULL, NULL );
-			this->top_field_first = mlt_properties_get_int( frame_properties, "top_field_first" );
+			// this->top_field_first = mlt_properties_get_int( frame_properties, "top_field_first" );
 			this->got_picture = 1;
 
 			goto exit_get_image;
@@ -1005,13 +1020,17 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 	}
 
 	// Duplicate the last image if necessary (see comment on rawvideo below)
-	if ( this->av_frame && this->got_picture && this->seekable
+	if ( this->av_frame && this->av_frame->linesize[0] && this->got_picture && this->seekable
 		 && ( paused
 			  || this->current_position == req_position
 			  || ( !use_new_seek && this->current_position > req_position ) ) )
 	{
 		// Duplicate it
 		if ( ( image_size = allocate_buffer( frame_properties, codec_context, buffer, format, width, height ) ) )
+		{
+			// Workaround 1088 encodings missing cropping info.
+			if ( *height == 1088 && mlt_profile_dar( mlt_service_profile( MLT_PRODUCER_SERVICE( producer ) ) ) == 16.0/9.0 )
+				*height = 1080;
 #ifdef VDPAU
 			if ( this->vdpau && this->vdpau->buffer )
 			{
@@ -1027,6 +1046,7 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 			else
 #endif
 			convert_image( this->av_frame, *buffer, codec_context->pix_fmt, format, *width, *height );
+		}
 		else
 			mlt_frame_get_image( frame, buffer, format, width, height, writable );
 	}
@@ -1181,6 +1201,9 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 			{
 				if ( ( image_size = allocate_buffer( frame_properties, codec_context, buffer, format, width, height ) ) )
 				{
+					// Workaround 1088 encodings missing cropping info.
+					if ( *height == 1088 && mlt_profile_dar( mlt_service_profile( MLT_PRODUCER_SERVICE( producer ) ) ) == 16.0/9.0 )
+						*height = 1080;
 #ifdef VDPAU
 					if ( this->vdpau )
 					{
@@ -1243,6 +1266,9 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 		mlt_cache_put( this->image_cache, (void*) position, image, *format, mlt_pool_release );
 	}
 
+	// Regardless of speed, we expect to get the next frame (cos we ain't too bright)
+	this->video_expected = position + 1;
+
 exit_get_image:
 	// Set the progressive flag
 	if ( mlt_properties_get( properties, "force_progressive" ) )
@@ -1251,10 +1277,10 @@ exit_get_image:
 		mlt_properties_set_int( frame_properties, "progressive", !this->av_frame->interlaced_frame );
 
 	// Set the field order property for this frame
-	mlt_properties_set_int( frame_properties, "top_field_first", this->top_field_first );
-
-	// Regardless of speed, we expect to get the next frame (cos we ain't too bright)
-	this->video_expected = position + 1;
+	if ( mlt_properties_get( properties, "force_tff" ) )
+		mlt_properties_set_int( frame_properties, "top_field_first", !!mlt_properties_get_int( properties, "force_tff" ) );
+	else
+		mlt_properties_set_int( frame_properties, "top_field_first", this->top_field_first );
 
 	return !this->got_picture;
 }
@@ -1464,6 +1490,10 @@ static void producer_set_up_video( producer_avformat this, mlt_frame frame )
 		mlt_properties_set_int( frame_properties, "real_height", this->video_codec->height );
 		mlt_properties_set_double( frame_properties, "aspect_ratio", aspect_ratio );
 
+		// Workaround 1088 encodings missing cropping info.
+		if ( this->video_codec->height == 1088 && mlt_profile_dar( mlt_service_profile( MLT_PRODUCER_SERVICE( producer ) ) ) == 16.0/9.0 )
+			mlt_properties_set_int( frame_properties, "real_height", 1080 );
+
 		// Add our image operation
 		mlt_frame_push_service( frame, this );
 		mlt_frame_push_get_image( frame, producer_get_image );
@@ -1514,13 +1544,13 @@ static int seek_audio( producer_avformat this, mlt_position position, double tim
 	return paused;
 }
 
-static int decode_audio( producer_avformat this, int *ignore, AVPacket *pkt, int channels, int samples, double timecode, double fps )
+static int decode_audio( producer_avformat this, int *ignore, AVPacket pkt, int channels, int samples, double timecode, double fps )
 {
 	// Fetch the audio_format
 	AVFormatContext *context = this->audio_format;
 
 	// Get the current stream index
-	int index = pkt->stream_index;
+	int index = pkt.stream_index;
 
 	// Get codec context
 	AVCodecContext *codec_context = this->audio_codec[ index ];
@@ -1533,8 +1563,8 @@ static int decode_audio( producer_avformat this, int *ignore, AVPacket *pkt, int
 	int16_t *decode_buffer = this->decode_buffer[ index ];
 
 	int audio_used = this->audio_used[ index ];
-	uint8_t *ptr = pkt->data;
-	int len = pkt->size;
+	uint8_t *ptr = pkt.data;
+	int len = pkt.size;
 	int ret = 0;
 
 	while ( ptr && ret >= 0 && len > 0 )
@@ -1543,7 +1573,7 @@ static int decode_audio( producer_avformat this, int *ignore, AVPacket *pkt, int
 
 		// Decode the audio
 #if (LIBAVCODEC_VERSION_INT >= ((52<<16)+(26<<8)+0))
-		ret = avcodec_decode_audio3( codec_context, decode_buffer, &data_size, pkt );
+		ret = avcodec_decode_audio3( codec_context, decode_buffer, &data_size, &pkt );
 #elif (LIBAVCODEC_VERSION_INT >= ((51<<16)+(29<<8)+0))
 		ret = avcodec_decode_audio2( codec_context, decode_buffer, &data_size, ptr, len );
 #else
@@ -1551,12 +1581,12 @@ static int decode_audio( producer_avformat this, int *ignore, AVPacket *pkt, int
 #endif
 		if ( ret < 0 )
 		{
-			ret = 0;
+			mlt_log_warning( MLT_PRODUCER_SERVICE(this->parent), "audio decoding error %d\n", ret );
 			break;
 		}
 
-		len -= ret;
-		ptr += ret;
+		pkt.size = len -= ret;
+		pkt.data = ptr += ret;
 
 		// If decoded successfully
 		if ( data_size > 0 )
@@ -1597,9 +1627,9 @@ static int decode_audio( producer_avformat this, int *ignore, AVPacket *pkt, int
 	}
 
 	// If we're behind, ignore this packet
-	if ( pkt->pts >= 0 )
+	if ( pkt.pts >= 0 )
 	{
-		double current_pts = av_q2d( context->streams[ index ]->time_base ) * pkt->pts;
+		double current_pts = av_q2d( context->streams[ index ]->time_base ) * pkt.pts;
 		int req_position = ( int )( timecode * fps + 0.5 );
 		int int_position = ( int )( current_pts * fps + 0.5 );
 		if ( context->start_time != AV_NOPTS_VALUE )
@@ -1733,7 +1763,7 @@ static int producer_get_audio( mlt_frame frame, void **buffer, mlt_audio_format 
 				 ( this->audio_index == INT_MAX && context->streams[ pkt.stream_index ]->codec->codec_type == CODEC_TYPE_AUDIO ) ) )
 			{
 				int channels2 = this->audio_index == INT_MAX ? this->audio_codec[pkt.stream_index]->channels : *channels;
-				ret = decode_audio( this, &ignore, &pkt, channels2, *samples, real_timecode, fps );
+				ret = decode_audio( this, &ignore, pkt, channels2, *samples, real_timecode, fps );
 			}
 			av_free_packet( &pkt );
 
@@ -1786,9 +1816,10 @@ static int producer_get_audio( mlt_frame frame, void **buffer, mlt_audio_format 
 			index = this->audio_index;
 
 			// Now handle the audio if we have enough
-			if ( this->audio_used[ index ] >= *samples )
+			if ( this->audio_used[ index ] > 0 )
 			{
 				int16_t *src = this->audio_buffer[ index ];
+				*samples = this->audio_used[ index ] < *samples ? this->audio_used[ index ] : *samples;
 				memcpy( *buffer, src, *samples * *channels * sizeof(int16_t) );
 				this->audio_used[ index ] -= *samples;
 				memmove( src, &src[ *samples * *channels ], this->audio_used[ index ] * *channels * sizeof(int16_t) );

@@ -31,6 +31,7 @@
 #include <SDL/SDL.h>
 #include <SDL/SDL_syswm.h>
 #include <sys/time.h>
+#include "consumer_sdl_osx.h"
 
 extern pthread_mutex_t mlt_sdl_mutex;
 
@@ -256,7 +257,7 @@ static inline void display_1( SDL_Surface *screen, SDL_Rect rect, uint8_t *image
 	if ( rect.w == 0 || rect.h == 0 ) return;
 	int scale_width = ( width << 16 ) / rect.w;
 	int scale_height = ( height << 16 ) / rect.h;
-	int stride = width * 3;
+	int stride = width * 4;
 	int x, y, row_index;
 	uint8_t *q, *row;
 
@@ -273,7 +274,7 @@ static inline void display_1( SDL_Surface *screen, SDL_Rect rect, uint8_t *image
 		row = image + stride * row_index;
 		for ( x = 0; x < rect.w; x ++ )
 		{
-			q = row + ( ( ( 32768 + scale_width * x ) >> 16 ) * 3 );
+			q = row + ( ( ( 32768 + scale_width * x ) >> 16 ) * 4 );
 			*p ++ = SDL_MapRGB( screen->format, *q, *( q + 1 ), *( q + 2 ) );
 		}
 		start += scanlength;
@@ -286,7 +287,7 @@ static inline void display_2( SDL_Surface *screen, SDL_Rect rect, uint8_t *image
 	if ( rect.w == 0 || rect.h == 0 ) return;
 	int scale_width = ( width << 16 ) / rect.w;
 	int scale_height = ( height << 16 ) / rect.h;
-	int stride = width * 3;
+	int stride = width * 4;
 	int x, y, row_index;
 	uint8_t *q, *row;
 
@@ -303,7 +304,7 @@ static inline void display_2( SDL_Surface *screen, SDL_Rect rect, uint8_t *image
 		row = image + stride * row_index;
 		for ( x = 0; x < rect.w; x ++ )
 		{
-			q = row + ( ( ( 32768 + scale_width * x ) >> 16 ) * 3 );
+			q = row + ( ( ( 32768 + scale_width * x ) >> 16 ) * 4 );
 			*p ++ = SDL_MapRGB( screen->format, *q, *( q + 1 ), *( q + 2 ) );
 		}
 		start += scanlength;
@@ -316,7 +317,7 @@ static inline void display_3( SDL_Surface *screen, SDL_Rect rect, uint8_t *image
 	if ( rect.w == 0 || rect.h == 0 ) return;
 	int scale_width = ( width << 16 ) / rect.w;
 	int scale_height = ( height << 16 ) / rect.h;
-	int stride = width * 3;
+	int stride = width * 4;
 	int x, y, row_index;
 	uint8_t *q, *row;
 
@@ -334,7 +335,7 @@ static inline void display_3( SDL_Surface *screen, SDL_Rect rect, uint8_t *image
 		row = image + stride * row_index;
 		for ( x = 0; x < rect.w; x ++ )
 		{
-			q = row + ( ( ( 32768 + scale_width * x ) >> 16 ) * 3 );
+			q = row + ( ( ( 32768 + scale_width * x ) >> 16 ) * 4 );
 			pixel = SDL_MapRGB( screen->format, *q, *( q + 1 ), *( q + 2 ) );
 			*p ++ = (pixel & 0xFF0000) >> 16;
 			*p ++ = (pixel & 0x00FF00) >> 8;
@@ -350,7 +351,7 @@ static inline void display_4( SDL_Surface *screen, SDL_Rect rect, uint8_t *image
 	if ( rect.w == 0 || rect.h == 0 ) return;
 	int scale_width = ( width << 16 ) / rect.w;
 	int scale_height = ( height << 16 ) / rect.h;
-	int stride = width * 3;
+	int stride = width * 4;
 	int x, y, row_index;
 	uint8_t *q, *row;
 
@@ -367,7 +368,7 @@ static inline void display_4( SDL_Surface *screen, SDL_Rect rect, uint8_t *image
 		row = image + stride * row_index;
 		for ( x = 0; x < rect.w; x ++ )
 		{
-			q = row + ( ( ( 32768 + scale_width * x ) >> 16 ) * 3 );
+			q = row + ( ( ( 32768 + scale_width * x ) >> 16 ) * 4 );
 			*p ++ = SDL_MapRGB( screen->format, *q, *( q + 1 ), *( q + 2 ) );
 		}
 		start += scanlength;
@@ -379,7 +380,7 @@ static int consumer_play_video( consumer_sdl this, mlt_frame frame )
 	// Get the properties of this consumer
 	mlt_properties properties = this->properties;
 
-	mlt_image_format vfmt = mlt_image_rgb24;
+	mlt_image_format vfmt = mlt_image_rgb24a;
 	int height = this->height;
 	int width = this->width;
 	uint8_t *image = NULL;
@@ -390,7 +391,7 @@ static int consumer_play_video( consumer_sdl this, mlt_frame frame )
 	void ( *unlock )( void ) = mlt_properties_get_data( properties, "app_unlock", NULL );
 
 	if ( lock != NULL ) lock( );
-
+	void *pool = mlt_cocoa_autorelease_init();
 	sdl_lock_display();
 	
 	// Handle events
@@ -439,11 +440,14 @@ static int consumer_play_video( consumer_sdl this, mlt_frame frame )
 		this->sdl_screen = SDL_SetVideoMode( this->window_width, this->window_height, 0, this->sdl_flags );
 		if ( consumer_get_dimensions( &this->window_width, &this->window_height ) )
 			this->sdl_screen = SDL_SetVideoMode( this->window_width, this->window_height, 0, this->sdl_flags );
-		pthread_mutex_unlock( &mlt_sdl_mutex );
 
 		uint32_t color = mlt_properties_get_int( this->properties, "window_background" );
-		SDL_FillRect( this->sdl_screen, NULL, color >> 8 );
-		changed = 1;
+		if ( this->sdl_screen )
+		{
+			SDL_FillRect( this->sdl_screen, NULL, color >> 8 );
+			changed = 1;
+		}
+		pthread_mutex_unlock( &mlt_sdl_mutex );
 	}
 
 	if ( changed == 0 &&
@@ -452,6 +456,7 @@ static int consumer_play_video( consumer_sdl this, mlt_frame frame )
 		 !mlt_properties_get_int( MLT_FRAME_PROPERTIES( frame ), "refresh" ) )
 	{
 		sdl_unlock_display( );
+		mlt_cocoa_autorelease_close( pool );
 		if ( unlock != NULL ) unlock( );
 		struct timespec tm = { 0, 100000 };
 		nanosleep( &tm, NULL );
@@ -464,7 +469,6 @@ static int consumer_play_video( consumer_sdl this, mlt_frame frame )
 
 	// Get the image, width and height
 	mlt_frame_get_image( frame, &image, &vfmt, &width, &height, 0 );
-	mlt_events_fire( properties, "consumer-frame-show", frame, NULL );
 
 	if ( image != NULL )
 	{
@@ -529,8 +533,9 @@ static int consumer_play_video( consumer_sdl this, mlt_frame frame )
 	}
 
 	sdl_unlock_display();
-
+	mlt_cocoa_autorelease_close( pool );
 	if ( unlock != NULL ) unlock( );
+	mlt_events_fire( properties, "consumer-frame-show", frame, NULL );
 
 	return 1;
 }

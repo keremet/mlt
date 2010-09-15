@@ -260,6 +260,7 @@ mlt_producer mlt_tractor_get_track( mlt_tractor this, int index )
 static int producer_get_image( mlt_frame this, uint8_t **buffer, mlt_image_format *format, int *width, int *height, int writable )
 {
 	uint8_t *data = NULL;
+	int size = 0;
 	mlt_properties properties = MLT_FRAME_PROPERTIES( this );
 	mlt_frame frame = mlt_frame_pop_service( this );
 	mlt_properties frame_properties = MLT_FRAME_PROPERTIES( frame );
@@ -280,7 +281,8 @@ static int producer_get_image( mlt_frame this, uint8_t **buffer, mlt_image_forma
 	mlt_properties_set_int( properties, "progressive", mlt_properties_get_int( frame_properties, "progressive" ) );
 	mlt_properties_set_int( properties, "distort", mlt_properties_get_int( frame_properties, "distort" ) );
 	data = mlt_frame_get_alpha_mask( frame );
-	mlt_properties_set_data( properties, "alpha", data, 0, NULL, NULL );
+	mlt_properties_get_data( frame_properties, "alpha", &size );
+	mlt_properties_set_data( properties, "alpha", data, size, NULL, NULL );
 	return 0;
 }
 
@@ -397,6 +399,12 @@ static int producer_get_frame( mlt_producer parent, mlt_frame_ptr frame, int tra
 					if ( !strncmp( name, "meta.", 5 ) && !mlt_properties_get( frame_properties, name ) )
 						mlt_properties_set( frame_properties, name, mlt_properties_get( temp_properties, name ) );
 				}
+
+				// Copy the format conversion virtual functions
+				if ( ! (*frame)->convert_image && temp->convert_image )
+					(*frame)->convert_image = temp->convert_image;
+				if ( ! (*frame)->convert_audio && temp->convert_audio )
+					(*frame)->convert_audio = temp->convert_audio;
 
 				// Check for last track
 				done = mlt_properties_get_int( temp_properties, "last_track" );

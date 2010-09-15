@@ -21,7 +21,6 @@
 #include <framework/mlt_filter.h>
 #include <framework/mlt_frame.h>
 #include <framework/mlt_factory.h>
-#include <framework/mlt_factory.h>
 
 
 // ffmpeg Header files
@@ -92,6 +91,7 @@ static int filter_scale( mlt_frame this, uint8_t **image, mlt_image_format *form
 		interp = SWS_LANCZOS;
 	else if ( strcmp( interps, "spline" ) == 0 )
 		interp = SWS_SPLINE;
+	interp |= SWS_ACCURATE_RND;
 
 	// Determine the bytes per pixel
 	int bpp;
@@ -99,18 +99,27 @@ static int filter_scale( mlt_frame this, uint8_t **image, mlt_image_format *form
 	{
 		case mlt_image_yuv422:
 			bpp = 2;
+			interp |= SWS_FULL_CHR_H_INP;
 			break;
 		case mlt_image_rgb24:
 			bpp = 3;
+			interp |= SWS_FULL_CHR_H_INT;
 			break;
 		case mlt_image_rgb24a:
 		case mlt_image_opengl:
 			bpp = 4;
+			interp |= SWS_FULL_CHR_H_INT;
 			break;
 		default:
 			// XXX: we only know how to rescale packed formats
 			return 1;
 	}
+#ifdef USE_MMX
+	interp |= SWS_CPU_CAPS_MMX;
+#endif
+#ifdef USE_SSE
+	interp |= SWS_CPU_CAPS_MMX2;
+#endif
 
 	// Convert the pixel formats
 	int avformat = convert_mlt_to_av_cs( *format );

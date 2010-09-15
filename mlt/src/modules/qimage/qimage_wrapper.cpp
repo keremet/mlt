@@ -42,6 +42,9 @@
 #include <QtCore/QtEndian>
 #endif
 
+#ifdef USE_EXIF
+#include <libexif/exif-data.h>
+#endif
 
 #include <cmath>
 
@@ -98,7 +101,7 @@ void refresh_qimage( producer_qimage self, mlt_frame frame, int width, int heigh
 	self->current_image = static_cast<uint8_t*>( mlt_cache_item_data( self->image_cache, NULL ) );
 
 	// Check if user wants us to reload the image
-	if ( mlt_properties_get_int( producer_props, "force_reload" ) ) 
+	if ( mlt_properties_get_int( producer_props, "force_reload" ) )
 	{
 		qimage = NULL;
 		self->current_image = NULL;
@@ -153,19 +156,74 @@ void refresh_qimage( producer_qimage self, mlt_frame frame, int width, int heigh
 		}
 	}
 
-    // optimization for subsequent iterations on single picture
+	int disable_exif = mlt_properties_get_int( producer_props, "disable_exif" );
+
+	// optimization for subsequent iterations on single pictur
 	if ( width != 0 && ( image_idx != self->image_idx || width != self->current_width || height != self->current_height ) )
 		self->current_image = NULL;
 	if ( image_idx != self->qimage_idx )
 		qimage = NULL;
-	if ( !qimage && !self->current_image )
+
+	if ( !qimage || mlt_properties_get_int( producer_props, "_disable_exif" ) != disable_exif)
 	{
 		self->current_image = NULL;
 		qimage = new QImage( mlt_properties_get_value( self->filenames, image_idx ) );
 
 		if ( !qimage->isNull( ) )
 		{
-			// Store the width/height of the qimage
+#ifdef USE_EXIF
+			// Read the exif value for this file
+			if ( disable_exif == 0) {
+				ExifData *d = exif_data_new_from_file( mlt_properties_get_value( self->filenames, image_idx ) );
+				ExifEntry *entry;
+				int exif_orientation = 0;
+				/* get orientation and rotate image accordingly if necessary */
+				if (d) {
+					if ( ( entry = exif_content_get_entry ( d->ifd[EXIF_IFD_0], EXIF_TAG_ORIENTATION ) ) )
+						exif_orientation = exif_get_short (entry->data, exif_data_get_byte_order (d));
+					
+					/* Free the EXIF data */
+					exif_data_unref(d);
+				}
+
+				if ( exif_orientation > 1 )
+				{
+				      // Rotate image according to exif data
+				      QImage processed;
+				      QMatrix matrix;
+
+				      switch ( exif_orientation ) {
+					  case 2:
+					      matrix.scale( -1, 1 );
+					      break;
+					  case 3:
+					      matrix.rotate( 180 );
+					      break;
+					  case 4:
+					      matrix.scale( 1, -1 );
+					      break;
+					  case 5:
+					      matrix.rotate( 270 );
+					      matrix.scale( -1, 1 );
+					      break;
+					  case 6:
+					      matrix.rotate( 90 );
+					      break;
+					  case 7:
+					      matrix.rotate( 90 );
+					      matrix.scale( -1, 1 );
+					      break;
+					  case 8:
+					      matrix.rotate( 270 );
+					      break;
+				      }
+				      processed = qimage->transformed( matrix );
+				      delete qimage;
+				      qimage = new QImage( processed );
+				}
+			}
+#endif			
+			// Store the width/height of the qimage  
 			self->current_width = qimage->width( );
 			self->current_height = qimage->height( );
 
@@ -178,6 +236,7 @@ void refresh_qimage( producer_qimage self, mlt_frame frame, int width, int heigh
 			mlt_events_block( producer_props, NULL );
 			mlt_properties_set_int( producer_props, "_real_width", self->current_width );
 			mlt_properties_set_int( producer_props, "_real_height", self->current_height );
+			mlt_properties_set_int( producer_props, "_disable_exif", disable_exif );
 			mlt_events_unblock( producer_props, NULL );
 		}
 		else
