@@ -69,7 +69,6 @@ mlt_producer producer_qimage_init( mlt_profile profile, mlt_service_type type, c
 			if ( frame )
 			{
 				mlt_properties frame_properties = MLT_FRAME_PROPERTIES( frame );
-				pthread_mutex_init( &this->mutex, NULL );
 				mlt_properties_set_data( frame_properties, "producer_qimage", this, 0, NULL, NULL );
 				mlt_frame_set_position( frame, mlt_producer_position( producer ) );
 				mlt_properties_set_position( frame_properties, "qimage_position", mlt_producer_position( producer ) );
@@ -82,6 +81,8 @@ mlt_producer producer_qimage_init( mlt_profile profile, mlt_service_type type, c
 			producer_close( producer );
 			producer = NULL;
 		}
+		if ( producer )
+			pthread_mutex_init( &this->mutex, NULL );
 		return producer;
 	}
 	free( this );
@@ -96,30 +97,7 @@ static void load_filenames( producer_qimage this, mlt_properties producer_proper
 	// Read xml string
 	if ( strstr( filename, "<svg" ) )
 	{
-		// Generate a temporary file for the svg
-		char fullname[ 1024 ] = "/tmp/mlt.XXXXXX";
-		int fd = mkstemp( fullname );
-
-		if ( fd > -1 )
-		{
-			// Write the svg into the temp file
-			ssize_t remaining_bytes;
-			char *xml = filename;
-			
-			// Strip leading crap
-			while ( xml[0] != '<' )
-				xml++;
-			
-			remaining_bytes = strlen( xml );
-			while ( remaining_bytes > 0 )
-				remaining_bytes -= write( fd, xml + strlen( xml ) - remaining_bytes, remaining_bytes );
-			close( fd );
-
-			mlt_properties_set( this->filenames, "0", fullname );
-
-			// Teehe - when the producer closes, delete the temp file and the space allo
-			mlt_properties_set_data( producer_properties, "__temporary_file__", fullname, 0, ( mlt_destructor )unlink, NULL );
-		}
+		make_tempfile( this, filename );
 	}
 	// Obtain filenames
 	else if ( strchr( filename, '%' ) != NULL )
@@ -183,6 +161,8 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 	*width = mlt_properties_get_int( properties, "rescale_width" );
 	*height = mlt_properties_get_int( properties, "rescale_height" );
 
+	mlt_service_lock( MLT_PRODUCER_SERVICE( &this->parent ) );
+
 	// Refresh the image
 	refresh_qimage( this, frame, *width, *height );
 
@@ -199,7 +179,7 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 		uint8_t *image_copy = mlt_pool_alloc( image_size );
 		memcpy( image_copy, this->current_image, image_size );
 		// Now update properties so we free the copy after
-		mlt_properties_set_data( properties, "image", image_copy, image_size, mlt_pool_release, NULL );
+		mlt_frame_set_image( frame, image_copy, image_size, mlt_pool_release );
 		// We're going to pass the copy on
 		*buffer = image_copy;
 		*format = this->has_alpha ? mlt_image_rgb24a : mlt_image_rgb24;
@@ -214,6 +194,7 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 	// Release references and locks
 	pthread_mutex_unlock( &this->mutex );
 	mlt_cache_item_close( this->image_cache );
+	mlt_service_unlock( MLT_PRODUCER_SERVICE( &this->parent ) );
 
 	return error;
 }
@@ -251,7 +232,11 @@ static int producer_get_frame( mlt_producer producer, mlt_frame_ptr frame, int i
 
 		// Set producer-specific frame properties
 		mlt_properties_set_int( properties, "progressive", mlt_properties_get_int( producer_properties, "progressive" ) );
-		mlt_properties_set_double( properties, "aspect_ratio", mlt_properties_get_double( producer_properties, "aspect_ratio" ) );
+		double force_ratio = mlt_properties_get_double( producer_properties, "force_aspect_ratio" );
+		if ( force_ratio > 0.0 )
+			mlt_properties_set_double( properties, "aspect_ratio", force_ratio );
+		else
+			mlt_properties_set_double( properties, "aspect_ratio", mlt_properties_get_double( producer_properties, "aspect_ratio" ) );
 
 		// Push the get_image method
 		mlt_frame_push_get_image( *frame, producer_get_image );

@@ -26,7 +26,7 @@
 #include <string.h>
 
 // ffmpeg Header files
-#include <avformat.h>
+#include <libavformat/avformat.h>
 
 /** Get the audio.
 */
@@ -41,6 +41,8 @@ static int resample_get_audio( mlt_frame frame, void **buffer, mlt_audio_format 
 
 	// Get the filter properties
 	mlt_properties filter_properties = MLT_FILTER_PROPERTIES( filter );
+
+	mlt_service_lock( MLT_FILTER_SERVICE( filter ) );
 
 	// Get the resample information
 	int output_rate = mlt_properties_get_int( filter_properties, "frequency" );
@@ -128,6 +130,8 @@ static int resample_get_audio( mlt_frame frame, void **buffer, mlt_audio_format 
 			mlt_properties_set_int( filter_properties, "last_frequency", *frequency );
 		}
 
+		mlt_service_unlock( MLT_FILTER_SERVICE( filter ) );
+
 		// Resample the audio
 		used = audio_resample( resample, sample_buffer, *buffer, *samples );
 		int size = used * *channels * sizeof( int16_t );
@@ -146,6 +150,10 @@ static int resample_get_audio( mlt_frame frame, void **buffer, mlt_audio_format 
 		*samples = used;
 		*frequency = output_rate;
 	}
+	else
+	{
+		mlt_service_unlock( MLT_FILTER_SERVICE( filter ) );
+	}
 
 	return 0;
 }
@@ -153,13 +161,13 @@ static int resample_get_audio( mlt_frame frame, void **buffer, mlt_audio_format 
 /** Filter processing.
 */
 
-static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
+static mlt_frame filter_process( mlt_filter filter, mlt_frame frame )
 {
 	// Only call this if we have a means to get audio
 	if ( mlt_frame_is_test_audio( frame ) == 0 )
 	{
 		// Push the filter on to the stack
-		mlt_frame_push_audio( frame, this );
+		mlt_frame_push_audio( frame, filter );
 
 		// Assign our get_audio method
 		mlt_frame_push_audio( frame, resample_get_audio );
@@ -174,10 +182,10 @@ static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
 mlt_filter filter_avresample_init( char *arg )
 {
 	// Create a filter
-	mlt_filter this = mlt_filter_new( );
+	mlt_filter filter = mlt_filter_new( );
 
 	// Initialise if successful
-	if ( this != NULL )
+	if ( filter != NULL )
 	{
 		// Calculate size of the buffer
 		int size = AVCODEC_MAX_AUDIO_FRAME_SIZE * sizeof( int16_t );
@@ -186,18 +194,18 @@ mlt_filter filter_avresample_init( char *arg )
 		int16_t *buffer = mlt_pool_alloc( size );
 
 		// Assign the process method
-		this->process = filter_process;
+		filter->process = filter_process;
 
 		// Deal with argument
 		if ( arg != NULL )
-			mlt_properties_set( MLT_FILTER_PROPERTIES( this ), "frequency", arg );
+			mlt_properties_set( MLT_FILTER_PROPERTIES( filter ), "frequency", arg );
 
 		// Default to 2 channel output
-		mlt_properties_set_int( MLT_FILTER_PROPERTIES( this ), "channels", 2 );
+		mlt_properties_set_int( MLT_FILTER_PROPERTIES( filter ), "channels", 2 );
 
 		// Store the buffer
-		mlt_properties_set_data( MLT_FILTER_PROPERTIES( this ), "buffer", buffer, size, mlt_pool_release, NULL );
+		mlt_properties_set_data( MLT_FILTER_PROPERTIES( filter ), "buffer", buffer, size, mlt_pool_release, NULL );
 	}
 
-	return this;
+	return filter;
 }

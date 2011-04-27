@@ -27,7 +27,9 @@
 #include <samplerate.h>
 #include <string.h>
 
-#define BUFFER_LEN 20480
+// BUFFER_LEN is based on a maximum of 96KHz, 5 fps, 8 channels
+// TODO: dynamically allocate larger buffer size
+#define BUFFER_LEN ((96000/5) * 8 * sizeof(float))
 #define RESAMPLE_TYPE SRC_SINC_FASTEST
 
 /** Get the audio.
@@ -50,19 +52,23 @@ static int resample_get_audio( mlt_frame frame, void **buffer, mlt_audio_format 
 		output_rate = *frequency;
 
 	// Get the producer's audio
-	if ( *format != mlt_audio_s16 )
-		*format = mlt_audio_float;
 	mlt_frame_get_audio( frame, buffer, format, frequency, channels, samples );
 
 	// Return now if no work to do
 	if ( output_rate != *frequency )
 	{
+		mlt_log_verbose( MLT_FILTER_SERVICE(filter), "channels %d samples %d frequency %d -> %d\n",
+			*channels, *samples, *frequency, output_rate );
+
 		// Do not convert to float unless we need to change the rate
 		if ( *format != mlt_audio_float )
 		{
 			*format = mlt_audio_float;
 			mlt_frame_get_audio( frame, buffer, format, frequency, channels, samples );
 		}
+
+		mlt_service_lock( MLT_FILTER_SERVICE(filter) );
+
 		float *input_buffer = mlt_properties_get_data( filter_properties, "input_buffer", NULL );
 		float *output_buffer = mlt_properties_get_data( filter_properties, "output_buffer", NULL );
 		SRC_DATA data;
@@ -119,9 +125,13 @@ static int resample_get_audio( mlt_frame frame, void **buffer, mlt_audio_format 
 			// Update output variables
 			*samples = data.output_frames_gen;
 			*frequency = output_rate;
+
 		}
 		else
+		{
 			mlt_log_error( MLT_FILTER_SERVICE( filter ), "%s %d,%d,%d\n", src_strerror( error ), *frequency, *samples, output_rate );
+		}
+		mlt_service_unlock( MLT_FILTER_SERVICE(filter) );
 	}
 
 	return error;

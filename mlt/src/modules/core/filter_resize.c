@@ -147,7 +147,7 @@ static uint8_t *frame_resize_image( mlt_frame this, int owidth, int oheight, int
 	int iheight = mlt_properties_get_int( properties, "height" );
 
 	// If width and height are correct, don't do anything
-	if ( iwidth != owidth || iheight != oheight )
+	if ( iwidth < owidth || iheight < oheight )
 	{
 		uint8_t alpha_value = mlt_properties_get_int( properties, "resize_alpha" );
 
@@ -158,9 +158,7 @@ static uint8_t *frame_resize_image( mlt_frame this, int owidth, int oheight, int
 		resize_image( output, owidth, oheight, input, iwidth, iheight, bpp );
 
 		// Now update the frame
-		mlt_properties_set_data( properties, "image", output, owidth * ( oheight + 1 ) * bpp, ( mlt_destructor )mlt_pool_release, NULL );
-		mlt_properties_set_int( properties, "width", owidth );
-		mlt_properties_set_int( properties, "height", oheight );
+		mlt_frame_set_image( this, output, owidth * ( oheight + 1 ) * bpp, mlt_pool_release );
 
 		// We should resize the alpha too
 		if ( alpha && alpha_size >= iwidth * iheight )
@@ -168,7 +166,7 @@ static uint8_t *frame_resize_image( mlt_frame this, int owidth, int oheight, int
 			alpha = resize_alpha( alpha, owidth, oheight, iwidth, iheight, alpha_value );
 			if ( alpha )
 			{
-				mlt_properties_set_data( properties, "alpha", alpha, owidth * oheight, ( mlt_destructor )mlt_pool_release, NULL );
+				mlt_frame_set_alpha( this, alpha, owidth * oheight, mlt_pool_release );
 				this->get_alpha_mask = NULL;
 			}
 		}
@@ -271,23 +269,7 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 		// Get the requested scale operation
 		char *op = mlt_properties_get( MLT_FILTER_PROPERTIES( filter ), "scale" );
 		int bpp;
-
-		switch ( *format )
-		{
-			case mlt_image_yuv422:
-				bpp = 2;
-				break;
-			case mlt_image_rgb24:
-				bpp = 3;
-				break;
-			case mlt_image_rgb24a:
-			case mlt_image_opengl:
-				bpp = 4;
-				break;
-			default:
-				// XXX: we only know how to resize packed formats
-				return 1;
-		}
+		int size = mlt_image_format_size( *format, owidth, oheight, &bpp );
 
 		// Provides a manual override for misreported field order
 		if ( mlt_properties_get( properties, "meta.top_field_first" ) )
@@ -299,9 +281,12 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 		     mlt_properties_get_int( properties, "progressive" ) == 0 )
 		{
 			// Get the input image, width and height
-			int size = owidth * oheight * bpp;
-			uint8_t *ptr = *image + owidth * bpp;
-			memmove( ptr, *image, size - owidth * bpp );
+			uint8_t *new_image = mlt_pool_alloc( size );
+			mlt_frame_set_image( this, new_image, size, mlt_pool_release );
+			uint8_t *ptr = new_image + owidth * bpp;
+			memcpy( new_image, *image, owidth * bpp );
+			memcpy( ptr, *image, owidth * ( oheight - 1 ) * bpp );
+			*image = new_image;
 			
 			// Set the normalised field order
 			mlt_properties_set_int( properties, "top_field_first", 0 );

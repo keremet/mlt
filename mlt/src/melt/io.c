@@ -27,7 +27,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#ifndef WIN32
 #include <termios.h>
+#else
+// MinGW defines struct timespec in pthread.h
+#include <pthread.h>
+#endif
 #include <unistd.h>
 #include <sys/time.h>
 
@@ -102,11 +107,13 @@ static int mode = 0;
 
 void term_exit(void)
 {
+#ifndef WIN32
 	if ( mode == 1 )
 	{
 		tcsetattr( 0, TCSANOW, &oldtty );
 		mode = 0;
 	}
+#endif
 }
 
 /** Init terminal so that we can grab keys without blocking.
@@ -114,6 +121,7 @@ void term_exit(void)
 
 void term_init( )
 {
+#ifndef WIN32
 	struct termios tty;
 
 	tcgetattr( 0, &tty );
@@ -132,6 +140,7 @@ void term_init( )
 	mode = 1;
 
 	atexit( term_exit );
+#endif
 }
 
 /** Check for a keypress without blocking infinitely.
@@ -140,6 +149,7 @@ void term_init( )
 
 int term_read( )
 {
+#ifndef WIN32
     int n = 1;
     unsigned char ch;
     struct timeval tv;
@@ -158,6 +168,10 @@ int term_read( )
             return ch;
         return n;
     }
+#else
+	struct timespec tm = { 0, 40000 };
+	nanosleep( &tm, NULL );
+#endif
     return -1;
 }
 

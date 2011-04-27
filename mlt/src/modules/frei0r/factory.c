@@ -30,7 +30,15 @@
 #include <stdlib.h>
 #include <limits.h>
 
+
+#ifdef WIN32
+#define LIBSUF ".dll"
+#define FREI0R_PLUGIN_PATH "lib\\frei0r-1"
+#else
+#define LIBSUF ".so"
 #define FREI0R_PLUGIN_PATH "/usr/lib/frei0r-1:/usr/lib64/frei0r-1:/opt/local/lib/frei0r-1:/usr/local/lib/frei0r-1:$HOME/.frei0r-1/lib"
+#endif
+
 #define GET_FREI0R_PATH (getenv("FREI0R_PATH") ? getenv("FREI0R_PATH") : getenv("MLT_FREI0R_PLUGIN_PATH") ? getenv("MLT_FREI0R_PLUGIN_PATH") : FREI0R_PLUGIN_PATH)
 
 extern mlt_filter filter_frei0r_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
@@ -40,6 +48,24 @@ extern int producer_get_frame( mlt_producer producer, mlt_frame_ptr frame, int i
 extern void producer_close( mlt_producer this );
 extern void transition_close( mlt_transition this );
 extern mlt_frame transition_process( mlt_transition transition, mlt_frame a_frame, mlt_frame b_frame );
+
+static void check_thread_safe( mlt_properties properties, const char *name )
+{
+	char dirname[PATH_MAX];
+	snprintf( dirname, PATH_MAX, "%s/frei0r/not_thread_safe.txt", mlt_environment( "MLT_DATA" ) );
+	mlt_properties not_thread_safe = mlt_properties_load( dirname );
+	int i;
+
+	for ( i = 0; i < mlt_properties_count( not_thread_safe ); i++ )
+	{
+		if ( strcmp( name, mlt_properties_get_name( not_thread_safe, i ) ) == 0 )
+		{
+			mlt_properties_set_int( properties, "_not_thread_safe", 1 );
+			break;
+		}
+	}
+	mlt_properties_close( not_thread_safe );
+}
 
 static mlt_properties fill_param_info ( mlt_service_type type, const char *service_name, char *name )
 {
@@ -150,7 +176,7 @@ static mlt_properties fill_param_info ( mlt_service_type type, const char *servi
 	return metadata;
 }
 
-static void * load_lib(  mlt_profile profile, mlt_service_type type , void* handle){
+static void * load_lib( mlt_profile profile, mlt_service_type type , void* handle, const char *name ){
 
 	int i=0;
 	void (*f0r_get_plugin_info)(f0r_plugin_info_t*),
@@ -163,7 +189,6 @@ static void * load_lib(  mlt_profile profile, mlt_service_type type , void* hand
 		  const uint32_t* inframe2,const uint32_t* inframe3, uint32_t* outframe);
 
 	if ( ( f0r_construct = dlsym(handle, "f0r_construct") ) &&
-				(f0r_update = dlsym(handle,"f0r_update") ) &&
 				(f0r_destruct = dlsym(handle,"f0r_destruct") ) &&
 				(f0r_get_plugin_info = dlsym(handle,"f0r_get_plugin_info") ) &&
 				(f0r_get_param_info = dlsym(handle,"f0r_get_param_info") ) &&
@@ -173,6 +198,7 @@ static void * load_lib(  mlt_profile profile, mlt_service_type type , void* hand
 				(f0r_deinit= dlsym(handle,"f0r_deinit" ) )
 		){
 
+		f0r_update=dlsym(handle,"f0r_update");
 		f0r_update2=dlsym(handle,"f0r_update2");
 
 		f0r_plugin_info_t info;
@@ -182,7 +208,7 @@ static void * load_lib(  mlt_profile profile, mlt_service_type type , void* hand
 		mlt_properties properties=NULL;
 
 		if (type == producer_type && info.plugin_type == F0R_PLUGIN_TYPE_SOURCE ){
-			mlt_producer this = mlt_producer_new( );
+			mlt_producer this = mlt_producer_new( profile );
 			if ( this != NULL )
 			{
 				this->get_frame = producer_get_frame;
@@ -227,6 +253,7 @@ static void * load_lib(  mlt_profile profile, mlt_service_type type , void* hand
 				ret=transition;
 			}
 		}
+		check_thread_safe( properties, name );
 		mlt_properties_set_data(properties, "_dlclose_handle", handle , sizeof (void*) , NULL , NULL );
 		mlt_properties_set_data(properties, "_dlclose", dlclose , sizeof (void*) , NULL , NULL );
 		mlt_properties_set_data(properties, "f0r_construct", f0r_construct , sizeof(void*),NULL,NULL);
@@ -259,27 +286,37 @@ static void * create_frei0r_item ( mlt_profile profile, mlt_service_type type, c
 	void* ret=NULL;
 	while (dircount--){
 		char soname[PATH_MAX];
+		char *myid = strdup( id );
 
+#ifdef WIN32
+		char *firstname = strtok( myid, "." );
+#else
 		char *save_firstptr = NULL;
-		char *firstname=strtok_r(strdup(id),".",&save_firstptr);
+		char *firstname = strtok_r( myid, ".", &save_firstptr );
+#endif
 		char* directory = mlt_tokeniser_get_string (tokeniser, dircount);
 
-		firstname=strtok_r(NULL,".",&save_firstptr);
+#ifdef WIN32
+		firstname = strtok( NULL, "." );
+#else
+		firstname = strtok_r( NULL, ".", &save_firstptr );
+#endif
 		if (strncmp(directory, "$HOME", 5))
-			snprintf(soname, PATH_MAX, "%s/%s.so", directory, firstname);
+			snprintf(soname, PATH_MAX, "%s/%s" LIBSUF, directory, firstname );
 		else
-			snprintf(soname, PATH_MAX, "%s%s/%s.so", getenv("HOME"), strchr(directory, '/'), firstname);
+			snprintf(soname, PATH_MAX, "%s%s/%s" LIBSUF, getenv("HOME"), strchr(directory, '/'), firstname );
 
 		if (firstname){
 
 			void* handle=dlopen(soname,RTLD_LAZY);
 
 			if (handle ){
-				ret=load_lib ( profile , type , handle );
+				ret=load_lib ( profile , type , handle, firstname );
 			}else{
 				dlerror();
 			}
 		}
+		free( myid );
 	}
 	mlt_tokeniser_close ( tokeniser );
 	return ret;
@@ -308,20 +345,24 @@ MLT_REPOSITORY
 			snprintf(dirname, PATH_MAX, "%s", directory);
 		else
 			snprintf(dirname, PATH_MAX, "%s%s", getenv("HOME"), strchr(directory, '/'));
-		mlt_properties_dir_list(direntries, dirname ,"*.so",1);
+		mlt_properties_dir_list(direntries, dirname ,"*" LIBSUF, 1);
 
 		for (i=0; i<mlt_properties_count(direntries);i++){
 			char* name=mlt_properties_get_value(direntries,i);
 			char* shortname=name+strlen(dirname)+1;
+#ifdef WIN32
+			char* firstname = strtok( shortname, "." );
+#else
 			char *save_firstptr = NULL;
+			char* firstname = strtok_r( shortname, ".", &save_firstptr );
+#endif
 			char pluginname[1024]="frei0r.";
-			char* firstname = strtok_r ( shortname , "." , &save_firstptr );
 			strcat(pluginname,firstname);
 
 			if ( mlt_properties_get( blacklist, firstname ) )
 				continue;
 
-			void* handle=dlopen(strcat(name,".so"),RTLD_LAZY);
+			void* handle=dlopen(strcat(name, LIBSUF),RTLD_LAZY);
 			if (handle){
 				void (*plginfo)(f0r_plugin_info_t*)=dlsym(handle,"f0r_get_plugin_info");
 

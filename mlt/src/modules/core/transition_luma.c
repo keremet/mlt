@@ -29,42 +29,6 @@
 #include <string.h>
 #include <math.h>
 
-/** Calculate the position for this frame.
-*/
-
-static float position_calculate( mlt_transition this, mlt_frame frame )
-{
-	// Get the in and out position
-	mlt_position in = mlt_transition_get_in( this );
-	mlt_position out = mlt_transition_get_out( this );
-
-	// Get the position of the frame
-	char *name = mlt_properties_get( MLT_TRANSITION_PROPERTIES( this ), "_unique_id" );
-	mlt_position position = mlt_properties_get_position( MLT_FRAME_PROPERTIES( frame ), name );
-
-	// Now do the calcs
-	return ( float )( position - in ) / ( float )( out - in + 1 );
-}
-
-/** Calculate the field delta for this frame - position between two frames.
-*/
-
-static float delta_calculate( mlt_transition this, mlt_frame frame )
-{
-	// Get the in and out position
-	mlt_position in = mlt_transition_get_in( this );
-	mlt_position out = mlt_transition_get_out( this );
-
-	// Get the position of the frame
-	mlt_position position = mlt_frame_get_position( frame );
-
-	// Now do the calcs
-	float x = ( float )( position - in ) / ( float )( out - in + 1 );
-	float y = ( float )( position + 1 - in ) / ( float )( out - in + 1 );
-
-	return ( y - x ) / 2.0;
-}
-
 static inline int dissolve_yuv( mlt_frame this, mlt_frame that, float weight, int width, int height )
 {
 	int ret = 0;
@@ -368,6 +332,8 @@ static int transition_get_image( mlt_frame a_frame, uint8_t **image, mlt_image_f
 	// This compositer is yuv422 only
 	*format = mlt_image_yuv422;
 
+	mlt_service_lock( MLT_TRANSITION_SERVICE( transition ) );
+
 	// The cached luma map information
 	int luma_width = mlt_properties_get_int( properties, "width" );
 	int luma_height = mlt_properties_get_int( properties, "height" );
@@ -380,14 +346,15 @@ static int transition_get_image( mlt_frame a_frame, uint8_t **image, mlt_image_f
 	// Correct width/height if not specified
 	if ( luma_width == 0 || luma_height == 0 )
 	{
-		luma_width = mlt_properties_get_int( a_props, "width" );
-		luma_height = mlt_properties_get_int( a_props, "height" );
+		luma_width = *width;
+		luma_height = *height;
 	}
 		
-	if ( resource != current_resource )
+	if ( resource && ( !current_resource || strcmp( resource, current_resource ) ) )
 	{
 		char temp[ 512 ];
 		char *extension = strrchr( resource, '.' );
+		char *orig_resource = resource;
 
 		if ( strchr( resource, '%' ) )
 		{
@@ -416,7 +383,7 @@ static int transition_get_image( mlt_frame a_frame, uint8_t **image, mlt_image_f
 				// Set the transition properties
 				mlt_properties_set_int( properties, "width", luma_width );
 				mlt_properties_set_int( properties, "height", luma_height );
-				mlt_properties_set( properties, "_resource", resource );
+				mlt_properties_set( properties, "_resource", orig_resource );
 				mlt_properties_set_data( properties, "bitmap", luma_bitmap, luma_width * luma_height * 2, mlt_pool_release, NULL );
 			}
 		}
@@ -467,7 +434,7 @@ static int transition_get_image( mlt_frame a_frame, uint8_t **image, mlt_image_f
 					// Set the transition properties
 					mlt_properties_set_int( properties, "width", luma_width );
 					mlt_properties_set_int( properties, "height", luma_height );
-					mlt_properties_set( properties, "_resource", resource);
+					mlt_properties_set( properties, "_resource", orig_resource);
 					mlt_properties_set_data( properties, "bitmap", luma_bitmap, luma_width * luma_height * 2, mlt_pool_release, NULL );
 
 					// Cleanup the luma frame
@@ -481,9 +448,8 @@ static int transition_get_image( mlt_frame a_frame, uint8_t **image, mlt_image_f
 	}
 
 	// Arbitrary composite defaults
-	float mix = position_calculate( transition, a_frame );
-	float frame_delta = delta_calculate( transition, a_frame );
-	
+	float mix = mlt_transition_get_progress( transition, a_frame );
+	float frame_delta = mlt_transition_get_progress_delta( transition, a_frame );
 	float luma_softness = mlt_properties_get_double( properties, "softness" );
 	int progressive = 
 			mlt_properties_get_int( a_props, "consumer_deinterlace" ) ||
@@ -508,23 +474,34 @@ static int transition_get_image( mlt_frame a_frame, uint8_t **image, mlt_image_f
 	if ( mix >= 1.0 )
 		mix -= floor( mix );
 
-	mix = reverse || invert ? 1 - mix : mix;
-	frame_delta *= reverse || invert ? -1.0 : 1.0;
-
 	// Ensure we get scaling on the b_frame
 	if ( mlt_properties_get( b_props, "rescale.interp" ) == NULL || !strcmp( mlt_properties_get( b_props, "rescale.interp" ), "none" ) )
 		mlt_properties_set( b_props, "rescale.interp", mlt_properties_get( a_props, "rescale.interp" ) );
+	
+	if ( invert )
+		mlt_properties_set_int( b_props, "consumer_deinterlace", mlt_properties_get_int( a_props, "consumer_deinterlace") );
 
 	if ( mlt_properties_get( properties, "fixed" ) )
 		mix = mlt_properties_get_double( properties, "fixed" );
 
 	if ( luma_width > 0 && luma_height > 0 && luma_bitmap != NULL )
+	{
+		reverse = invert ? !reverse : reverse;
+		mix = reverse ? 1 - mix : mix;
+		frame_delta *= reverse ? -1.0 : 1.0;
 		// Composite the frames using a luma map
 		luma_composite( !invert ? a_frame : b_frame, !invert ? b_frame : a_frame, luma_width, luma_height, luma_bitmap, mix, frame_delta,
 			luma_softness, progressive ? -1 : top_field_first, width, height );
+	}
 	else
+	{
+		mix = ( reverse || invert ) ? 1 - mix : mix;
+		invert = 0;
 		// Dissolve the frames using the time offset for mix value
 		dissolve_yuv( a_frame, b_frame, mix, *width, *height );
+	}
+	
+	mlt_service_unlock( MLT_TRANSITION_SERVICE( transition ) );
 
 	// Extract the a_frame image info
 	*width = mlt_properties_get_int( !invert ? a_props : b_props, "width" );
@@ -540,12 +517,6 @@ static int transition_get_image( mlt_frame a_frame, uint8_t **image, mlt_image_f
 
 static mlt_frame transition_process( mlt_transition transition, mlt_frame a_frame, mlt_frame b_frame )
 {
-	// Get a unique name to store the frame position
-	char *name = mlt_properties_get( MLT_TRANSITION_PROPERTIES( transition ), "_unique_id" );
-
-	// Assign the current position to the name
-	mlt_properties_set_position( MLT_FRAME_PROPERTIES( a_frame ), name, mlt_frame_get_position( a_frame ) );
-
 	// Push the transition on to the frame
 	mlt_frame_push_service( a_frame, transition );
 

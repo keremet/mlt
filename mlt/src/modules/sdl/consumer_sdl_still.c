@@ -1,6 +1,6 @@
 /*
  * consumer_sdl_still.c -- A Simple DirectMedia Layer consumer
- * Copyright (C) 2003-2004 Ushodaya Enterprises Limited
+ * Copyright (C) 2003-2004, 2010 Ushodaya Enterprises Limited
  * Author: Charles Yates
  *
  * This library is free software; you can redistribute it and/or
@@ -28,8 +28,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-#include <SDL/SDL.h>
-#include <SDL/SDL_syswm.h>
+#include <SDL.h>
+#include <SDL_syswm.h>
 #include <sys/time.h>
 #include "consumer_sdl_osx.h"
 
@@ -163,12 +163,15 @@ static int consumer_start( mlt_consumer parent )
 
 		// Default window size
 		double display_ratio = mlt_properties_get_double( this->properties, "display_ratio" );
-		this->window_width = ( double )this->height * display_ratio;
+		this->window_width = ( double )this->height * display_ratio + 0.5;
 		this->window_height = this->height;
 
 		if ( sdl_started == 0 && preview_off == 0 )
 		{
-			if ( SDL_Init( SDL_INIT_VIDEO | SDL_INIT_NOPARACHUTE ) < 0 )
+			pthread_mutex_lock( &mlt_sdl_mutex );
+			int ret = SDL_Init( SDL_INIT_VIDEO | SDL_INIT_NOPARACHUTE );
+			pthread_mutex_unlock( &mlt_sdl_mutex );
+			if ( ret < 0 )
 			{
 				fprintf( stderr, "Failed to initialize SDL: %s\n", SDL_GetError() );
 				return -1;
@@ -179,9 +182,12 @@ static int consumer_start( mlt_consumer parent )
 		}
 		else if ( preview_off == 0 )
 		{
-			if ( SDL_GetVideoSurface( ) != NULL )
+			pthread_mutex_lock( &mlt_sdl_mutex );
+			SDL_Surface *screen = SDL_GetVideoSurface( );
+			pthread_mutex_unlock( &mlt_sdl_mutex );
+			if ( screen != NULL )
 			{
-				this->sdl_screen = SDL_GetVideoSurface( );
+				this->sdl_screen = screen;
 			}
 		}
 
@@ -449,7 +455,7 @@ static int consumer_play_video( consumer_sdl this, mlt_frame frame )
 		}
 		pthread_mutex_unlock( &mlt_sdl_mutex );
 	}
-
+	mlt_properties_set_int( MLT_FRAME_PROPERTIES( frame ), "test_audio", 1 );
 	if ( changed == 0 &&
 		 this->last_position == mlt_frame_get_position( frame ) &&
 		 this->last_producer == mlt_frame_get_original_producer( frame ) &&
@@ -505,7 +511,9 @@ static int consumer_play_video( consumer_sdl this, mlt_frame frame )
 		mlt_properties_set_int( this->properties, "rect_h", this->rect.h );
 	}
 	
-	if ( !mlt_consumer_is_stopped( &this->parent ) && SDL_GetVideoSurface( ) != NULL && this->sdl_screen != NULL && this->sdl_screen->pixels != NULL )
+	pthread_mutex_lock( &mlt_sdl_mutex );
+	SDL_Surface *screen = SDL_GetVideoSurface( );
+	if ( !mlt_consumer_is_stopped( &this->parent ) && screen != NULL && this->sdl_screen != NULL && this->sdl_screen->pixels != NULL )
 	{
 		switch( this->sdl_screen->format->BytesPerPixel )
 		{
@@ -527,10 +535,9 @@ static int consumer_play_video( consumer_sdl this, mlt_frame frame )
 		}
 
 		// Flip it into sight
-		pthread_mutex_lock( &mlt_sdl_mutex );
 		SDL_Flip( this->sdl_screen );
-		pthread_mutex_unlock( &mlt_sdl_mutex );
 	}
+	pthread_mutex_unlock( &mlt_sdl_mutex );
 
 	sdl_unlock_display();
 	mlt_cocoa_autorelease_close( pool );
@@ -607,10 +614,11 @@ static int consumer_get_dimensions( int *width, int *height )
 	// Specify the SDL Version
 	SDL_VERSION( &wm.version );
 
+#ifndef __DARWIN__
 	// Get the wm structure
 	if ( SDL_GetWMInfo( &wm ) == 1 )
 	{
-#ifndef __DARWIN__
+#ifndef WIN32
 		// Check that we have the X11 wm
 		if ( wm.subsystem == SDL_SYSWM_X11 ) 
 		{
@@ -633,6 +641,7 @@ static int consumer_get_dimensions( int *width, int *height )
 		}
 #endif
 	}
+#endif
 
 	return changed;
 }

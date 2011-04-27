@@ -50,7 +50,7 @@ mlt_producer producer_colour_init( mlt_profile profile, mlt_service_type type, c
 		// Set the default properties
 		mlt_properties_set( properties, "resource", colour == NULL ? "0x000000ff" : colour );
 		mlt_properties_set( properties, "_resource", "" );
-		mlt_properties_set_double( properties, "aspect_ratio", 0 );
+		mlt_properties_set_double( properties, "aspect_ratio", mlt_profile_sar( profile ) );
 		
 		return producer;
 	}
@@ -99,6 +99,8 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 	// Obtain the producer for this frame
 	mlt_producer producer = mlt_properties_get_data( properties, "producer_colour", NULL );
 
+	mlt_service_lock( MLT_PRODUCER_SERVICE( producer ) );
+
 	// Obtain properties of producer
 	mlt_properties producer_props = MLT_PRODUCER_PROPERTIES( producer );
 
@@ -128,23 +130,8 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 		int i = *width * *height + 1;
 		int bpp;
 
-		switch ( *format )
-		{
-			case mlt_image_rgb24:
-				bpp = 3;
-				break;
-			case mlt_image_rgb24a:
-			case mlt_image_opengl:
-				bpp = 4;
-				break;
-			default:
-				bpp = 2;
-				*format = mlt_image_yuv422;
-				break;
-		}
-
 		// Allocate the image
-		size = *width * *height * bpp;
+		size = mlt_image_format_size( *format, *width, *height, &bpp );
 		uint8_t *p = image = mlt_pool_alloc( size );
 
 		// Update the producer
@@ -153,6 +140,8 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 		mlt_properties_set_int( producer_props, "_height", *height );
 		mlt_properties_set_int( producer_props, "_format", *format );
 		mlt_properties_set( producer_props, "_resource", now );
+
+		mlt_service_unlock( MLT_PRODUCER_SERVICE( producer ) );
 
 		switch ( *format )
 		{
@@ -204,6 +193,10 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 			break;
 		}
 	}
+	else
+	{
+		mlt_service_unlock( MLT_PRODUCER_SERVICE( producer ) );
+	}
 
 	// Create the alpha channel
 	int alpha_size = *width * *height;
@@ -218,8 +211,8 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 	memcpy( *buffer, image, size );
 
 	// Now update properties so we free the copy after
-	mlt_properties_set_data( properties, "image", *buffer, size, mlt_pool_release, NULL );
-	mlt_properties_set_data( properties, "alpha", alpha, alpha_size, mlt_pool_release, NULL );
+	mlt_frame_set_image( frame, *buffer, size, mlt_pool_release );
+	mlt_frame_set_alpha( frame, alpha, alpha_size, mlt_pool_release );
 	mlt_properties_set_double( properties, "aspect_ratio", mlt_properties_get_double( producer_props, "aspect_ratio" ) );
 	mlt_properties_set_int( properties, "real_width", *width );
 	mlt_properties_set_int( properties, "real_height", *height );

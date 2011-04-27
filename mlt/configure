@@ -1,7 +1,7 @@
 #!/bin/sh
 
-export version=0.5.10
-export soversion=2
+export version=0.7.0
+export soversion=4
 
 show_help()
 {
@@ -19,6 +19,7 @@ General build options:
   --datadir=directory     - data directory (default: $prefix/share)
   --mandir=directory      - man documentation directory (default: $prefix/share/man)
   --enable-gpl            - Enable GPL components
+  --enable-debug          - Compile without optimizations support (default: off)
   --disable-debug         - Compile without debug support (default: on)
   --disable-mmx           - Compile without MMX support (default: on)
   --disable-sse           - Compile without SSE support (default: on)
@@ -69,34 +70,55 @@ build_config()
 
 		[ "$arch" != "" ] && echo "TARGETARCH=-march=$arch"
 		[ "$cpu" != "" ] && echo "TARGETCPU=-mcpu=$cpu"
-		echo "OPTIMISATIONS=-O2 -pipe -fomit-frame-pointer"
+		[ "$optimisations" = "true" ] &&
+			echo "OPTIMISATIONS=-O2 -pipe -fomit-frame-pointer"
 
-		echo "CFLAGS+=-Wall -fPIC -DPIC \$(TARGETARCH) \$(TARGETCPU) \$(OPTIMISATIONS) \$(MMX_FLAGS) \$(SSE_FLAGS) \$(SSE2_FLAGS) \$(DEBUG_FLAGS) \$(LARGE_FILE)"
+		echo "CFLAGS+=-Wall -DPIC \$(TARGETARCH) \$(TARGETCPU) \$(OPTIMISATIONS) \$(MMX_FLAGS) \$(SSE_FLAGS) \$(SSE2_FLAGS) \$(DEBUG_FLAGS) \$(LARGE_FILE)"
 
 		case $targetos in
 		Darwin)
 		sysctl -a hw | grep "x86_64: 1" > /dev/null && echo "ARCH_X86_64=1" && echo "CFLAGS+=-DARCH_X86_64"
-		echo "CFLAGS+=-D__DARWIN__ `sdl-config --cflags`"
+		echo "CFLAGS+=-fPIC -D__DARWIN__ `sdl-config --cflags`"
 		echo "SHFLAGS=-dynamiclib"
 		echo "LDFLAGS+=`sdl-config --libs`"
 		;;
 		Linux)
 		[ "$(uname -m)" = "x86_64" ] && echo "ARCH_X86_64=1" && echo "CFLAGS+=-DARCH_X86_64"
-		echo "OPTIMISATIONS+=-ffast-math"
-		echo "CFLAGS+=-pthread"
+		[ "$optimisations" = "true" ] &&
+			echo "OPTIMISATIONS+=-ffast-math"
+		echo "CFLAGS+=-fPIC -pthread"
 		echo "SHFLAGS=-shared"
 		echo "LIBDL=-ldl"
 		echo "RDYNAMIC=-rdynamic"
 		echo "LDFLAGS+=-Wl,--no-undefined -Wl,--as-needed"
 		;;
 		FreeBSD)
-		[ "$(uname -m)" = "x86_64" ] && echo "ARCH_X86_64=1" && echo "CFLAGS+=-DARCH_X86_64"
-		echo "OPTIMISATIONS+=-ffast-math"
+		[ "$(uname -m)" = "amd64" -o "$(uname -m)" = "x86_64" ] && echo "ARCH_X86_64=1" && echo "CFLAGS+=-DARCH_X86_64"
+		[ "$optimisations" = "true" ] &&
+			echo "OPTIMISATIONS+=-ffast-math"
+		echo "CFLAGS+=-fPIC -pthread"
+		echo "SHFLAGS=-shared"
+		echo "RDYNAMIC=-rdynamic"
+		echo "LDFLAGS+=-Wl,--no-undefined -Wl,--as-needed"
+		;;
+		NetBSD)
+		[ "$(uname -m)" = "amd64" ] && echo "ARCH_X86_64=1" && echo "CFLAGS+=-DARCH_X86_64"
+		[ "$optimisations" = "true" ] &&
+			echo "OPTIMISATIONS+=-ffast-math"
 		echo "CFLAGS+=-pthread"
 		echo "SHFLAGS=-shared"
 		echo "RDYNAMIC=-rdynamic"
 		echo "LDFLAGS+=-Wl,--no-undefined -Wl,--as-needed"
 		;;
+		MinGW)
+		[ "$(uname -m)" = "x86_64" ] && echo "ARCH_X86_64=1" && echo "CFLAGS+=-DARCH_X86_64"
+		[ "$optimisations" = "true" ] &&
+			echo "OPTIMISATIONS+=-ffast-math"
+		echo "SHFLAGS=-shared"
+		echo "LIBDL=-ldl"
+		echo "RDYNAMIC="
+		echo "LDFLAGS+=-Wl,--no-undefined -Wl,--as-needed"
+		;;		
 		*)
 		;;
 		esac
@@ -155,6 +177,7 @@ export libdir=""
 export datadir=""
 export mandir=""
 export help=0
+export optimisations=true
 export debug=true
 export mmx=true
 export sse=true
@@ -171,8 +194,12 @@ case $targetos in
 	Darwin)
 	LIBSUF=".dylib"
 	;;
-	Linux|FreeBSD)
+	Linux|FreeBSD|NetBSD)
 	LIBSUF=".so"
+	;;
+	MINGW32_NT-*)
+	targetos="MinGW"
+	LIBSUF=".dll"
 	;;
 	*)
 	LIBSUF=".so"
@@ -189,6 +216,7 @@ do
 		--libdir=* )		libdir="${i#--libdir=}" ;;
 		--datadir=* )		datadir="${i#--datadir=}" ;;
 		--mandir=* )		mandir="${i#--mandir=}" ;;
+		--enable-debug )	optimisations=false ;;
 		--disable-debug )	debug=false ;;
 		--disable-mmx )		mmx=false; sse=false; sse2=false ;;
 		--disable-sse )		sse=false; sse2=false ;;

@@ -1,4 +1,1545 @@
+2011-03-27  Dan Dennedy <dan@dennedy.org>
+
+  * Doxyfile, configure, src/framework/mlt_version.h: Set version to 0.7.0
+
+  * NEWS: Add release notes for v0.7.0.
+
+  * src/modules/melt/producer_melt.c: Fix segfault on missing melt argument
+  (3249982).
+
+  * src/modules/avformat/producer_avformat.c: Fix a segfault in avformat with
+  parallel consumer.
+
+  * src/modules/core/transition_composite.c: Fix composite using wrong B frame
+  scaling.  This could happen when the caller of mlt_frame_get_image supplied 0
+  for width and height. For example, Kdenlive's GL output with the sdl_audio
+  consumer with real_time > 1 and paused.
+
+  * docs/melt.1: Fix segfaul on missing melt argument (3249982).
+
+  * src/modules/sdl/consumer_sdl_audio.c: Fix some crashing in sdl_audio.
+
+  * src/modules/sdl/consumer_sdl_audio.c: Also increase audio_buffer default in
+  sdl_audio.
+
+  * src/modules/avformat/configure: Disable VDPAU by default.  Require new
+  --avformat-vdpau to enable it.
+
+  * src/modules/avformat/consumer_avformat.c, src/modules/sox/filter_sox.c,
+  src/modules/xml/producer_xml.c: Use mlt_properties_get_value where possible.
+
+  * src/framework/mlt_playlist.c, src/framework/mlt_producer.c,
+  src/framework/mlt_properties.c, src/framework/mlt_properties.h,
+  src/framework/mlt_tractor.c, src/mlt++/MltProperties.cpp,
+  src/mlt++/MltProperties.h: Add mlt_properties_lock and _unlock.  Fixes some
+  concurrency safetiness problems.
+
+2011-03-24  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/decklink/configure, src/modules/kino/configure,
+  src/modules/linsys/configure: Enable linsys by default on Linux.  Disable
+  linsys and decklink by default on OS X and Windows.
+
+  * src/modules/configure: Display all configure options with --help. 
+  Regardless of --enable-gpl setting.
+
+  * src/modules/avformat/producer_avformat.c: Redo locking in avformat
+  producer.  This significantly improves concurrency. The service locks added
+  during parallel consumer development also introduced a concurrency
+  performance regression even for the single-threaded consumer. The result was
+  much audio discontinuity due to audio output buffer underruns. As a result,
+  the recent bug fix to re-open the video demuxer upon seeking to the first
+  frame had to be rewritten.
+
+2011-03-23  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/avformat/vdpau.c: Fix vdpau crashes when failed to init.
+
+  * src/modules/avformat/vdpau.c: Fix unchecked vdpau pointer.
+
+  * src/modules/sdl/consumer_sdl_preview.c: Default sdl_preview prefill to 1. 
+  Since buffer and prefill were recently passed from sdl_preview onto sdl,
+  sdl's default buffer level changed to the base service default of 25. That
+  change increases the latency of transport controls. Changing the prefill to 1
+  resolves that while still allowing the rendering thread a chance to do some
+  anticipatory work.
+
+  * src/modules/decklink/consumer_decklink.cpp: Fix a comment in decklink
+  consumer.
+
+  * src/framework/mlt_consumer.c, src/modules/decklink/consumer_decklink.cpp:
+  Fix a couple null pointer bugs.
+
+2011-03-22  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/decklink/consumer_decklink.cpp: Improve frame-dropping in
+  decklink.
+
+2011-03-20  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/jackrack/filter_jackrack.c, src/modules/jackrack/plugin.h,
+  src/modules/jackrack/process.c: Fix build of jackrack module on mingw.
+
+2011-03-19  Dan Dennedy <dan@dennedy.org>
+
+  * profiles/atsc_1080p_50, profiles/atsc_1080p_5994, profiles/atsc_1080p_60:
+  Add high frame rate 1080p profiles.
+
+2011-03-17  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/avformat/producer_avformat.c: Fix regression on seeking to
+  first frame with audio_index set.
+
+2011-03-14  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/avformat/producer_avformat.c: Add force_length and
+  adjust_length properties.  The reporter on kdenlive bug 2003 reports another
+  user on IRC had the same problem with clips being too long. Change the
+  default length adjustment to be more safe and add new properties to affect
+  the heuristic for other applications that might want a different behavior.
+  adjust_length applies a plus/minus operand to the detected length.
+  force_length provides a brute force length override.
+
+  * src/modules/avformat/producer_avformat.c: Fix some incorrect frame rates in
+  avformat (kdenlive-1616).
+
+  * src/modules/frei0r/factory.c: Support frei0r transitions that use
+  f0r_update2().
+
+  * configure: Fix amd64 detection on FreeBSD.  Patch from Alberto Villa.
+
+2011-03-13  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/core/filter_crop.c: Add boolean use_profile property to crop
+  filter.  This lets one express crop amounts in pixels relative to profile
+  resolution instead of in terms of source resolution.
+
+  * src/modules/frei0r/blacklist.txt: We do not yet support
+  f0r_param_position_t.
+
+2011-03-12  Ertan Deniz <ertanden@gmail.com>
+
+  * src/framework/mlt_factory.c: Set global variables to NULL in
+  mlt_factory_close  to enable mlt_factory to be initialized and closed
+  multiple times.
+
+2011-03-12  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/avformat/consumer_avformat.c: Prefer opening codec by name
+  instead of by ID.  This fixes a bug with actually using libxvid instead of
+  mpeg4 because both share the same CODEC_ID_MPEG4. This is similar to the
+  recent problem with ac3 selection in new versions of ffmpeg that have 2 ac3
+  encoders.
+
+2011-03-09  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/frei0r/filter_frei0r.c, src/modules/frei0r/frei0r_helper.c,
+  src/modules/frei0r/frei0r_helper.h, src/modules/frei0r/producer_frei0r.c,
+  src/modules/frei0r/transition_frei0r.c: Refactor frei0r and fix time
+  parameter.  Refactored to use mlt_filter_get_position and
+  mlt_transition_get_position. frei0r's time parameter is seconds, but we were
+  passing frame count.
+
+  * src/modules/core/transition_region.c: Fix region transition with more than
+  2 tracks.
+
+  * src/modules/core/transition_region.c, src/modules/plus/transition_affine.c:
+  Refactor to mlt_transition_get_position()
+
+  * src/framework/mlt_transition.c, src/framework/mlt_transition.h,
+  src/mlt++/MltTransition.cpp, src/mlt++/MltTransition.h: Add
+  mlt_transition_get_position()
+
+  * src/modules/core/transition_luma.c: Remove obsolete unique position on
+  frame.
+
+  * src/framework/mlt_transition.c: Use the producer when always active.
+
+  * src/modules/core/filter_luma.c, src/modules/core/filter_watermark.c,
+  src/modules/dgraft/filter_telecide.c, src/modules/kdenlive/filter_freeze.c,
+  .../motion_est/filter_autotrack_rectangle.c,
+  src/modules/motion_est/filter_crop_detect.c,
+  src/modules/oldfilm/filter_vignette.c, src/modules/plus/filter_affine.c,
+  src/modules/vmfx/filter_shape.c: Refactor to mlt_filter_get_position().
+
+2011-03-08  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/core/filter_obscure.c: Refactor to mlt_filter_get_progress().
+
+  * src/framework/mlt_filter.c, src/framework/mlt_transition.c: Use the
+  producer when filter/transition always active.
+
+  * src/framework/mlt_filter.c, src/framework/mlt_filter.h,
+  src/mlt++/MltFilter.cpp, src/mlt++/MltFilter.h: Add
+  mlt_filter_get_position().
+
+2011-03-07  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/core/transition_composite.c,
+  src/modules/core/transition_luma.c: Refactor to
+  mlt_transition_get_progress_delta().
+
+  * src/framework/mlt_transition.c, src/framework/mlt_transition.h,
+  src/mlt++/MltTransition.cpp, src/mlt++/MltTransition.h: Add
+  mlt_transition_get_progress_delta().
+
+  * src/modules/core/transition_luma.c, src/modules/core/transition_mix.c:
+  Refactor to mlt_transition_get_progress().
+
+  * src/framework/mlt_transition.c, src/framework/mlt_transition.h,
+  src/mlt++/MltTransition.cpp, src/mlt++/MltTransition.h: Add
+  mlt_transition_get_progress().
+
+  * src/modules/core/filter_brightness.c, src/modules/core/filter_obscure.c,
+  src/modules/kdenlive/filter_boxblur.c, src/modules/kdenlive/filter_wave.c,
+  src/modules/normalize/filter_volume.c, src/modules/oldfilm/filter_dust.c,
+  src/modules/oldfilm/filter_grain.c, src/modules/oldfilm/filter_lines.c,
+  src/modules/oldfilm/filter_oldfilm.c: Refactor to mlt_filter_get_progress().
+
+  * src/framework/mlt_filter.c, src/framework/mlt_filter.h,
+  src/mlt++/MltFilter.cpp, src/mlt++/MltFilter.h: Add
+  mlt_filter_get_progress().
+
+  * src/modules/plus/transition_affine.c: Refactor to
+  mlt_transition_get_length().
+
+2011-03-10  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/avformat/consumer_avformat.c: Fix regression on AC-3 fix.  The
+  recent AC-3 fix broke automatic codec selection based on format. So, we
+  choose codec by name only for ac3 now.
+
+  * src/modules/swfdec/configure: Fix typo in swfdec configure script.
+
+  * src/modules/swfdec/Makefile, src/modules/swfdec/configure: Add build
+  support for swfdec 0.7.  And prioritize newer versions over older ones.
+
+  * src/modules/resample/filter_resample.c: Increase resample buffer size.  For
+  example, trying to resample 6 channels of 48 KHz would fail.
+
+  * src/modules/resample/filter_resample.c: Remove unnecessary audio conversion
+  to float.
+
+  * src/modules/avformat/producer_avformat.c: Fix audio resample with
+  audio_index=all.  This still only works with channels <= 2. Streams with
+  channels > 2 are resampled downstream with the resample filter. However, that
+  only works when said stream has the highest sample rate.
+
+2011-03-07  Till Theato <root@ttill.de>
+
+  * src/modules/rotoscoping/filter_rotoscoping.c: Rotoscoping: use new API
+  functions to prevent some possible issues.
+
+2011-03-07  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/core/filter_audioconvert.c: Fix regression in audioconvert.
+
+2011-03-06  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/core/transition_composite.c,
+  src/modules/plus/transition_affine.c: Refactor to use
+  mlt_transition_get_length().
+
+  * src/framework/mlt_transition.c, src/framework/mlt_transition.h,
+  src/mlt++/MltTransition.cpp, src/mlt++/MltTransition.h: Add
+  mlt_transition_get_length().
+
+  * src/modules/frei0r/filter_frei0r.c: Refactor to use mlt_frame_get_length().
+
+  * src/modules/normalize/filter_volume.c: Remove unused variable.
+
+  * src/framework/mlt_filter.c, src/framework/mlt_filter.h,
+  src/mlt++/MltFilter.cpp, src/mlt++/MltFilter.h: Add mlt_filter_get_length().
+
+  * src/framework/mlt_playlist.c: Refactor to use mlt_producer_get_playtime().
+
+  * src/modules/core/filter_audioconvert.c, src/modules/core/filter_mono.c,
+  src/modules/core/producer_consumer.c: Refactor to mlt_audio_format_size().
+
+  * src/framework/mlt_frame.c, src/framework/mlt_frame.h: Add
+  mlt_audio_format_size().
+
+  * src/modules/core/producer_noise.c, src/modules/normalize/filter_volume.c:
+  Remove unused variables.
+
+  * src/modules/avformat/filter_avcolour_space.c: Define out this unused code.
+
+  * src/modules/avformat/filter_swscale.c,
+  src/modules/avformat/producer_avformat.c, src/modules/core/filter_crop.c,
+  src/modules/core/filter_resize.c, src/modules/core/producer_colour.c,
+  src/modules/gtk2/filter_rescale.c, src/modules/kdenlive/filter_freeze.c,
+  src/modules/kdenlive/producer_framebuffer.c: Refactor to use
+  mlt_image_format_size().
+
+  * src/framework/mlt_frame.c, src/framework/mlt_frame.h: Add
+  mlt_image_format_size()
+
+  * src/framework/mlt_tractor.c, src/modules/avformat/filter_avcolour_space.c,
+  src/modules/avformat/filter_swscale.c,
+  src/modules/avformat/producer_avformat.c,
+  src/modules/core/filter_audiowave.c, src/modules/core/filter_crop.c,
+  src/modules/core/filter_imageconvert.c, src/modules/core/filter_luma.c,
+  src/modules/core/filter_rescale.c, src/modules/core/filter_resize.c,
+  src/modules/core/filter_watermark.c, src/modules/core/producer_colour.c,
+  src/modules/core/producer_consumer.c, src/modules/core/producer_hold.c,
+  src/modules/core/producer_noise.c, src/modules/core/producer_ppm.c,
+  src/modules/core/transition_composite.c,
+  src/modules/core/transition_region.c, src/modules/dgraft/filter_telecide.c,
+  src/modules/dv/producer_libdv.c, src/modules/frei0r/frei0r_helper.c,
+  src/modules/frei0r/producer_frei0r.c, src/modules/gtk2/filter_rescale.c,
+  src/modules/gtk2/producer_pango.c, src/modules/gtk2/producer_pixbuf.c,
+  src/modules/kdenlive/filter_freeze.c, src/modules/kdenlive/filter_wave.c,
+  src/modules/kdenlive/producer_framebuffer.c,
+  src/modules/motion_est/producer_slowmotion.c,
+  src/modules/plus/filter_affine.c, src/modules/plus/filter_charcoal.c,
+  src/modules/qimage/producer_kdenlivetitle.c,
+  src/modules/qimage/producer_qimage.c, src/modules/sdl/producer_sdl_image.c,
+  src/modules/swfdec/producer_swfdec.c, src/modules/vmfx/producer_pgm.c,
+  src/modules/xine/filter_deinterlace.c: Refactor to use
+  mlt_frame_set_image/_alpha.
+
+  * src/framework/mlt_frame.c, src/framework/mlt_frame.h,
+  src/mlt++/MltFrame.cpp, src/mlt++/MltFrame.h: Add mlt_frame_set_image and
+  mlt_frame_set_alpha.
+
+  * src/framework/mlt_properties.c: Fix spelling error in doxygen.
+
+  * src/framework/mlt_consumer.c: Fix thread cleanup on parallel consumer stop.
+   This was appearing often as a segfault at the end of melt with the avformat
+  consumer.
+
+  * src/modules/gtk2/producer_pango.c, src/modules/gtk2/producer_pixbuf.c:
+  Alias bicubic for hyper in pango and pixbuf.
+
+  * : Add gpl flag file to rotoscoping filter.
+
+  * src/modules/avformat/consumer_avformat.c: Fix AC-3 encoding
+  (kdenlive-2010).  FFmpeg now has separate encoders that take float versus
+  fixed samples.
+
+2011-03-05  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/gtk2/filter_rescale.c: Make 'bicubic' an alias for highest
+  quality in gtk scaler.
+
+  * src/modules/qimage/qimage_wrapper.cpp: Fix handling monochrome in qimage.
+
+2011-03-03  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/core/transition_luma.c: Fix string comparison and requested
+  luma size.
+
+  * src/modules/core/filter_resize.c: Prevent attempt to pad to a smaller size.
+
+  * src/modules/core/transition_luma.c: Fix luma semantics when both reverse
+  and invert.  Previously, when not using a wipe (dissolve), invert would make
+  the transition have no effect. Now, it works and does the same thing as
+  reverse. Also, when using a wipe, reverse had no effect when invert was set,
+  and the desired effect could not be achieved. Now, it works as expected.
+
+  * demo/demo: Set a profile for the demo script.
+
+  * demo/consumers.ini: Drop MainConcept and BlueFish444 from the demo
+  consumers.
+
+  * src/framework/mlt_properties.c: Improve mlt_properties_close() in debugger.
+
+2011-03-02  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/kdenlive/filter_wave.c: Rewrite wave filter to be
+  parallel-safe.  It does this by using mlt_frame_unique_properties(). Also, it
+  fixes a problem not properly processing a source image.
+
+  * src/modules/normalize/filter_volume.c: Refactor volume to use
+  mlt_frame_unique_properties().
+
+  * src/framework/mlt_frame.c, src/framework/mlt_frame.h: Add
+  mlt_frame_unique_properties().
+
+  * src/modules/avformat/consumer_avformat.c,
+  src/modules/avformat/filter_avcolour_space.c,
+  src/modules/avformat/filter_avdeinterlace.c,
+  src/modules/avformat/filter_avresample.c,
+  src/modules/avformat/filter_swscale.c,
+  src/modules/avformat/producer_avformat.c, src/modules/avformat/vdpau.c:
+  Rename 'this' in avformat module.
+
+  * src/modules/frei0r/not_thread_safe.txt: Mark more frei0r filters not
+  thread-safe.
+
+2011-03-01  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/kdenlive/producer_framebuffer.c: Fix deadlock regression in
+  framebuffer producer.
+
+  * src/modules/frei0r/not_thread_safe.txt: Flag some frei0r filters as not
+  thread-safe.
+
+  * src/modules/sdl/consumer_sdl.c: Fix deadlock in sdl_preview.  This would
+  occur when trying to play from a paused state at the end of the project.
+
+2011-03-01  Till Theato <root@ttill.de>
+
+  * src/modules/rotoscoping/filter_rotoscoping.c,
+  src/modules/rotoscoping/filter_rotoscoping.yml: rotoscoping: remove parameter
+  precision. Its influence on speed was very minimal while it caused some
+  crashes. Also update YAML filter description.
+
+2011-02-28  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/core/transition_luma.c: Fix integrity of luma transition when
+  parallel.
+
+  * src/modules/avformat/producer_avformat.c: Workaround incorrect duration on
+  some clips (kdenlive-2003).
+
+  * src/modules/avformat/producer_avformat.c: Fix regression in determination
+  of seekable.
+
+  * src/framework/mlt_consumer.c, src/framework/mlt_deque.c,
+  src/framework/mlt_events.c, src/framework/mlt_factory.c,
+  src/framework/mlt_field.c, src/framework/mlt_filter.c,
+  src/framework/mlt_frame.c, src/framework/mlt_geometry.c,
+  src/framework/mlt_multitrack.c, src/framework/mlt_parser.c,
+  src/framework/mlt_playlist.c, src/framework/mlt_pool.c,
+  src/framework/mlt_producer.c, src/framework/mlt_profile.c,
+  src/framework/mlt_properties.c, src/framework/mlt_property.c,
+  src/framework/mlt_property.h, src/framework/mlt_repository.c,
+  src/framework/mlt_service.c, src/framework/mlt_tokeniser.h,
+  src/framework/mlt_tractor.c, src/framework/mlt_transition.c: Rename this to
+  self in the framework.  This makes doxygen output better match the headers,
+  and it improves life within a code-parsing IDE like Qt Creator.
+
+  * demo/demo.ini: Fixup demo.ini
+
+  * src/framework/mlt_geometry.c: Rename self to g in mlt_geometry.
+
+  * src/modules/avformat/producer_avformat.c: Fix compiler error on older
+  version of libavutil.
+
+2011-02-27  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/avformat/consumer_avformat.c: Fix mlt_consumer_position when
+  encoding audio only.
+
+  * src/modules/avformat/consumer_avformat.c,
+  src/modules/avformat/producer_avformat.c: Add support for FFmpeg AVMetadata
+  API.
+
+  * src/modules/avformat/producer_avformat.c: Fix compiler warning on
+  av_get_pix_fmt().
+
+  * src/modules/avformat/producer_avformat.c: Rewrite seekable check in
+  avformat.  Now, alsa input works: melt -profile dv_pal alsa:default 
+  video4linux with alsa: melt -profile quarter_15 video4linux2:/dev/video1 \
+  -track alsa:default -transition mix  And files over HTTP can handle seeking.
+
+2011-02-27  Till Theato <root@ttill.de>
+
+  * src/modules/rotoscoping/filter_rotoscoping.c: rotoscoping: Add parameters
+  feather and feather_passes. Feathering is done by bluring the map containing
+  the masked area.
+
+2011-02-26  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/frei0r/blacklist.txt: Remove frei0r.facedetect from black list.
+
+  * src/modules/frei0r/not_thread_safe.txt: Mark frei0r.cluster as not
+  thread-safe.
+
+  * src/modules/frei0r/factory.c: Fix small memory leak each a frei0r plugin is
+  instantiated.
+
+2011-02-25  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/avformat/producer_avformat.c: Add support for pix_fmt on
+  avformat resource URL.  For example,
+  libdc1394:/dev/raw1394?frame_rate:15\&pix_fmt:yuv422 makes a Firewire digital
+  camera (not DV camcorder) on Linux work.
+
+  * src/modules/avformat/producer_avformat.c: Add support for avdevice video
+  channel selection.  For example, video4linux2:/dev/video0?channel=2 sets the
+  input to S-
+
+  * setenv: fix setenv
+
+2011-02-24  Dan Dennedy <dan@dennedy.org>
+
+  * src/framework/mlt_transition.c: Support forever transitions (in and out not
+  supplied).
+
+  * src/modules/core/filter_rescale.c: Add 'factor' property to scale filters. 
+  Under certain conditions it can be desirable to manually change the
+  resolution. Caution: one can still not use this in a completely generic way
+  with this change.  For example, in a realtime playout situation, one can
+  attach swscale with factor=0.25, followed by frei0r.cluster, followed by
+  swscale again with no properties. The first swscale will downscale the image
+  for the heavy cluster filter. The last swscale will upscale it to make the
+  rest of the project components happy.
+
+2011-02-20  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/frei0r/Makefile, src/modules/frei0r/factory.c,
+  src/modules/frei0r/frei0r_helper.c, src/modules/frei0r/not_thread_safe.txt:
+  Mark some frei0r plugins as not thread safe.
+
+2011-02-20  Till Theato <root@ttill.de>
+
+  * src/modules/rotoscoping/filter_rotoscoping.c: rotoscoping: number of points
+  can now change from keyframe to keyframe. Result may be unexpected though.
+  Additionally some cleanup
+
+  * src/modules/rotoscoping/filter_rotoscoping.c: rotoscoping: rename mode
+  "matte" to "luma" Additionally prevent serialization of internal parameters
+
+2011-02-19  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/avformat/producer_avformat.c: Fix video4linux in avformat
+  producer.  melt video4linux2:/dev/video0
+
+  * docs/install.txt, docs/mlt-xml.txt, docs/services.txt, setenv: Remove info
+  about mainconcept and bluefish services.
+
+  * src/framework/mlt_producer.c, src/framework/mlt_producer.h,
+  src/modules/core/producer_consumer.c, src/modules/core/producer_hold.c,
+  src/modules/core/producer_noise.c, src/modules/frei0r/factory.c,
+  src/modules/motion_est/producer_slowmotion.c: Add profile parameter to
+  mlt_producer_new.
+
+  * src/framework/mlt_service.c: Check pointer passed to mlt_service_profile.
+
+  * src/modules/core/producer_colour.c: Fix aspect ratio of color producer.
+
+  * configure: Add --enable-debug option.
+
+2011-02-19  j-b-m <jb@kdenlive.org>
+
+  * src/modules/gtk2/producer_pixbuf.c, src/modules/qimage/qimage_wrapper.cpp:
+  Store exif orientation.  Patch attached internally stores the exif
+  orientation so that it can be accessible to the framework and apps using it. 
+  Useful it in Kdenlive to correctly rotate images when creating proxy images.
+
+2011-02-19  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/motion_est/Makefile: Fix lib suffix on motion_est.
+
+2011-02-16  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/sdl/consumer_sdl_audio.c: Disable purging consumer on seek in
+  sdl_audio.  Due to misbehaving on parallel-consumer.
+
+2011-02-16  Till Theato <root@ttill.de>
+
+  * src/modules/rotoscoping/filter_rotoscoping.c: rotoscoping: Use
+  "property-changed" event to find out when to parse the spline
+
+2011-02-13  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/sdl/consumer_sdl.c: Playout remaining frames in sdl at
+  end-of-stream.
+
+  * src/framework/mlt_consumer.c, src/framework/mlt_consumer.h,
+  src/modules/sdl/consumer_sdl_preview.c: Fix deadlocks in sdl_preview with
+  parallel-consumer.
+
+2011-02-08  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/core/transition_composite.c: Fix image skew bug in composite
+  (kdenlive-1923).
+
+  * src/modules/core/transition_luma.c: Fix deinterlace when luma is inverted
+  (kdenlive-1953).
+
+2011-02-07  j-b-m <jb@kdenlive.org>
+
+  * src/modules/plus/transition_affine.c: Make offset in affine transition
+  keyframable.
+
+2011-02-05  Till Theato <root@ttill.de>
+
+  * src/modules/rotoscoping/filter_rotoscoping.c: rotoscoping: fix mode alpha
+  not working with image format rgb24a
+
+2011-02-03  Till Theato <root@ttill.de>
+
+  * src/modules/rotoscoping/filter_rotoscoping.c: rotoscoping: prevent possible
+  crash
+
+2011-01-31  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/core/producer_consumer.c: Copy the alpha channel in
+  producer_consumer.
+
+2011-01-30  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/avformat/consumer_avformat.c: Improve efficiency of memory copy
+  in avformat consumer.  Patch from Paul Flinders <paul@flinders.org>.
+
+  * src/modules/avformat/producer_avformat.c: Be pessimistic about the duration
+  (kdenlive-1962).  Some clip formats give a slightly longer duration estimate,
+  and MLT does not handle that well especially in some non-interactive use
+  cases like transcoding and automated processing.
+
+2011-01-27  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/gtk2/Makefile: Link pango producer with libiconv on Mac OS X.
+
+2011-01-27  Till Theato <root@ttill.de>
+
+  * src/modules/rotoscoping/Makefile, src/modules/rotoscoping/factory.c,
+  src/modules/rotoscoping/filter_rotoscoping.c,
+  src/modules/rotoscoping/filter_rotoscoping.yml: Rotoscoping: Set default mode
+  to alpha and add YAML filter description
+
+2011-01-26  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/avformat/producer_avformat.c: Do not round up the duration
+  (kdenlive-1962).
+
+  * src/modules/avformat/producer_avformat.c: Fix pausing on vdpau with
+  noimagecache.  Also uses AVFrame we already have instead of local AVPicture.
+
+  * src/modules/avformat/producer_avformat.c: Make seeking to first frame more
+  reliable.
+
+2011-01-25  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/sdl/consumer_sdl.c: Increase default SDL audio buffer to
+  prevent crackling.
+
+  * src/framework/mlt_consumer.c: Make worker thread handle tracking more
+  portable.
+
+2011-01-25  Till Theato <root@ttill.de>
+
+  * src/modules/rotoscoping/filter_rotoscoping.c: Rotoscoping: another small
+  cleanup
+
+  * src/modules/rotoscoping/filter_rotoscoping.c: Rotoscoping: cleanup
+
+  * src/modules/rotoscoping/filter_rotoscoping.c: Rotoscoping: Mode matte
+  should also work in yuv420p (untested since forcing a conversion from yuv422
+  does not work)
+
+  * src/modules/rotoscoping/filter_rotoscoping.c: Rotoscoping: only the mode
+  rgb requires a specific colorspace
+
+2011-01-24  Till Theato <root@ttill.de>
+
+  * src/modules/rotoscoping/filter_rotoscoping.c: Rotoscoping: Save the the
+  json object so we do not have to parse the parameter at every processing but
+  only when it changed
+
+  * src/modules/rotoscoping/filter_rotoscoping.c: Rotoscoping: use mlt_pool
+
+  * src/modules/rotoscoping/filter_rotoscoping.c: Rotoscoping: rename "mask"
+  mode to "matte"
+
+2010-11-23  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/plus/filter_affine.c: Reduce service lock contention in affine
+  filter.
+
+  * src/modules/frei0r/filter_frei0r.c, src/modules/frei0r/frei0r_helper.c,
+  src/modules/frei0r/frei0r_helper.h, src/modules/frei0r/producer_frei0r.c,
+  src/modules/frei0r/transition_frei0r.c: Reduce service lock contention in
+  frei0r module.
+
+2010-11-04  Dan Dennedy <dan@dennedy.org>
+
+  * src/framework/mlt_consumer.c: Fix race condition on frame pointer in
+  parallel consumer.
+
+2010-10-17  Dan Dennedy <dan@dennedy.org>
+
+  * src/framework/mlt_consumer.c: Fix multiple workers getting the same frame.
+
+2010-10-04  Dan Dennedy <dan@dennedy.org>
+
+  * src/framework/mlt_consumer.c, src/framework/mlt_consumer.h,
+  src/framework/mlt_frame.h: Use a single queue for parallel workers.  This is
+  a major change from the previous model of moving work items (frames) from one
+  queue to another. This new model improves the behavior of realtime mode and
+  performance overall. In the new model, a single queue is used along with an
+  is_processed flag on the frame. Also, there is an index into the queue
+  (process_head) that indicates from which point should a worker consider
+  fetching the next unprocessed frame.  There are situations in realtime mode
+  where the processing of a frame takes longer than the queue (or from head to
+  its fetch index). Over extended periods of this heavy processing, the video
+  frame in the consumer may never be updated (rendered=1)! To remedy this, the
+  consumer detects this and automatically moves the process_head towards the
+  tail, but even this may not be good enough. The only real remedy is to
+  increase buffers and suffer with poor latency. If lower latency is preferred,
+  then it may be better to not use realtime mode and permit audio
+  discontinuity.
+
+  * src/framework/mlt_types.h: Add a MLT_FRAME() cast.  And white-space align
+  the casts.
+
+  * src/framework/mlt_deque.c, src/framework/mlt_deque.h: Add mlt_deque_peek()
+  with index.
+
+2010-06-15  Dan Dennedy <dan@dennedy.org>
+
+  * src/framework/mlt_consumer.c: Remove audio processing from the worker
+  threads.  This has a bad interaction with the avformat producer, which
+  contains a buffer of unused decoded samples. This shifts audio processing to
+  the main consumer thread, which is often light anyways. I recommend to set
+  the threads property to 2 or more on the avformat consumer to offload video
+  encoding to separate threads from the audio processing and encoding.
+
+  * src/modules/xine/filter_deinterlace.c: Make YADIF reentrant.
+
+  * src/framework/mlt_consumer.c: Fix regression frames out-of-order.
+
+  * src/framework/mlt_consumer.c: Fix compiler warning on this enum.
+
+2010-06-14  Dan Dennedy <dan@dennedy.org>
+
+  * src/framework/mlt_consumer.c: Change this log message back to debug level.
+
+  * src/framework/mlt_consumer.c, src/framework/mlt_frame.c,
+  src/framework/mlt_tractor.c, src/modules/core/filter_imageconvert.c,
+  src/modules/sdl/consumer_sdl.c: Fix image format consistency and conversion.
+
+2010-06-11  Dan Dennedy <dan@dennedy.org>
+
+  * src/framework/mlt_consumer.c, src/framework/mlt_tractor.c: Remove the
+  tractor service locking.  This completely inhibited parallelism, but removing
+  it also exposes more race conditions that require resolution.
+
+  * src/framework/mlt_consumer.c: Add work queue to the parallel consumer. 
+  This removes get_frame calls from the worker threads. The get_frame call must
+  take a service lock and that creates contention between the threads.
+
+  * src/modules/xine/filter_deinterlace.c: Add service locks around yadif
+  context.
+
+2010-04-15  Dan Dennedy <dan@dennedy.org>
+
+  * src/framework/mlt_consumer.c: Change this log message to debug level.
+
+2010-03-04  Dan Dennedy <dan@dennedy.org>
+
+  * .../motion_est/filter_autotrack_rectangle.c,
+  src/modules/motion_est/filter_crop_detect.c,
+  src/modules/motion_est/filter_motion_est.c,
+  src/modules/normalize/filter_volume.c, src/modules/oldfilm/filter_dust.c,
+  src/modules/oldfilm/filter_lines.c, src/modules/plus/filter_affine.c,
+  src/modules/plus/transition_affine.c,
+  src/modules/qimage/producer_kdenlivetitle.c,
+  src/modules/qimage/producer_qimage.c, src/modules/sox/filter_sox.c,
+  src/modules/vorbis/producer_vorbis.c: Add service locks for parallelism.
+
+  * src/modules/sdl/consumer_sdl_preview.c: Pass real_time, buffer, and prefill
+  properties onto normal sdl consumer.
+
+  * src/modules/sdl/consumer_sdl.c: Log dropped frames at info log level.
+
+  * src/modules/avformat/filter_avresample.c,
+  src/modules/avformat/filter_swscale.c,
+  src/modules/avformat/producer_avformat.c,
+  src/modules/core/filter_data_show.c, src/modules/core/filter_luma.c,
+  src/modules/core/filter_watermark.c, src/modules/core/producer_colour.c,
+  src/modules/core/transition_composite.c, src/modules/core/transition_luma.c,
+  src/modules/core/transition_region.c, src/modules/effectv/filter_burn.c,
+  src/modules/frei0r/filter_frei0r.c, src/modules/frei0r/producer_frei0r.c,
+  src/modules/frei0r/transition_frei0r.c, src/modules/gtk2/producer_pango.c,
+  src/modules/gtk2/producer_pixbuf.c, src/modules/kdenlive/filter_freeze.c,
+  src/modules/kdenlive/producer_framebuffer.c,
+  src/modules/resample/filter_resample.c: Add service locks for parallelism. 
+  RGB filters and transitions from frei0r and burningtv are still not safe
+  enough.
+
+  * src/framework/mlt_tractor.c: Set the proper size of "image" where known.
+
+  * src/framework/mlt_consumer.c, src/framework/mlt_consumer.h: Add parallelism
+  to mlt_consumer.  To use set real_time greater than 1 for frame-dropping or
+  less than -1 for no frame-dropping. It works better with a liberal buffer
+  size. You can still set prefill less than buffer size, but it must be at
+  least the same number as real_time, preferably a little higher to help with
+  frame ordering.
+
+2010-02-20  Dan Dennedy <dan@dennedy.org>
+
+  * src/framework/mlt_deque.c, src/framework/mlt_deque.h: Add
+  mlt_deque_insert().
+
+2010-02-16  Dan Dennedy <dan@dennedy.org>
+
+  * src/framework/mlt_consumer.c, src/framework/mlt_consumer.h: Qualify queue,
+  mutex, and cond vars with frame_queue_.
+
+2011-01-23  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/qimage/producer_qimage.c: Fix build outside MinGW.
+
+  * src/modules/jackrack/configure: Fix getting LADSPA include dir from
+  listplugins.
+
+  * configure, src/framework/mlt_version.h: Move to an interim version number.
+
+2011-01-17  Dan Dennedy <dan@dennedy.org>
+
+  * src/examples/Makefile: Make this example use the mlt++ pkg-config.  This
+  more accurately demonstrates how to build a C++ app against mlt++.
+
+  * src/modules/sdl/consumer_sdl.c, src/modules/sdl/consumer_sdl_still.c: SDL
+  tweaks for Windows discovered when embedded.
+
+  * src/framework/Makefile, src/mlt++/Makefile, src/mlt++/config.h: On Windows
+  install .def and version-less DLLs to let apps build against us.
+
+  * src/framework/mlt_factory.c, src/modules/avformat/configure,
+  src/modules/frei0r/factory.c, src/modules/jackrack/plugin_mgr.c: On Windows
+  locate plugins and data by directory relative to current directory.  lib\mlt
+  lib\frei0r-1 lib\ladspa share\mlt share\ffmpeg
+
+2010-12-31  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/swfdec/Makefile: Fix swfdec build on MinGW.
+
+  * src/modules/xml/consumer_xml.c, src/modules/xml/producer_xml.c: Cleanup
+  libxml changes for MinGW.
+
+  * src/modules/jackrack/configure, src/modules/jackrack/jack_rack.c: Fix
+  JackRack build on MinGW.
+
+  * src/modules/qimage/Makefile, src/modules/qimage/configure,
+  src/modules/qimage/producer_qimage.c, src/modules/qimage/qimage_wrapper.cpp,
+  src/modules/qimage/qimage_wrapper.h: Fix qimage build for MinGW.
+
+2010-12-30  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/sox/configure: Fix sox build on MinGW.
+
+  * src/modules/frei0r/factory.c: Fix frei0r build on MinGW.
+
+  * src/modules/xml/consumer_xml.c, src/modules/xml/producer_xml.c: Fix libxml2
+  build on MinGW.
+
+  * src/modules/gtk2/Makefile, src/modules/gtk2/consumer_gtk2.c,
+  src/modules/gtk2/producer_pixbuf.c: Fix gtk2 build on mingw.
+
+2010-12-15  Dan Dennedy <dan@dennedy.org>
+
+  * src/melt/Makefile, src/melt/io.c, src/melt/melt.c,
+  src/modules/sdl/consumer_sdl.c: Fix SDL and keyboard input on Win32.
+
+2010-12-05  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/sdl/Makefile: Fix build of mingw branch on Linux.  Fixing this
+  here prior to merging into master.
+
+2010-12-03  Dan Dennedy <dan@dennedy.org>
+
+  * configure, src/framework/Makefile, src/melt/Makefile, src/melt/io.c,
+  src/mlt++/Makefile, src/mlt++/MltFactory.cpp, src/mlt++/MltFactory.h,
+  src/mlt++/config.h, src/mlt++/configure, src/modules/avformat/Makefile,
+  src/modules/core/Makefile, src/modules/core/producer_loader.c,
+  src/modules/kino/configure, src/modules/motion_est/Makefile,
+  src/modules/sdl/Makefile, src/modules/sdl/consumer_sdl.c,
+  src/modules/sdl/consumer_sdl_audio.c, src/modules/sdl/consumer_sdl_preview.c,
+  src/modules/sdl/consumer_sdl_still.c, src/win32/fnmatch.c,
+  src/win32/fnmatch.h, src/win32/win32.c: Initial port to Windows using MinGW. 
+  Much of the credit goes to Michael Zenov.
+
+2011-01-23  Dan Dennedy <dan@dennedy.org>
+
+  * ChangeLog: Update ChangeLog for v0.6.2.
+
+  * Doxyfile, configure, docs/melt.1, src/framework/mlt_version.h: Set version
+  to 0.6.2.
+
+  * NEWS: Add v0.6.2 release notes.
+
+2011-01-22  Till Theato <root@ttill.de>
+
+  * src/modules/rotoscoping/filter_rotoscoping.c: Rotoscoping: add parameter
+  alpha_operation with possible values: clear, max, min, add, sub
+
+  * src/modules/rotoscoping/filter_rotoscoping.c: Fix not every point
+  calculated for the spline was used
+
+2011-01-21  Till Theato <root@ttill.de>
+
+  * src/modules/rotoscoping/filter_rotoscoping.c: Rotoscoping: - Rename
+  parameter polygon to spline - Add parameter precision setting the maximum
+  distance between two points when calculating the spline - some cleanup
+
+2011-01-20  Till Theato <root@ttill.de>
+
+  * src/modules/rotoscoping/filter_rotoscoping.c: Rotoscoping: Use cubic Bezier
+  spline instead of simple polygon to define masks
+
+2011-01-16  j-b-m <jb@kdenlive.org>
+
+  * src/modules/plus/transition_affine.c: Add always_active property to affine
+  transition.
+
+2011-01-16  Till Theato <root@ttill.de>
+
+  * src/modules/rotoscoping/filter_rotoscoping.c: Rotoscoping: Add parameter
+  invert
+
+  * src/modules/rotoscoping/Makefile, src/modules/rotoscoping/cJSON.c,
+  src/modules/rotoscoping/cJSON.h,
+  src/modules/rotoscoping/filter_rotoscoping.c: Rotoscoping: Add support for
+  simple keyframes - current limits: - number of points has to be equal for all
+  keyframes - points have to be in "correct" order (1. point in 1. kf will be
+  moved to 1. point in 2. kf, ...) - the parameter "polygon" is now formated
+  using json: - no keyframes: polygon="[[x,y], [x,y], ...]" - keyframes:
+  polygon= '{ "framepos1" : [[x,y], [x,y], ...], "framepos2" : [[x,y], [x,y],
+  ...], ...}'
+
+2011-01-15  Till Theato <root@ttill.de>
+
+  * src/modules/rotoscoping/filter_rotoscoping.c: rotoscoping filter: add modes
+  - rgb (everything but polygon black, default) - alpha (polygon alpha value =
+  255, the rest = 0) - mask (polygon white, the rest black)
+
+  * src/modules/rotoscoping/Makefile, src/modules/rotoscoping/factory.c,
+  src/modules/rotoscoping/filter_rotoscoping.c: Add rotoscoping filter (WIP):
+  It hides everything not in the polygon defined by the vertices given through
+  the "polygon" parameter
+
+2011-01-11  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/plus/transition_affine.c: fix compiler warning
+
+  * configure, src/mlt++/configure, src/modules/avformat/configure,
+  src/modules/kino/endian_types.h, src/modules/kino/riff.cc,
+  src/modules/qimage/configure, src/modules/sox/configure: Enable build on
+  NetBSD (3090684)
+
+  * src/modules/kino/Makefile, src/modules/qimage/Makefile: Use CXX rather than
+  CC for linking C++ (3090682)
+
+  * src/swig/python/build: Fix underlinking python binding (3082761).  Link the
+  python binding library to MLT and Python needed on some systems like
+  OpenSUSE.  Patch by Cristian Morales Vega
+
+  * src/modules/sdl/consumer_sdl_audio.c,
+  src/modules/sdl/consumer_sdl_preview.c: Fix undefined bahavior in SDL module
+  (3066195).  The standard says the post-increment can have effect at any point
+  between the previous and the next sequence point (or something similar), so
+  the behavior of "this->refresh_count = this->refresh_count ++" is undefined. 
+  Patch by Cristian Morales Vega
+
+  * src/modules/plus/filter_affine.c: Add use_normalised to affine filter.
+
+  * src/modules/plus/transition_affine.c: Fix some regressions in affine. 
+  Crashing on null rescale.interp and still some incorrect handling of sample
+  aspect ratios.
+
+2011-01-10  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/plus/interp.h, src/modules/plus/transition_affine.c: Add
+  geometry opacity interpretation to affine.  Also, fixes interpolation method
+  selection and removes a redundant bounds test.
+
+2011-01-10  j-b-m <jb@kdenlive.org>
+
+  * src/modules/gtk2/producer_pixbuf.c, src/modules/qimage/producer_qimage.c:
+  Add force_aspect_ratio to image producers.
+
+2011-01-10  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/linsys/20-linsys.rules: Remove NAME= from linsys udev rules.
+
+  * configure, src/framework/mlt_version.h: Move to an interim version.
+
+2011-01-01  Dan Dennedy <dan@dennedy.org>
+
+  * ChangeLog: update ChangeLog for v0.6.0
+
+  * NEWS: Add v0.6.0 release notes.
+
+  * Doxyfile, configure, docs/melt.1, src/framework/mlt_version.h: set version
+  to 0.6.0
+
+  * src/modules/avformat/configure: Set recommended FFmpeg version to 0.6.1.
+
+  * src/melt/melt.c: Update year in copyright notice.
+
+  * src/modules/core/transition_composite.c: Default to progressive rendering
+  in composite.  Field-based rendering is not sensitive to whether the
+  composite has motion and therefore produces ugly results for static things by
+  default. Field-based rendering can be explicitly requested on an animated
+  composite by setting the progressive property to 0.
+
+  * src/modules/feeds/NTSC/etv.properties: Scale the animation durations in
+  NTSC etv data feed.
+
+  * src/modules/feeds/NTSC/etv.properties,
+  src/modules/feeds/PAL/etv.properties: Make etv data feeds same and scalable
+  between NTSC and PAL.
+
+  * src/melt/melt.c: Treat profile set by environment variable as explicit.
+
+  * demo/mlt_attributes, src/modules/feeds/NTSC/data_fx.properties,
+  src/modules/feeds/NTSC/etv.properties: Make feeds consistent between NTSC and
+  PAL.  Fix mlt_attributes demo.
+
+  * src/melt/melt.c: Fix melt crashing due to many things depending on
+  consumer_aspect_ratio.
+
+  * src/modules/core/consumer_null.c: Fix segfault stopping unstarted null
+  consumer.
+
+  * src/modules/avformat/consumer_avformat.c: Increase video encoder output
+  buffer size.
+
+  * demo/README, demo/mlt_slideshow, demo/mlt_slideshow_black: Convert
+  "Scotland" in demos to "photos"
+
+  * demo/svg.mlt, src/modules/xml/producer_xml.c: Fix parsing mixed XML
+  documents and svg.mlt example.
+
+2010-12-29  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/avformat/consumer_avformat.c: Fix an infinite loop encoding a
+  video with vorbis audio (kdenlive-1871).
+
+2010-12-27  Dan Dennedy <dan@dennedy.org>
+
+  * src/mlt++/MltProducer.cpp, src/mlt++/MltProducer.h: Revert
+  Producer::set_speed and add Producer::pause.  The new Producer::pause
+  contains the wait for consumer-sdl-paused.
+
+2010-12-23  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/swfdec/producer_swfdec.c: Prevent concurrent access to swfdec
+  context.
+
+  * src/modules/swfdec/producer_swfdec.c: Add meta.media properties to swfdec.
+
+2010-12-22  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/plus/transition_affine.c: Fix shearing bug in affine transition
+  & filter.
+
+  * src/framework/mlt_frame.c, src/framework/mlt_frame.h: Add
+  mlt_frame_write_ppm to visualize debugging.
+
+2010-12-21  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/decklink/Makefile: Fix build of decklink on some non-Linux
+  systems (BSD).
+
+2010-12-19  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/sdl/consumer_sdl.c, src/modules/sdl/consumer_sdl_preview.c:
+  Increase the speed of switching between sdl_still and sdl.  Based on patch
+  from Jonathan Thomas.  It does this by not calling the SDL_InitSubSystem(
+  SDL_INIT_AUDIO ) and SDL_QuitSubSystem( SDL_INIT_AUDIO ) methods every time
+  it switches, but rather when the SDL Preview consumer is started and stopped.
+
+2010-12-16  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/decklink/consumer_decklink.cpp: Fix cleaning up decklink when
+  stopped.
+
+  * src/mlt++/MltProducer.cpp: Fix regression in Producer::set_speed when
+  consumer stopped.  This was causing a deadlock in Kdenlive and any app that
+  calls set_speed when the consumer is stopped.
+
+  * src/modules/sdl/consumer_sdl_still.c: Fix race-induced intermittent crash
+  in sdl_still (kdenlive-1762).
+
+  * src/framework/Makefile, src/framework/mlt.h, src/framework/mlt_version.c,
+  src/framework/mlt_version.h, src/swig/mlt.i: Add mlt_version API. 
+  Contributed by Jonathan Thomas.
+
+2010-12-15  Dan Dennedy <dan@dennedy.org>
+
+  * src/mlt++/MltProducer.cpp: Fix regression on return value of
+  Producer::set_speed.
+
+  * src/mlt++/MltProducer.cpp, src/modules/sdl/consumer_sdl_preview.c:
+  Synchronize Producer.set_speed(0) with sdl_preview.  This also helps prevent
+  deadlock while waiting for consumer-sdl-paused event. Not 100% yet, but 100%
+  requires script (swig) apps to handle the event asynchronously via an event
+  listener, which is not available yet for most - only ruby. Furthermore, they
+  would really like to be able to pass opaque data to the asynchronous handler,
+  which is not yet available in the framework.  A good example here is pausing
+  playback prior to seeking to a specific frame. The app should be able to make
+  a consumer-paused event handler to which it can pass the new position, so it
+  can properly seek after the pause has officially occurred. Without the
+  ability to pass opaque data, it must save the new position as an instance
+  variable to use within the handler - once it has support for event listeners
+  that is.
+
+  * src/modules/sdl/consumer_sdl_preview.c: Prevent a possible deadlock when
+  pausing.
+
+2010-12-12  j-b-m <jb@kdenlive.org>
+
+  * src/modules/kdenlive/filter_freeze.c: Prevent always fetching the "frozen"
+  frame.  Instead of using cache, which causes flicker in previews.
+
+2010-12-12  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/sdl/consumer_sdl_preview.c: Fix crash when connecting the
+  sdl_preview to a new producer.  This occurs when you do not first stop the
+  consumer.
+
+2010-12-11  Dan Dennedy <dan@dennedy.org>
+
+  * src/melt/melt.c: Make melt handle failure to start consumer.
+
+  * src/modules/decklink/consumer_decklink.cpp: Fix tearing in decklink.  Also:
+  Adds a "preroll" property, which takes number of video frames. Prevent it
+  from deadlocking on a few dropped video frames in succession. Signal failure
+  to start when the profile is not compatible.
+
+2010-12-09  Dan Dennedy <dan@dennedy.org>
+
+  * src/mlt++/MltProperties.cpp, src/mlt++/MltProperties.h: Added
+  Mlt::Properties::wait_for(string).
+
+  * src/swig/mlt.i: Fix memory leak in swig on Properties::setup_wait_for.
+
+  * src/modules/linsys/consumer_SDIstream.c: Remove exit() from Linsys sdi
+  consumer.  Replace it with a consumer-fatal-error event.
+
+  * src/framework/mlt_log.c, src/melt/melt.c,
+  src/modules/avformat/consumer_avformat.c: Add consumer-fatal-error event to
+  avformat consumer.  This addresses Kdenlive bug 1894. When the avformat
+  consumer has a fatal error, it will fire an event. Melt intercepts the event
+  and exits with failure.
+
+2010-12-08  Dan Dennedy <dan@dennedy.org>
+
+  * configure, src/framework/mlt_consumer.c, src/framework/mlt_consumer.h,
+  src/framework/mlt_types.h, src/melt/melt.c, src/mlt++/MltConsumer.cpp,
+  src/mlt++/MltConsumer.h: Add mlt_consumer_position (Mlt::Consumer::position).
+
+  * src/modules/sdl/consumer_sdl_preview.c: A minor refactoring.
+
+  * src/modules/sdl/consumer_sdl_preview.c: Add a consumer-sdl-paused event.
+
+  * src/modules/sdl/consumer_sdl_preview.c: Refactor end-of-stream and speed
+  change.
+
+2010-11-30  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/core/loader.dict: Load .xml file as MLT XML.
+
+  * demo/mlt_swf_variables, demo/txtField.swf: Add example of using SWF with
+  variables.
+
+  * src/modules/lumas/configure: Make --luma-compress imply --luma-8bit. 
+  Otherwise, we get unloadable 16-bit PNG.
+
+2010-11-29  Dan Dennedy <dan@dennedy.org>
+
+  * src/swig/python/codecs.py: Add example of how to list of codecs.
+
+  * src/modules/avformat/consumer_avformat.c: Make the formats and codecs
+  available through properties.
+
+  * src/modules/avformat/producer_avformat.c: Fix reading uncompressed video
+  (bug 3121436).
+
+  * src/modules/avformat/vdpau.c: Make VDPAU decoding a tad more resilient.
+
+2010-11-26  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/swfdec/producer_swfdec.c: Add support for swfdec variables. 
+  The new 'variables' property takes a URL-encoded string, e.g.
+  variables="title=Hello World&subtitle=swfdec variables".
+
+2010-11-23  Dan Dennedy <dan@dennedy.org>
+
+  * src/melt/melt.c: Fix AVCHD detected as double frame rate.  The heuristic is
+  based upon fact that there is really no such thing as 50 or 59.94 _frames_
+  per second interlaced.
+
+2010-11-20  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/linsys/20-linsys.rules: Add suggested udev rules for Linsys
+  cards.
+
+2010-11-19  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/plus/transition_affine.c: Fix affine on non-square pixels
+  (kdenlive-1880).
+
+2010-11-17  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/swfdec/producer_swfdec.c: Refactor image conversion in swfdec.
+
+  * src/modules/frei0r/frei0r_helper.c: Add support for
+  F0R_COLOR_MODEL_BGRA8888
+
+2010-11-17  Till Theato <root@ttill.de>
+
+  * src/modules/gtk2/producer_pango.c: Fix crash in pango on very long strings.
+   Fix frame width and height get -1 when using producer pango with long
+  strings (large text files).
+
+2010-11-14  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/sdl/consumer_sdl.c: Fix the size argument handling.
+
+2010-11-09  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/avformat/consumer_avformat.c: Add locks around
+  avcodec_open/_close for thread protection.
+
+  * src/modules/avformat/producer_avformat.c: Fix regression on 1920x1088
+  clips.
+
+2010-11-07  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/swfdec/configure: Add configure script to detect optional
+  swfdec dependency.
+
+  * src/modules/swfdec/Makefile: Support build on swfdec 0.8 as well.
+
+  * src/modules/core/loader.dict, src/modules/swfdec/Makefile,
+  src/modules/swfdec/producer_swfdec.c: Add swfdec producer.  No audio or
+  variables/parameters yet.
+
+2010-11-06  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/decklink/DeckLinkAPI.h,
+  src/modules/decklink/DeckLinkAPIDispatch.cpp,
+  src/modules/decklink/LinuxCOM.h, src/modules/decklink/Makefile,
+  src/modules/decklink/consumer_decklink.cpp: Add Blackmagic Design DeckLink
+  consumer.
+
+2010-10-27  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/plus/transition_affine.c: Another apsect ratio fix in affine.
+
+  * src/modules/plus/transition_affine.c: Fix aspect- and size-related issues
+  in affine.
+
+2010-10-21  Dan Dennedy <dan@dennedy.org>
+
+  * src/melt/melt.c: Fix edit points when using auto-profile.
+
+  * src/modules/avformat/producer_avformat.c: Fix frame rate detection when the
+  muxer rate is 0/0.
+
+2010-10-20  Dan Dennedy <dan@dennedy.org>
+
+  * src/framework/mlt_tokeniser.c, src/modules/frei0r/frei0r_helper.c: Add
+  support for frei0r string parameter.
+
+  * src/modules/avformat/filter_avcolour_space.c: Disable colorspace
+  normalization - not working yet.
+
+2010-10-18  Dan Dennedy <dan@dennedy.org>
+
+  * src/framework/mlt_property.c: Fkx crash converting string property with
+  null value.
+
+2010-10-17  j-b-m <jb@kdenlive.org>
+
+  * src/modules/qimage/kdenlivetitle_wrapper.cpp,
+  src/modules/qimage/producer_kdenlivetitle.c: Fix serializing xmldata in
+  kdenlivetitle (kdenlive-1841).  Patch below fixes an issue with the
+  kdenlivetitle producer. Basically, the problem was that when loading a
+  kdenlivetitle from a file, all the properties were serialized and passed to
+  the xml consumer.  The problem became more obvious with the "embeded" images
+  in titles, which then caused images to be embedded inside the kdenlive
+  project file, causing problems like reported in this issue: 
+  http://kdenlive.org/mantis/view.php?id=1841  With the patch, titles loaded
+  from a file will not copy the xmldata.
+
+2010-10-17  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/sdl/consumer_sdl.c, src/modules/sdl/consumer_sdl_audio.c,
+  src/modules/sdl/consumer_sdl_preview.c, src/modules/sdl/consumer_sdl_still.c:
+  Fix including SDL headers (3087522).
+
+2010-10-13  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/xml/consumer_xml.c: Do not serialize profile when consumer
+  profile is null.
+
+  * src/modules/avformat/producer_avformat.c: Fix regression using codec frame
+  rate.
+
+  * src/modules/xml/consumer_xml.c: Add null pointer checks around profile in
+  consumer xml.
+
+  * src/melt/melt.c, src/modules/avformat/producer_avformat.c: Add colorspace
+  to auto-profile.
+
+  * src/modules/xml/consumer_xml.c, src/modules/xml/producer_xml.c:
+  (De)serialize colorspace in profile.
+
+  * src/modules/avformat/consumer_avformat.c,
+  src/modules/avformat/producer_avformat.c: Fix version support for
+  AVCodec:colorspace.
+
+  * src/modules/avformat/configure: Add --avformat-no-vdpau configure option.
+
+  * src/modules/core/filter_data_show.c: Add math header for lrint().
+
+  * src/modules/core/filter_data_show.c: Add #frame# variable substitution in
+  data_show filter.
+
+  * src/modules/core/filter_data_show.c: Fix timecode conversion with
+  non-integral framerate.
+
+2010-10-10  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/core/producer_consumer.c: Fix consumer producer not updating
+  frames in Kdenlive.
+
+2010-10-09  Dan Dennedy <dan@dennedy.org>
+
+  * src/melt/melt.c: Handle consumer properties that alter the profile.
+
+  * src/modules/core/producer_loader.c: Check for colorspace change on profile.
+
+2010-10-07  Dan Dennedy <dan@dennedy.org>
+
+  * src/melt/melt.c, src/modules/core/producer_consumer.c,
+  src/modules/core/producer_loader.c, src/modules/melt/producer_melt.c,
+  src/modules/xml/producer_xml.c: Move logic for when to auto-insert consumer
+  producer.  Move it into the loader producer so apps other than melt can use
+  it too. To use it, an app must set the profile to explicit.
+
+  * src/framework/mlt_profile.c, src/framework/mlt_profile.h: Add
+  mlt_profile_clone().
+
+2010-09-26  Dan Dennedy <dan@dennedy.org>
+
+  * src/melt/melt.c: Use denominators as the litmus test for generating
+  profile.  This allows converting all producers to meta.media.width and
+  meta.media.height while not attempting to auto-profile the image producers,
+  which can potentially hold extremely large images and do not contain any
+  inherent frame rate. This also protects from potential divide by zero errors.
+
+  * src/melt/melt.c: Factor out usage help from main() processing.
+
+  * src/melt/melt.c: Factor out processing -consumer option.
+
+2010-09-19  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/avformat/producer_avformat.c: Fix some framerate-related issues
+  on playback.  Usage of stream->avg_frame_rate and seting aspect_ratio on
+  fallback.
+
+  * src/melt/melt.c: Fix crash on invalid and audio only clips.
+
+  * src/modules/avformat/producer_avformat.c: Improve some media attributes
+  detection.  These are for the new meta.media properties: square pixel
+  fallback, use new avg_frame_rate, converting 1088 to 1080.
+
+2010-08-28  Dan Dennedy <dan@dennedy.org>
+
+  * src/melt/melt.c, src/modules/melt/producer_melt.c: Add an automatic profile
+  feature to melt.  Here are the main use cases this feature provides: - Given
+  a regular (non-mlt-xml) media file, melt reads the media attributes and
+  generates an equivalent MLT profile. This makes it easier to transcode
+  without changing or specifying resolution, aspect, and framerate. - Given a
+  MLT XML file containing a profile attribute or element, melt loads the
+  specified profile. A composition typically contains profile- without you
+  having to remember. - Given a MLT XML containing a profile but also
+  specifying a -profile option, melt automatically uses the 'consumer' producer
+  with the requested profiles. This is similar to the above case, but when
+  explicitly choosing a profile different than the composition one should use
+  the consumer producer. This just makes melt smarter and more automatic.
+
+  * src/modules/avformat/producer_avformat.c: Add immutable meta.media-prefixed
+  properties.  I am deprecating real_width, real_height, and source_fps in
+  favor of new properties prefixed by "meta.media." These are different than
+  the "meta.media.N.stream" and "meta.media.N.codec" properties because they
+  represent the selected tracks as well as some interpretation of the raw
+  AVFormat and AVCodec attributes in addition to reflecting "force_" overrides.
+  There is still many changes to make throughout to full remove real_width and
+  real_height. This change just adds what melt's new auto-profile feature needs
+  for most use cases.
+
+  * src/modules/core/producer_consumer.c: Do not let consumer producer alter
+  the profile when validating input.
+
+  * src/modules/xml/consumer_xml.c, src/modules/xml/mlt-xml.dtd,
+  src/modules/xml/producer_xml.c: Add (de)serialization of profile to XML.  In
+  addition to the 'profile' element, one can also set the 'profile' attribute
+  of the root element to a named profile.
+
+2010-10-04  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/avformat/configure, src/modules/avformat/consumer_avformat.c:
+  Add support for short-hand vpre to avformat consumer.  For example, when
+  vcodec=libx264, you can use vpre=medium as shorthand for
+  $prefix/share/ffmpeg/libx264-medium.ffpreset.
+
+  * src/modules/avformat/audioconvert.h, src/modules/avformat/configure,
+  src/modules/avformat/consumer_avformat.c, src/modules/avformat/factory.c,
+  src/modules/avformat/filter_avcolour_space.c,
+  src/modules/avformat/filter_avdeinterlace.c,
+  src/modules/avformat/filter_avresample.c,
+  src/modules/avformat/filter_swscale.c,
+  src/modules/avformat/producer_avformat.c, src/modules/avformat/vdpau.c:
+  FFmpeg build improvements (3078007).  Handle --avformat-svn-version=0.5. Fix
+  building without swscale. Fix compiling new colorspace stuff against FFmpeg
+  <= v0.5. FFmpeg libs are increasing; only support contemporary header layout.
+
+2010-10-04  j-b-m <jb@kdenlive.org>
+
+  * src/modules/qimage/kdenlivetitle_wrapper.cpp: Fix
+  TextColor+Outline+Typewriter=wrong color in titler (kdenlive-1829).
+
+2010-09-28  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/sdl/consumer_sdl.c, src/modules/sdl/consumer_sdl_audio.c,
+  src/modules/sdl/consumer_sdl_preview.c, src/modules/sdl/consumer_sdl_still.c:
+  Fix race conditions in SDL (kdenlive-1711).  Contributed patch by 'jem' -
+  thanks!
+
+2010-09-28  j-b-m <jb@kdenlive.org>
+
+  * src/modules/sdl/consumer_sdl_still.c: Fix crash in SDL with new kdenlive
+  audio VU meter.  Below, a patch that fixes a crash in the SDL still consumer,
+  the bug was triggered by the recent audio monitor feature of Kdenlive. 
+  Basically, it just sets test_audio to 1 on the SDL still consumer frames.
+
+2010-09-26  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/avformat/filter_avcolour_space.c,
+  src/modules/avformat/producer_avformat.c: Set default colorspace (from
+  profile) on frames.  Also, allow affirmatively setting luma to _not_ full
+  range (force_full_luma=0).
+
+  * src/modules/kdenlive/producer_framebuffer.c: Fix indentation in
+  producer_framebuffer.c.
+
+  * src/framework/mlt.h: Add mlt_cache.h to set of all mlt headers.
+
+  * src/framework/mlt_frame.h: Document new colorspace and force_full_luma
+  frame properties.
+
+  * src/framework/mlt_tractor.c: Tractor needs to pass along new frame
+  properties.
+
+  * src/modules/dv/producer_libdv.c: Set libdv producer to Rec 601 colorspace.
+
+  * profiles/atsc_1080i_50, profiles/atsc_1080i_5994, profiles/atsc_1080i_60,
+  profiles/atsc_1080p_2398, profiles/atsc_1080p_24, profiles/atsc_1080p_25,
+  profiles/atsc_1080p_2997, profiles/atsc_1080p_30, profiles/atsc_720p_2398,
+  profiles/atsc_720p_24, profiles/atsc_720p_25, profiles/atsc_720p_2997,
+  profiles/atsc_720p_30, profiles/atsc_720p_50, profiles/atsc_720p_5994,
+  profiles/atsc_720p_60, profiles/cif_15, profiles/cif_ntsc, profiles/cif_pal,
+  profiles/cvd_ntsc, profiles/cvd_pal, profiles/dv_ntsc, profiles/dv_ntsc_wide,
+  profiles/dv_pal, profiles/dv_pal_wide, profiles/hdv_1080_25p,
+  profiles/hdv_1080_30p, profiles/hdv_1080_50i, profiles/hdv_1080_60i,
+  profiles/hdv_720_25p, profiles/hdv_720_30p, profiles/hdv_720_50p,
+  profiles/hdv_720_60p, profiles/qcif_15, profiles/qcif_ntsc,
+  profiles/qcif_pal, profiles/quarter_15, profiles/quarter_ntsc,
+  profiles/quarter_ntsc_wide, profiles/quarter_pal, profiles/quarter_pal_wide,
+  profiles/sdi_486i_5994, profiles/square_ntsc, profiles/square_ntsc_wide,
+  profiles/square_pal, profiles/square_pal_wide, profiles/svcd_ntsc,
+  profiles/svcd_ntsc_wide, profiles/svcd_pal, profiles/svcd_pal_wide,
+  profiles/vcd_ntsc, profiles/vcd_pal: Add colorspace to all profile presets.
+
+  * src/framework/mlt_profile.c: Parse colorspace profile property and add
+  hardcoded default.
+
+  * src/modules/avformat/filter_avcolour_space.c,
+  src/modules/avformat/producer_avformat.c: Rename variables and properties
+  around luma range for clarity.  Frame property "force_full_luma" controls
+  this and can be set via producer property "set.force_full_luma." However, it
+  is not really ready for use until libswscale can respect its full_range
+  parameter in a RGB to YUV conversion.
+
 2010-09-13  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/avformat/filter_avcolour_space.c: Add conversion to profile
+  colorspace.
+
+  * src/modules/avformat/producer_avformat.c: Expand colorspace support to
+  explicit 601.
+
+  * src/modules/avformat/consumer_avformat.c: Set colorspace in codec context.
+
+  * src/framework/mlt_consumer.c: Map profile colorspace to consumer property.
+
+  * src/modules/avformat/producer_avformat.c: Remove hardcoded luma scaling and
+  passing skip_luma_scale to frame.  Luma scaling does not work and passing
+  skip_luma_scale can be done by setting set.skip_luma_scale on the producer.
+
+  * src/modules/avformat/filter_avcolour_space.c,
+  src/modules/avformat/producer_avformat.c: Rename yuv_std to colorspace.
+
+2010-08-24  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/avformat/producer_avformat.c: Require skip_luma_scale
+  explicitly <> 0.
+
+  * src/framework/mlt_profile.h, src/modules/avformat/filter_avcolour_space.c,
+  src/modules/avformat/producer_avformat.c: Add input YUV colorspace (601 vs
+  709) handling.  Still need to work on the output side including normalization
+  and setting the encoder.
+
+  * src/framework/mlt_frame.c, src/framework/mlt_types.h,
+  src/modules/avformat/filter_avcolour_space.c,
+  src/modules/avformat/filter_swscale.c, src/modules/gtk2/producer_pixbuf.c,
+  src/modules/qimage/producer_qimage.c, src/modules/sdl/producer_sdl_image.c:
+  Revert new image types.  I think we can just use frame properties.
+
+  * src/modules/avformat/filter_avcolour_space.c,
+  src/modules/avformat/producer_avformat.c: Get initial skipping of luma
+  scaling to work.  When the avformat producer property skip_luma_scale is set
+  to 1, then we do not scale the luma on the first YCbCr to RGB conversion.
+  This is only done once because swscale always downscales luma when converting
+  RGB to YCbCr, and we need to keep the conversions symmetrical to prevent luma
+  contraction (loss of contrast).
+
+2010-08-23  Dan Dennedy <dan@dennedy.org>
+
+  * src/framework/mlt_frame.c, src/framework/mlt_profile.h,
+  src/framework/mlt_types.h, src/modules/avformat/filter_avcolour_space.c,
+  src/modules/avformat/filter_swscale.c,
+  src/modules/avformat/producer_avformat.c, src/modules/gtk2/producer_pixbuf.c,
+  src/modules/qimage/producer_qimage.c, src/modules/sdl/producer_sdl_image.c:
+  Improve colorspace handling (work in progress)  Trying to add support for
+  non-scaling luma between YCbCr and RGB conversions as well as support for ITU
+  Rec. 709 luma conversion for HD formats.
+
+2010-09-21  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/core/filter_crop.c: Test the function pointer to be safe.
+
+  * src/modules/core/filter_crop.c: Remove an extra debug log message.
+
+  * src/modules/core/filter_crop.c: Fix crop making image black in a multitrack
+  (kdenlive-1814).
+
+2010-09-20  Dan Dennedy <dan@dennedy.org>
+
+  * src/modules/core/filter_resize.c: Fix field order correction on cached
+  image.  When the avformat producer is using image caching, the field order is
+  top-field-first, and the consumer is paused then the field order correction
+  was applied to the cached image. As a result, when repeating the image due to
+  being paused, the active image would scroll down the frame. This fixes it by
+  copying to a new image instead of reusing the cached image.
+
+2010-09-19  Dan Dennedy <dan@dennedy.org>
+
+  * configure: Bump to interim version.
+
+2010-09-19  j-b-m <jb@kdenlive.org>
+
+  * src/modules/avformat/producer_avformat.c: Improve fps detection in avformat
+  producer.  I noticed MLT sometimes gives wrong fps info (I can send some demo
+  clips if required), for example it gives a 1000.0 fps on some mp4 clips.  In
+  december 2009, FFMpeg introduced avg_frame_rate that gives better results
+  than r_frame_rate which is currently used in producer_avformat.  Patch below
+  makes use of this new field when available which gives better results (my
+  mpeg4 clip now shows a 22.691 fps instead of 1000.
+
+2010-09-13  Dan Dennedy <dan@dennedy.org>
+
+  * ChangeLog: Update ChangeLog for v0.5.10.
 
   * Doxyfile, configure, docs/melt.1, src/framework/mlt.h: Set version to
   0.5.10.

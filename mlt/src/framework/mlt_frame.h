@@ -57,6 +57,8 @@ typedef int ( *mlt_get_audio )( mlt_frame self, void **buffer, mlt_audio_format 
  * (no speed factor applied, only available when \em _need_previous_next is set on the producer)
  * \properties \em next \em frame a reference to the unfiltered following frame
  * (no speed factor applied, only available when \em _need_previous_next is set on the producer)
+ * \properties \em colorspace the standard for luma coefficients
+ * \properties \em force_full_luma luma range handling, set to -1 for pass-through, 1 for full range, 0 for scaling
  */
 
 struct mlt_frame_s
@@ -90,6 +92,7 @@ struct mlt_frame_s
 	mlt_deque stack_image;   /**< \private the image processing stack of operations and data */
 	mlt_deque stack_audio;   /**< \private the audio processing stack of operations and data */
 	mlt_deque stack_service; /**< \private a general purpose data stack */
+	int is_processing;       /**< \private indicates if a frame is or was processed by the parallel consumer */
 };
 
 #define MLT_FRAME_PROPERTIES( frame )		( &( frame )->parent )
@@ -105,6 +108,8 @@ extern double mlt_frame_get_aspect_ratio( mlt_frame self );
 extern int mlt_frame_set_aspect_ratio( mlt_frame self, double value );
 extern mlt_position mlt_frame_get_position( mlt_frame self );
 extern int mlt_frame_set_position( mlt_frame self, mlt_position value );
+extern int mlt_frame_set_image( mlt_frame self, uint8_t *image, int size, mlt_destructor destroy );
+extern int mlt_frame_set_alpha( mlt_frame self, uint8_t *alpha, int size, mlt_destructor destroy );
 extern void mlt_frame_replace_image( mlt_frame self, uint8_t *image, mlt_image_format format, int width, int height );
 extern int mlt_frame_get_image( mlt_frame self, uint8_t **buffer, mlt_image_format *format, int *width, int *height, int writable );
 extern uint8_t *mlt_frame_get_alpha_mask( mlt_frame self );
@@ -124,12 +129,16 @@ extern void *mlt_frame_pop_audio( mlt_frame self );
 extern mlt_deque mlt_frame_service_stack( mlt_frame self );
 extern mlt_producer mlt_frame_get_original_producer( mlt_frame self );
 extern void mlt_frame_close( mlt_frame self );
+extern mlt_properties mlt_frame_unique_properties( mlt_frame self, mlt_service service );
 
 /* convenience functions */
 extern int mlt_sample_calculator( float fps, int frequency, int64_t position );
 extern int64_t mlt_sample_calculator_to_now( float fps, int frequency, int64_t position );
 extern const char * mlt_image_format_name( mlt_image_format format );
+extern int mlt_image_format_size( mlt_image_format format, int width, int height, int *bpp );
 extern const char * mlt_audio_format_name( mlt_audio_format format );
+extern int mlt_audio_format_size( mlt_audio_format format, int samples, int channels );
+extern void mlt_frame_write_ppm( mlt_frame frame );
 
 /** This macro scales RGB into the YUV gamut - y is scaled by 219/255 and uv by 224/255. */
 #define RGB2YUV_601_SCALED(r, g, b, y, u, v)\

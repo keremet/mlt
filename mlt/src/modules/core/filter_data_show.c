@@ -21,6 +21,7 @@
 #include <framework/mlt.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 /** Handle the profile.
 */
@@ -98,12 +99,12 @@ char* metadata_value(mlt_properties properties, char* name)
 /** Convert frames to Timecode 
 */
 
-char* frame_to_timecode( int frames , int fps)
+char* frame_to_timecode( int frames, double fps)
 {
 	if (fps == 0) return strdup("-");
 	char *res = malloc(12);
-	int seconds = frames / (int) fps;
-	frames = frames % ((int) fps);
+	int seconds = frames / fps;
+	frames = frames % lrint( fps );
 	int minutes = seconds / 60;
 	seconds = seconds % 60;
 	int hours = minutes / 60;
@@ -209,6 +210,14 @@ static int process_feed( mlt_properties feed, mlt_filter filter, mlt_frame frame
 									strcat( result, tc );
 									free( tc );
 								}
+								else if ( !strcmp( keywords, "frame" ) )
+								{
+									// special case: replace #frame# with current frame number
+									int pos = mlt_properties_get_int( feed, "position" );
+									char s[12];
+									snprintf( s, sizeof(s) - 1, "%d", pos );
+									strcat( result, s );
+								}
 								else
 								{
 									// replace keyword with metadata value
@@ -291,11 +300,15 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 	// Get the frame properties
 	mlt_properties frame_properties = MLT_FRAME_PROPERTIES( frame );
 
+	mlt_service_lock( MLT_FILTER_SERVICE( filter ) );
+
 	// Track specific
 	process_queue( mlt_properties_get_data( frame_properties, "data_queue", NULL ), frame, filter );
 
 	// Global
 	process_queue( mlt_properties_get_data( frame_properties, "global_queue", NULL ), frame, filter );
+
+	mlt_service_unlock( MLT_FILTER_SERVICE( filter ) );
 
 	// Need to get the image
 	return mlt_frame_get_image( frame, image, format, width, height, 1 );

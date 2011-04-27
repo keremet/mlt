@@ -435,7 +435,7 @@ static void refresh_image( mlt_frame frame, int width, int height )
 			interp = GDK_INTERP_NEAREST;
 		else if ( strcmp( interps, "tiles" ) == 0 )
 			interp = GDK_INTERP_TILES;
-		else if ( strcmp( interps, "hyper" ) == 0 )
+		else if ( strcmp( interps, "hyper" ) == 0 || strcmp( interps, "bicubic" ) == 0 )
 			interp = GDK_INTERP_HYPER;
 
 // fprintf(stderr,"%s: scaling from %dx%d to %dx%d\n", __FILE__, this->width, this->height, width, height);
@@ -466,6 +466,8 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 	*width = mlt_properties_get_int( properties, "rescale_width" );
 	*height = mlt_properties_get_int( properties, "rescale_height" );
 
+	mlt_service_lock( MLT_PRODUCER_SERVICE( &this->parent ) );
+
 	// Refresh the image
 	pthread_mutex_lock( &pango_mutex );
 	refresh_image( frame, *width, *height );
@@ -483,7 +485,7 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 		memcpy( *buffer, gdk_pixbuf_get_pixels( this->pixbuf ), image_size );
 
 		// Now update properties so we free the copy after
-		mlt_properties_set_data( properties, "image", *buffer, image_size, mlt_pool_release, NULL );
+		mlt_frame_set_image( frame, *buffer, image_size, mlt_pool_release );
 		*format = mlt_image_rgb24a;
 	}
 	else
@@ -492,6 +494,7 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 	}
 
 	pthread_mutex_unlock( &pango_mutex );
+	mlt_service_unlock( MLT_PRODUCER_SERVICE( &this->parent ) );
 
 	return error;
 }
@@ -620,6 +623,9 @@ static GdkPixbuf *pango_get_pixbuf( const char *markup, const char *text, const 
 		pango_layout_set_font_description( layout, desc );
 		pango_layout_get_pixel_size( layout, &w, &h );
 	}
+
+        if ( pad == 0 )
+            pad = 1;
 
 	pixbuf = gdk_pixbuf_new( GDK_COLORSPACE_RGB, TRUE /* has alpha */, 8, w + 2 * pad, h + 2 * pad );
 	pango_draw_background( pixbuf, bg );

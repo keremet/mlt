@@ -98,10 +98,8 @@ static mlt_geometry transition_parse_keys( mlt_transition this, int normalised_w
 	// Create an empty geometries object
 	mlt_geometry geometry = mlt_geometry_init( );
 
-	// Get the in and out position
-	mlt_position in = mlt_transition_get_in( this );
-	mlt_position out = mlt_transition_get_out( this );
-	int length = out - in + 1;
+	// Get the duration
+	mlt_position length = mlt_transition_get_length( this );
 	double cycle = mlt_properties_get_double( properties, "cycle" );
 
 	// Get the new style geometry string
@@ -186,20 +184,6 @@ static int position_calculate( mlt_transition this, mlt_position position )
 
 /** Calculate the field delta for this frame - position between two frames.
 */
-
-static inline double delta_calculate( mlt_transition this, mlt_frame frame, mlt_position position )
-{
-	// Get the in and out position
-	mlt_position in = mlt_transition_get_in( this );
-	mlt_position out = mlt_transition_get_out( this );
-	double length = out - in + 1;
-
-	// Now do the calcs
-	double x = ( double )( position - in ) / length;
-	double y = ( double )( position + 1 - in ) / length;
-
-	return length * ( y - x ) / 2.0;
-}
 
 static int get_value( mlt_properties properties, const char *preferred, const char *fallback )
 {
@@ -853,6 +837,7 @@ static int get_b_frame_image( mlt_transition this, mlt_frame b_frame, uint8_t **
 
 	// Adjust to consumer scale
 	*width = rint( geometry->sw * *width / geometry->nw );
+	*width -= *width % 2; // coerce to even width for yuv422
 	*height = rint( geometry->sh * *height / geometry->nh );
 // fprintf(stderr, "%s: scaled %dx%d norm %dx%d resize %dx%d\n", __FILE__,
 // geometry->sw, geometry->sh, geometry->nw, geometry->nh, *width, *height);
@@ -881,9 +866,7 @@ static void crop_calculate( mlt_transition this, mlt_properties properties, stru
 		if ( !crop )
 		{
 			crop = mlt_geometry_init();
-			mlt_position in = mlt_transition_get_in( this );
-			mlt_position out = mlt_transition_get_out( this );
-			int length = out - in + 1;
+			mlt_position length = mlt_transition_get_length( this );
 			double cycle = mlt_properties_get_double( properties, "cycle" );
 
 			// Allow a geometry repeat cycle
@@ -951,7 +934,7 @@ static mlt_geometry composite_calculate( mlt_transition this, struct geometry_s 
 		}
 		else
 		{
-			int length = mlt_transition_get_out( this ) - mlt_transition_get_in( this ) + 1;
+			mlt_position length = mlt_transition_get_length( this );
 			double cycle = mlt_properties_get_double( properties, "cycle" );
 			if ( cycle > 1 )
 				length = cycle;
@@ -1047,7 +1030,7 @@ mlt_frame composite_copy_region( mlt_transition this, mlt_frame a_frame, mlt_pos
 	dest = mlt_pool_alloc( w * h * 2 );
 
 	// Assign to the new frame
-	mlt_properties_set_data( b_props, "image", dest, w * h * 2, mlt_pool_release, NULL );
+	mlt_frame_set_image( b_frame, dest, w * h * 2, mlt_pool_release );
 	mlt_properties_set_int( b_props, "width", w );
 	mlt_properties_set_int( b_props, "height", h );
 	mlt_properties_set_int( b_props, "format", format );
@@ -1133,12 +1116,12 @@ static int transition_get_image( mlt_frame a_frame, uint8_t **image, mlt_image_f
 		struct geometry_s result;
 
 		// Calculate the position
-		double delta = delta_calculate( this, a_frame, position );
+		double delta = mlt_transition_get_progress_delta( this, a_frame );
 
 		// Get the image from the b frame
 		uint8_t *image_b = NULL;
-		int width_b = *width;
-		int height_b = *height;
+		int width_b = *width > 0 ? *width : mlt_properties_get_int( a_props, "normalised_width" );
+		int height_b = *height > 0 ? *height : mlt_properties_get_int( a_props, "normalised_height" );
 	
 		// Vars for alphas
 		uint8_t *alpha_a = NULL;
@@ -1223,7 +1206,9 @@ static int transition_get_image( mlt_frame a_frame, uint8_t **image, mlt_image_f
 			int field;
 			
 			double luma_softness = mlt_properties_get_double( properties, "softness" );
+			mlt_service_lock( MLT_TRANSITION_SERVICE( this ) );
 			uint16_t *luma_bitmap = get_luma( this, properties, width_b, height_b );
+			mlt_service_unlock( MLT_TRANSITION_SERVICE( this ) );
 			char *operator = mlt_properties_get( properties, "operator" );
 
 			alpha_b = alpha_b == NULL ? mlt_frame_get_alpha_mask( b_frame ) : alpha_b;
@@ -1346,6 +1331,9 @@ mlt_transition transition_composite_init( mlt_profile profile, mlt_service_type 
 		// Use alignment (and hence alpha of b frame)
 		mlt_properties_set_int( properties, "aligned", 1 );
 
+		// Default to progressive rendering
+		mlt_properties_set_int( properties, "progressive", 1 );
+		
 		// Inform apps and framework that this is a video only transition
 		mlt_properties_set_int( properties, "_transition_type", 1 );
 	}

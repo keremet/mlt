@@ -37,14 +37,16 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 	int error = 0;
 	mlt_filter filter = mlt_frame_pop_service( this );
 	mlt_properties properties = MLT_FILTER_PROPERTIES( filter );
+
+	mlt_service_lock( MLT_FILTER_SERVICE( filter ) );
+
 	mlt_transition luma = mlt_properties_get_data( properties, "luma", NULL );
 	mlt_frame b_frame = mlt_properties_get_data( properties, "frame", NULL );
 	mlt_properties b_frame_props = b_frame ? MLT_FRAME_PROPERTIES( b_frame ) : NULL;
 	int out = mlt_properties_get_int( properties, "period" );
 	int cycle = mlt_properties_get_int( properties, "cycle" );
 	int duration = mlt_properties_get_int( properties, "duration" );
-	char *name = mlt_properties_get( properties, "_unique_id" );
-	mlt_position position = mlt_properties_get_position( MLT_FRAME_PROPERTIES(this), name );
+	mlt_position position = mlt_filter_get_position( filter, this );
 
 	out = out? out + 1 : 25;
 	if ( cycle )
@@ -104,12 +106,14 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 			mlt_log_debug( MLT_FILTER_SERVICE(filter), "copying frame %d\n", modulo_pos );
 			mlt_properties b_props = MLT_FRAME_PROPERTIES( b_frame );
 			memcpy( dst, src, size );
-			mlt_properties_set_data( b_props, "image", dst, size, mlt_pool_release, NULL );
+			mlt_frame_set_image( b_frame, dst, size, mlt_pool_release );
 			mlt_properties_set_int( b_props, "width", *width );
 			mlt_properties_set_int( b_props, "height", *height );
 			mlt_properties_set_int( b_props, "format", *format );
 		}
 	}
+
+	mlt_service_unlock( MLT_FILTER_SERVICE( filter ) );
 
 	return error;
 }
@@ -119,12 +123,6 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 
 static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
 {
-	// Get a unique name to store the frame position
-	char *name = mlt_properties_get( MLT_FILTER_PROPERTIES( this ), "_unique_id" );
-
-	// Assign the current position to the name
-	mlt_properties_set_position( MLT_FRAME_PROPERTIES( frame ), name, mlt_frame_get_position( frame ) );
-
 	// Push the filter on to the stack
 	mlt_frame_push_service( frame, this );
 

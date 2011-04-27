@@ -49,6 +49,8 @@ namespace Mlt
 			int inc_ref( );
 			int dec_ref( );
 			int ref_count( );
+			void lock( );
+			void unlock( );
 			void block( void *object = NULL );
 			void unblock( void *object = NULL );
 			void fire_event( const char *event );
@@ -87,6 +89,7 @@ namespace Mlt
 			static void delete_event( Event * );
 			Event *setup_wait_for( const char *id );
 			void wait_for( Event *, bool destroy = true );
+			void wait_for( const char *id );
 			bool is_sequence( );
 			static Properties *parse_yaml( const char *file );
 			char *serialise_yaml( );

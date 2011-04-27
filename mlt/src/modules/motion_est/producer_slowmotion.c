@@ -261,7 +261,7 @@ static int slowmotion_get_image( mlt_frame this, uint8_t **image, mlt_image_form
 	}
 
 	*image = output;
-	mlt_properties_set_data( frame_properties, "image", output, size, NULL, NULL );
+	mlt_frame_set_image( this, output, size, NULL );
 
 	// Make sure that no further scaling is done
 	mlt_properties_set( frame_properties, "rescale.interps", "none" );
@@ -358,7 +358,7 @@ static int slowmotion_get_frame( mlt_producer this, mlt_frame_ptr frame, int ind
 
 mlt_producer producer_slowmotion_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg )
 {
-	mlt_producer this = mlt_producer_new( );
+	mlt_producer this = mlt_producer_new( profile );
 
 	// Wrap the loader
 	mlt_producer real_producer = mlt_factory_producer( profile, NULL, arg );

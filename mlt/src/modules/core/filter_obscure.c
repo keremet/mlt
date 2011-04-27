@@ -131,22 +131,6 @@ static void geometry_calculate( struct geometry_s *output, struct geometry_s *in
 	output->mask_h = lerp( in->mask_h + ( out->mask_h - in->mask_h ) * position, 1, -1 );
 }
 
-/** Calculate the position for this frame.
-*/
-
-static float position_calculate( mlt_filter this, mlt_frame frame )
-{
-	// Get the in and out position
-	mlt_position in = mlt_filter_get_in( this );
-	mlt_position out = mlt_filter_get_out( this );
-
-	// Get the position of the frame
-	mlt_position position = mlt_frame_get_position( frame );
-
-	// Now do the calcs
-	return ( float )( position - in ) / ( float )( out - in + 1 );
-}
-
 /** The averaging function...
 */
 
@@ -257,7 +241,7 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 			struct geometry_s end;
 
 			// Retrieve the position
-			float position = mlt_properties_get_double(frame_properties, "filter_position");
+			float position = mlt_filter_get_progress( this, frame );
 
 			// Now parse the geometries
 			geometry_parse( &start, NULL, mlt_properties_get( properties, "start" ), normalised_width, normalised_height );
@@ -282,10 +266,6 @@ static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
 	// Push this on to the service stack
 	mlt_frame_push_service( frame, this );
 	
-	// Calculate the position for the filter effect
-	float position = position_calculate( this, frame );
-	mlt_properties_set_double( MLT_FRAME_PROPERTIES( frame ), "filter_position", position );
-
 	// Push the get image call
 	mlt_frame_push_get_image( frame, filter_get_image );
 

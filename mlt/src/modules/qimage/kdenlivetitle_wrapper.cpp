@@ -414,7 +414,18 @@ void drawKdenliveTitle( producer_ktitle self, mlt_frame frame, int width, int he
 			scene = new QGraphicsScene();
 			scene->setItemIndexMethod( QGraphicsScene::NoIndex );
                         scene->setSceneRect(0, 0, mlt_properties_get_int( properties, "width" ), mlt_properties_get_int( properties, "height" ));
-			loadFromXml( producer, scene, mlt_properties_get( producer_props, "xmldata" ), mlt_properties_get( producer_props, "templatetext" ) );
+			if ( mlt_properties_get( producer_props, "resource" ) && mlt_properties_get( producer_props, "resource" )[0] != '\0' )
+			{
+				// The title has a resource property, so we read all properties from the resource.
+				// Do not serialize the xmldata
+				loadFromXml( producer, scene, mlt_properties_get( producer_props, "_xmldata" ), mlt_properties_get( producer_props, "templatetext" ) );
+			}
+			else
+			{
+				// The title has no resource, all data should be serialized
+				loadFromXml( producer, scene, mlt_properties_get( producer_props, "xmldata" ), mlt_properties_get( producer_props, "templatetext" ) );
+			  
+			}
 			mlt_properties_set_data( producer_props, "qscene", scene, 0, ( mlt_destructor )qscene_delete, NULL );
 		}
                 
@@ -440,11 +451,15 @@ void drawKdenliveTitle( producer_ktitle self, mlt_frame frame, int width, int he
 				    // the keystroke delay and a start offset, both in frames
 				    QStringList values = params.at( 2 ).split( ";" );
 				    int interval = qMax( 0, ( ( int ) position - values.at( 1 ).toInt()) / values.at( 0 ).toInt() );
-				    QTextDocument *td = new QTextDocument( params.at( 1 ).left( interval ) );
-				    td->setDefaultFont( titem->font() );
-				    td->setDefaultTextOption( titem->document()->defaultTextOption() );
-				    td->setTextWidth( titem->document()->textWidth() );
-				    titem->setDocument( td );
+				    QTextCursor cursor = titem->textCursor();
+				    cursor.movePosition(QTextCursor::EndOfBlock);
+				    // get the font format
+				    QTextCharFormat format = cursor.charFormat();
+				    cursor.select(QTextCursor::Document);
+				    QString txt = params.at( 1 ).left( interval );
+				    // If the string to insert is empty, insert a space so that we don't loose
+				    // formatting infos for the next iterations
+				    cursor.insertText(txt.isEmpty() ? " " : txt, format);
 			    }
 		    }
 		}

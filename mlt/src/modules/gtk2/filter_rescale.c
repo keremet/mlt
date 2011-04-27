@@ -44,8 +44,11 @@ static int filter_scale( mlt_frame this, uint8_t **image, mlt_image_format *form
 		interp = PIXOPS_INTERP_NEAREST;
 	else if ( strcmp( interps, "tiles" ) == 0 )
 		interp = PIXOPS_INTERP_TILES;
-	else if ( strcmp( interps, "hyper" ) == 0 )
+	else if ( strcmp( interps, "hyper" ) == 0 || strcmp( interps, "bicubic" ) == 0 )
 		interp = PIXOPS_INTERP_HYPER;
+
+	int bpp;
+	int size = mlt_image_format_size( *format, owidth, oheight, &bpp );
 
 	// Carry out the rescaling
 	switch ( *format )
@@ -53,7 +56,7 @@ static int filter_scale( mlt_frame this, uint8_t **image, mlt_image_format *form
 	case mlt_image_yuv422:
 	{
 		// Create the output image
-		uint8_t *output = mlt_pool_alloc( owidth * ( oheight + 1 ) * 2 );
+		uint8_t *output = mlt_pool_alloc( size );
 
 		// Calculate strides
 		int istride = iwidth * 2;
@@ -62,9 +65,7 @@ static int filter_scale( mlt_frame this, uint8_t **image, mlt_image_format *form
 		yuv422_scale_simple( output, owidth, oheight, ostride, *image, iwidth, iheight, istride, interp );
 		
 		// Now update the frame
-		mlt_properties_set_data( properties, "image", output, owidth * ( oheight + 1 ) * 2, ( mlt_destructor )mlt_pool_release, NULL );
-		mlt_properties_set_int( properties, "width", owidth );
-		mlt_properties_set_int( properties, "height", oheight );
+		mlt_frame_set_image( this, output, size, mlt_pool_release );
 
 		// Return the output
 		*image = output;
@@ -74,10 +75,8 @@ static int filter_scale( mlt_frame this, uint8_t **image, mlt_image_format *form
 	case mlt_image_rgb24a:
 	case mlt_image_opengl:
 	{
-		int bpp = ( *format == mlt_image_rgb24 ? 3 : 4 );
-
 		// Create the output image
-		uint8_t *output = mlt_pool_alloc( owidth * ( oheight + 1 ) * bpp );
+		uint8_t *output = mlt_pool_alloc( size );
 
 		if ( strcmp( interps, "none" ) && ( iwidth != owidth || iheight != oheight ) )
 		{
@@ -109,9 +108,7 @@ static int filter_scale( mlt_frame this, uint8_t **image, mlt_image_format *form
 			g_object_unref( scaled );
 
 			// Now update the frame
-			mlt_properties_set_data( properties, "image", output, owidth * ( oheight + 1 ) * bpp, ( mlt_destructor )mlt_pool_release, NULL );
-			mlt_properties_set_int( properties, "width", owidth );
-			mlt_properties_set_int( properties, "height", oheight );
+			mlt_frame_set_image( this, output, size, mlt_pool_release );
 	
 			// Return the output
 			*image = output;

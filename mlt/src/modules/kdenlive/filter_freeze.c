@@ -38,7 +38,7 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 	int freeze_before = mlt_properties_get_int( properties, "freeze_before" );
 	int freeze_after = mlt_properties_get_int( properties, "freeze_after" );
 	mlt_position pos = mlt_properties_get_position( properties, "frame" );
-	mlt_position currentpos = mlt_properties_get_position( properties, "_seek_frame" );
+	mlt_position currentpos = mlt_filter_get_position( filter, this );
 
 	int do_freeze = 0;
 	if (freeze_before == 0 && freeze_after == 0) {
@@ -50,13 +50,14 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 	}
 
 	if (do_freeze == 1) {
+		mlt_service_lock( MLT_FILTER_SERVICE( filter ) );
 		freeze_frame = mlt_properties_get_data( properties, "freeze_frame", NULL );
-		if( freeze_frame == NULL || mlt_properties_get_position( properties, "_frame" ) != pos || mlt_properties_get_int( props , "width" ) != mlt_properties_get_int( MLT_FRAME_PROPERTIES( freeze_frame ), "width" )  || mlt_properties_get_int( props , "height" ) != mlt_properties_get_int( MLT_FRAME_PROPERTIES( freeze_frame ), "height" ) )
+		if ( freeze_frame == NULL || mlt_properties_get_position( properties, "_frame" ) != pos )
 		{
 			// freeze_frame has not been fetched yet or is not useful, so fetch it and cache it.
 			mlt_producer producer = mlt_frame_get_original_producer(this);
 			mlt_producer_seek( producer, pos );
-	    
+
 			// Get the frame
 			mlt_service_get_frame( mlt_producer_service(producer), &freeze_frame, 0 );
 
@@ -75,30 +76,14 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 		uint8_t *buffer = NULL;
 		int error = mlt_frame_get_image( freeze_frame, &buffer, format, width, height, 1 );
 
-		int size = 0;
-		switch ( *format )
-		{
-			case mlt_image_yuv420p:
-				size = *width * 3 * ( *height + 1 ) / 2;
-				break;
-			case mlt_image_rgb24:
-				size = *width * ( *height + 1 ) * 3;
-				break;
-			case mlt_image_rgb24a:
-			case mlt_image_opengl:
-				size = *width * ( *height + 1 ) * 4;
-				break;
-			default:
-				*format = mlt_image_yuv422;
-				size = *width * ( *height + 1 ) * 2;
-				break;
-		}
-
 		// Copy it to current frame
-	  	uint8_t *image_copy = mlt_pool_alloc( size );
+		int size = mlt_image_format_size( *format, *width, *height, NULL );
+		uint8_t *image_copy = mlt_pool_alloc( size );
 		memcpy( image_copy, buffer, size );
 		*image = image_copy;
-		mlt_properties_set_data( props, "image", *image, size, ( mlt_destructor ) mlt_pool_release, NULL );
+		mlt_frame_set_image( this, *image, size, mlt_pool_release );
+		mlt_service_unlock( MLT_FILTER_SERVICE( filter ) );
+
 		return error;
 	}
 
@@ -114,9 +99,6 @@ static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
 
 	// Push the filter on to the stack
 	mlt_frame_push_service( frame, this );
-
-	// Determine the time position of this frame
-	mlt_properties_set_position( MLT_FILTER_PROPERTIES( this ), "_seek_frame", mlt_frame_get_position( frame ) -  mlt_filter_get_in( this ) );
 
 	// Push the frame filter
 	mlt_frame_push_get_image( frame, filter_get_image );

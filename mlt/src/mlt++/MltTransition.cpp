@@ -116,3 +116,23 @@ int Transition::get_out( )
 {
 	return mlt_transition_get_out( get_transition() );
 }
+
+int Transition::get_length( )
+{
+	return mlt_transition_get_length( get_transition( ) );
+}
+
+int Transition::get_position( Frame &frame )
+{
+	return mlt_transition_get_position( get_transition( ), frame.get_frame( ) );
+}
+
+double Transition::get_progress( Frame &frame )
+{
+	return mlt_transition_get_progress( get_transition( ), frame.get_frame( ) );
+}
+
+double Transition::get_progress_delta( Frame &frame )
+{
+	return mlt_transition_get_progress_delta( get_transition( ), frame.get_frame( ) );
+}

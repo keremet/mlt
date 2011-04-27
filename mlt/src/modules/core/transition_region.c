@@ -123,11 +123,11 @@ static uint8_t *filter_get_alpha_mask( mlt_frame this )
 			*p ++ = ( int )( ( ( *image ++ - 16 ) * 299 ) / 255 );
 			image ++;
 		}
-		mlt_properties_set_data( MLT_FRAME_PROPERTIES( this ), "alpha", alpha, region_width * region_height, mlt_pool_release, NULL );
+		mlt_frame_set_alpha( this, alpha, region_width * region_height, mlt_pool_release );
 	}
 	else
 	{
-		mlt_properties_set_data( MLT_FRAME_PROPERTIES( this ), "alpha", alpha, region_width * region_height, NULL, NULL );
+		mlt_frame_set_alpha( this, alpha, region_width * region_height, NULL );
 	}
 
 	this->get_alpha_mask = NULL;
@@ -152,17 +152,16 @@ static int transition_get_image( mlt_frame frame, uint8_t **image, mlt_image_for
 	// Get the properties of the transition
 	mlt_properties properties = MLT_TRANSITION_PROPERTIES( this );
 
+	mlt_service_lock( MLT_TRANSITION_SERVICE( this ) );
+
 	// Get the composite from the transition
 	mlt_transition composite = mlt_properties_get_data( properties, "composite", NULL );
 
 	// Look for the first filter
 	mlt_filter filter = mlt_properties_get_data( properties, "_filter_0", NULL );
 
-	// Get the unique id of the filter (used to reacquire the producer position)
-	char *name = mlt_properties_get( properties, "_unique_id" );
-
-	// Get the original producer position
-	mlt_position position = mlt_properties_get_position( MLT_FRAME_PROPERTIES( frame ), name );
+	// Get the position
+	mlt_position position = mlt_transition_get_position( this, frame );
 
 	// Create a composite if we don't have one
 	if ( composite == NULL )
@@ -265,9 +264,6 @@ static int transition_get_image( mlt_frame frame, uint8_t **image, mlt_image_for
 		}
 	}
 
-	// Get the image
-	error = mlt_frame_get_image( frame, image, format, width, height, 1 );
-
 	// Only continue if we have both filter and composite
 	if ( composite != NULL )
 	{
@@ -290,11 +286,9 @@ static int transition_get_image( mlt_frame frame, uint8_t **image, mlt_image_for
 			b_frame = composite_copy_region( composite, frame, position );
 
 			// Ensure a destructor
+			char *name = mlt_properties_get( properties, "_unique_id" );
 			mlt_properties_set_data( MLT_FRAME_PROPERTIES( frame ), name, b_frame, 0, ( mlt_destructor )mlt_frame_close, NULL );
 		}
-
-		// Set the position of the b_frame
-		mlt_frame_set_position( b_frame, position );
 
 		// Make sure the filter is in the correct position
 		while ( filter != NULL )
@@ -386,6 +380,8 @@ static int transition_get_image( mlt_frame frame, uint8_t **image, mlt_image_for
 		error = mlt_frame_get_image( frame, image, format, width, height, 0 );
 	}
 
+	mlt_service_unlock( MLT_TRANSITION_SERVICE( this ) );
+
 	return error;
 }
 
@@ -394,15 +390,6 @@ static int transition_get_image( mlt_frame frame, uint8_t **image, mlt_image_for
 
 static mlt_frame transition_process( mlt_transition this, mlt_frame a_frame, mlt_frame b_frame )
 {
-	// Get the properties of the frame
-	mlt_properties properties = MLT_FRAME_PROPERTIES( a_frame );
-
-	// Get a unique name to store the frame position
-	char *name = mlt_properties_get( MLT_TRANSITION_PROPERTIES( this ), "_unique_id" );
-
-	// Assign the current position to the name
-	mlt_properties_set_position( properties, name, mlt_frame_get_position( a_frame ) );
-
 	// Push the transition on to the frame
 	mlt_frame_push_service( a_frame, this );
 

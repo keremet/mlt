@@ -27,11 +27,18 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef WIN32
+#include <windows.h>
+/** the default subdirectory of the libdir for holding modules (plugins) */
+#define PREFIX_LIB "lib\\mlt"
+/** the default subdirectory of the install prefix for holding module (plugin) data */
+#define PREFIX_DATA "share\\mlt"
+#else
 /** the default subdirectory of the libdir for holding modules (plugins) */
 #define PREFIX_LIB LIBDIR "/mlt"
 /** the default subdirectory of the install prefix for holding module (plugin) data */
 #define PREFIX_DATA PREFIX "/share/mlt"
-
+#endif
 
 /** holds the full path to the modules directory - initialized and retained for the entire session */
 static char *mlt_directory = NULL;
@@ -50,28 +57,28 @@ static int unique_id = 0;
  *
  * \param listener
  * \param owner
- * \param this
+ * \param self
  * \param args
  */
 
-static void mlt_factory_create_request( mlt_listener listener, mlt_properties owner, mlt_service this, void **args )
+static void mlt_factory_create_request( mlt_listener listener, mlt_properties owner, mlt_service self, void **args )
 {
 	if ( listener != NULL )
-		listener( owner, this, ( char * )args[ 0 ], ( char * )args[ 1 ], ( mlt_service * )args[ 2 ] );
+		listener( owner, self, ( char * )args[ 0 ], ( char * )args[ 1 ], ( mlt_service * )args[ 2 ] );
 }
 
 /** the -create-done event transmitter
  *
  * \param listener
  * \param owner
- * \param this
+ * \param self
  * \param args
  */
 
-static void mlt_factory_create_done( mlt_listener listener, mlt_properties owner, mlt_service this, void **args )
+static void mlt_factory_create_done( mlt_listener listener, mlt_properties owner, mlt_service self, void **args )
 {
 	if ( listener != NULL )
-		listener( owner, this, ( char * )args[ 0 ], ( char * )args[ 1 ], ( mlt_service )args[ 2 ] );
+		listener( owner, self, ( char * )args[ 0 ], ( char * )args[ 1 ], ( mlt_service )args[ 2 ] );
 }
 
 /** Construct the repository and factories.
@@ -106,6 +113,7 @@ mlt_repository mlt_factory_init( const char *directory )
 		mlt_properties_set_or_default( global_properties, "MLT_CONSUMER", getenv( "MLT_CONSUMER" ), "sdl" );
 		mlt_properties_set( global_properties, "MLT_TEST_CARD", getenv( "MLT_TEST_CARD" ) );
 		mlt_properties_set_or_default( global_properties, "MLT_PROFILE", getenv( "MLT_PROFILE" ), "dv_pal" );
+
 		mlt_properties_set_or_default( global_properties, "MLT_DATA", getenv( "MLT_DATA" ), PREFIX_DATA );
 	}
 
@@ -363,8 +371,14 @@ void mlt_factory_close( )
 	if ( mlt_directory != NULL )
 	{
 		mlt_properties_close( event_object );
+		event_object = NULL;
 		mlt_properties_close( global_properties );
-		mlt_repository_close( repository );
+		global_properties = NULL;
+		if ( repository )
+		{
+			mlt_repository_close( repository );
+			repository = NULL;
+		}
 		free( mlt_directory );
 		mlt_directory = NULL;
 		mlt_pool_close( );

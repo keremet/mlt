@@ -50,7 +50,7 @@ static void producer_close( mlt_producer this );
 mlt_producer producer_noise_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg )
 {
 	// Create a new producer object
-	mlt_producer this = mlt_producer_new( );
+	mlt_producer this = mlt_producer_new( profile );
 
 	// Initialise the producer
 	if ( this != NULL )
@@ -65,9 +65,6 @@ mlt_producer producer_noise_init( mlt_profile profile, mlt_service_type type, co
 
 static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_format *format, int *width, int *height, int writable )
 {
-	// Obtain properties of frame
-	mlt_properties properties = MLT_FRAME_PROPERTIES( frame );
-
 	// Calculate the size of the image
 	int size = *width * *height * 2;
 
@@ -78,9 +75,7 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 	*buffer = mlt_pool_alloc( size );
 
 	// Update the frame
-	mlt_properties_set_data( properties, "image", *buffer, size, mlt_pool_release, NULL );
-	mlt_properties_set_int( properties, "width", *width );
-	mlt_properties_set_int( properties, "height", *height );
+	mlt_frame_set_image( frame, *buffer, size, mlt_pool_release );
 
 	// Before we write to the image, make sure we have one
 	if ( *buffer != NULL )
@@ -147,7 +142,7 @@ static int producer_get_frame( mlt_producer this, mlt_frame_ptr frame, int index
 		mlt_properties properties = MLT_FRAME_PROPERTIES( *frame );
 
 		// Aspect ratio is whatever it needs to be
-		mlt_properties_set_double( properties, "aspect_ratio", 0 );
+		mlt_properties_set_double( properties, "aspect_ratio", mlt_properties_get_double( MLT_PRODUCER_PROPERTIES( this ), "aspect_ratio" ) );
 
 		// Set producer-specific frame properties
 		mlt_properties_set_int( properties, "progressive", 1 );

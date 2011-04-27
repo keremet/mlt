@@ -30,6 +30,7 @@ namespace Mlt
 {
 	class Service;
 	class Profile;
+	class Frame;
 
 	class MLTPP_DECLSPEC Transition : public Service
 	{
@@ -49,6 +50,10 @@ namespace Mlt
 			int get_b_track( );
 			int get_in( );
 			int get_out( );
+			int get_length( );
+			int get_position( Frame &frame );
+			double get_progress( Frame &frame );
+			double get_progress_delta( Frame &frame );
 	};
 }
 

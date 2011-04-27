@@ -24,8 +24,8 @@
 
 
 // ffmpeg Header files
-#include <avformat.h>
-#include <swscale.h>
+#include <libavformat/avformat.h>
+#include <libswscale/swscale.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -47,7 +47,7 @@ static inline int convert_mlt_to_av_cs( mlt_image_format format )
 			break;
 		case mlt_image_rgb24a:
 		case mlt_image_opengl:
-			value = PIX_FMT_RGB32;
+			value = PIX_FMT_RGBA;
 			break;
 		case mlt_image_yuv422:
 			value = PIX_FMT_YUYV422;
@@ -63,10 +63,10 @@ static inline int convert_mlt_to_av_cs( mlt_image_format format )
 	return value;
 }
 
-static int filter_scale( mlt_frame this, uint8_t **image, mlt_image_format *format, int iwidth, int iheight, int owidth, int oheight )
+static int filter_scale( mlt_frame frame, uint8_t **image, mlt_image_format *format, int iwidth, int iheight, int owidth, int oheight )
 {
 	// Get the properties
-	mlt_properties properties = MLT_FRAME_PROPERTIES( this );
+	mlt_properties properties = MLT_FRAME_PROPERTIES( frame );
 
 	// Get the requested interpolation method
 	char *interps = mlt_properties_get( properties, "rescale.interp" );
@@ -95,19 +95,19 @@ static int filter_scale( mlt_frame this, uint8_t **image, mlt_image_format *form
 
 	// Determine the bytes per pixel
 	int bpp;
+	mlt_image_format_size( *format, 0, 0, &bpp );
+
+	// Set swscale flags to get good quality
 	switch ( *format )
 	{
 		case mlt_image_yuv422:
-			bpp = 2;
 			interp |= SWS_FULL_CHR_H_INP;
 			break;
 		case mlt_image_rgb24:
-			bpp = 3;
 			interp |= SWS_FULL_CHR_H_INT;
 			break;
 		case mlt_image_rgb24a:
 		case mlt_image_opengl:
-			bpp = 4;
 			interp |= SWS_FULL_CHR_H_INT;
 			break;
 		default:
@@ -146,9 +146,7 @@ static int filter_scale( mlt_frame this, uint8_t **image, mlt_image_format *form
 		sws_freeContext( context );
 	
 		// Now update the frame
-		mlt_properties_set_data( properties, "image", output.data[0], owidth * ( oheight + 1 ) * bpp, ( mlt_destructor )mlt_pool_release, NULL );
-		mlt_properties_set_int( properties, "width", owidth );
-		mlt_properties_set_int( properties, "height", oheight );
+		mlt_frame_set_image( frame, output.data[0], owidth * ( oheight + 1 ) * bpp, mlt_pool_release );
 	
 		// Return the output
 		*image = output.data[0];
@@ -159,7 +157,7 @@ static int filter_scale( mlt_frame this, uint8_t **image, mlt_image_format *form
 		if ( alpha_size > 0 && alpha_size != ( owidth * oheight ) )
 		{
 			// Create the context and output image
-			uint8_t *alpha = mlt_frame_get_alpha_mask( this );
+			uint8_t *alpha = mlt_frame_get_alpha_mask( frame );
 			if ( alpha )
 			{
 				avformat = PIX_FMT_GRAY8;
@@ -173,7 +171,7 @@ static int filter_scale( mlt_frame this, uint8_t **image, mlt_image_format *form
 				sws_freeContext( context );
 	
 				// Set it back on the frame
-				mlt_properties_set_data( MLT_FRAME_PROPERTIES( this ), "alpha", output.data[0], owidth * oheight, mlt_pool_release, NULL );
+				mlt_frame_set_alpha( frame, output.data[0], owidth * oheight, mlt_pool_release );
 			}
 		}
 	
@@ -202,13 +200,13 @@ mlt_filter filter_swscale_init( mlt_profile profile, void *arg )
 	}		
 
 	// Create a new scaler
-	mlt_filter this = mlt_factory_filter( profile, "rescale", NULL );
+	mlt_filter filter = mlt_factory_filter( profile, "rescale", NULL );
 	
 	// If successful, then initialise it
-	if ( this != NULL )
+	if ( filter != NULL )
 	{
 		// Get the properties
-		mlt_properties properties = MLT_FILTER_PROPERTIES( this );
+		mlt_properties properties = MLT_FILTER_PROPERTIES( filter );
 
 		// Set the inerpolation
 		mlt_properties_set( properties, "interpolation", "bilinear" );
@@ -217,5 +215,5 @@ mlt_filter filter_swscale_init( mlt_profile profile, void *arg )
 		mlt_properties_set_data( properties, "method", filter_scale, 0, NULL, NULL );
 	}
 
-	return this;
+	return filter;
 }

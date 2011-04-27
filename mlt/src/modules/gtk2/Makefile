@@ -36,12 +36,23 @@ ifdef USE_PANGO
 OBJS += producer_pango.o
 CFLAGS += `pkg-config pangoft2 --cflags`
 LDFLAGS += `pkg-config pangoft2 --libs`
+ifeq ($(targetos),Darwin)
+LDFLAGS += -liconv
+endif
 ifeq ($(targetos),FreeBSD)
+LDFLAGS += -liconv
+endif
+ifeq ($(targetos), MinGW)
 LDFLAGS += -liconv
 endif
 endif
 
 SRCS := $(OBJS:.o=.c)
+
+ifeq ($(targetos), MinGW)
+OBJS += ../../win32/win32.o
+SRCS += ../../win32/win32.c
+endif
 
 all: 	$(TARGET)
 

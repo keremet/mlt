@@ -782,7 +782,7 @@ static int get_image( mlt_frame frame, uint8_t **image, mlt_image_format *format
 	{
 		// Put the current image into the image cache, keyed on position
 		size_t image_size = (*width * *height) << 1;
-		mlt_position pos = mlt_frame_get_position( frame );
+		mlt_position pos = mlt_filter_get_position( filter, frame );
 		uint8_t *image_copy = mlt_pool_alloc( image_size );
 		memcpy( image_copy, *image, image_size );
 		char key[20];
@@ -1062,7 +1062,7 @@ static int get_image( mlt_frame frame, uint8_t **image, mlt_image_format *format
 					// Do first and last lines.
 					uint8_t *final = mlt_pool_alloc( image_size );
 					cx->finalp = final;
-					mlt_properties_set_data( frame_properties, "image", final, image_size, (mlt_destructor)mlt_pool_release, NULL );
+					mlt_frame_set_image( frame, final, image_size, mlt_pool_release );
 					dstpn = cx->dstp + cx->dpitch;
 					for ( cx->x = 0; cx->x < cx->w; cx->x++ )
 					{

@@ -3,8 +3,9 @@
  * \brief abstraction for all consumer services
  * \see mlt_consumer_s
  *
- * Copyright (C) 2003-2009 Ushodaya Enterprises Limited
+ * Copyright (C) 2003-2010 Ushodaya Enterprises Limited
  * \author Charles Yates <charles.yates@pandora.be>
+ * \author Dan Dennedy <dan@dennedy.org>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -105,13 +106,23 @@ struct mlt_consumer_s
 	mlt_image_format format;
 	mlt_deque queue;
 	pthread_t ahead_thread;
-	pthread_mutex_t mutex;
-	pthread_cond_t cond;
+	pthread_mutex_t queue_mutex;
+	pthread_cond_t queue_cond;
 	pthread_mutex_t put_mutex;
 	pthread_cond_t put_cond;
 	mlt_frame put;
 	int put_active;
 	mlt_event event_listener;
+	mlt_position position;
+
+	/* additional fields added for the parallel work queue */
+	mlt_deque worker_threads;
+	pthread_mutex_t done_mutex;
+	pthread_cond_t done_cond;
+	int consecutive_dropped;
+	int consecutive_rendered;
+	int process_head;
+	int started;
 };
 
 #define MLT_CONSUMER_SERVICE( consumer )	( &( consumer )->parent )
@@ -131,5 +142,6 @@ extern int mlt_consumer_stop( mlt_consumer self );
 extern int mlt_consumer_is_stopped( mlt_consumer self );
 extern void mlt_consumer_stopped( mlt_consumer self );
 extern void mlt_consumer_close( mlt_consumer );
+extern mlt_position mlt_consumer_position( mlt_consumer );
 
 #endif

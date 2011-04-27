@@ -24,6 +24,7 @@
 #include "mlt_transition.h"
 #include "mlt_frame.h"
 #include "mlt_log.h"
+#include "mlt_producer.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,28 +32,28 @@
 
 /* Forward references */
 
-static int transition_get_frame( mlt_service this, mlt_frame_ptr frame, int index );
+static int transition_get_frame( mlt_service self, mlt_frame_ptr frame, int index );
 
 /** Initialize a new transition.
  *
  * \public \memberof mlt_transition_s
- * \param this a transition
+ * \param self a transition
  * \param child the object of a subclass
  * \return true on error
  */
 
-int mlt_transition_init( mlt_transition this, void *child )
+int mlt_transition_init( mlt_transition self, void *child )
 {
-	mlt_service service = &this->parent;
-	memset( this, 0, sizeof( struct mlt_transition_s ) );
-	this->child = child;
-	if ( mlt_service_init( service, this ) == 0 )
+	mlt_service service = &self->parent;
+	memset( self, 0, sizeof( struct mlt_transition_s ) );
+	self->child = child;
+	if ( mlt_service_init( service, self ) == 0 )
 	{
-		mlt_properties properties = MLT_TRANSITION_PROPERTIES( this );
+		mlt_properties properties = MLT_TRANSITION_PROPERTIES( self );
 
 		service->get_frame = transition_get_frame;
 		service->close = ( mlt_destructor )mlt_transition_close;
-		service->close_object = this;
+		service->close_object = self;
 
 		mlt_properties_set_position( properties, "in", 0 );
 		mlt_properties_set_position( properties, "out", 0 );
@@ -72,55 +73,55 @@ int mlt_transition_init( mlt_transition this, void *child )
 
 mlt_transition mlt_transition_new( )
 {
-	mlt_transition this = calloc( 1, sizeof( struct mlt_transition_s ) );
-	if ( this != NULL )
-		mlt_transition_init( this, NULL );
-	return this;
+	mlt_transition self = calloc( 1, sizeof( struct mlt_transition_s ) );
+	if ( self != NULL )
+		mlt_transition_init( self, NULL );
+	return self;
 }
 
 /** Get the service class interface.
  *
  * \public \memberof mlt_transition_s
- * \param this a transition
+ * \param self a transition
  * \return the service class
  * \see MLT_TRANSITION_SERVICE
  */
 
-mlt_service mlt_transition_service( mlt_transition this )
+mlt_service mlt_transition_service( mlt_transition self )
 {
-	return this != NULL ? &this->parent : NULL;
+	return self != NULL ? &self->parent : NULL;
 }
 
 /** Get the properties interface.
  *
  * \public \memberof mlt_transition_s
- * \param this a transition
+ * \param self a transition
  * \return the transition's properties
  * \see MLT_TRANSITION_PROPERTIES
  */
 
-mlt_properties mlt_transition_properties( mlt_transition this )
+mlt_properties mlt_transition_properties( mlt_transition self )
 {
-	return MLT_TRANSITION_PROPERTIES( this );
+	return MLT_TRANSITION_PROPERTIES( self );
 }
 
-/** Connect this transition with a producers a and b tracks.
+/** Connect a transition with a producer's a and b tracks.
  *
  * \public \memberof mlt_transition_s
- * \param this a transition
+ * \param self a transition
  * \param producer a producer
  * \param a_track the track index of the first input
  * \param b_track the track index of the second index
  * \return true on error
  */
 
-int mlt_transition_connect( mlt_transition this, mlt_service producer, int a_track, int b_track )
+int mlt_transition_connect( mlt_transition self, mlt_service producer, int a_track, int b_track )
 {
-	int ret = mlt_service_connect_producer( &this->parent, producer, a_track );
+	int ret = mlt_service_connect_producer( &self->parent, producer, a_track );
 	if ( ret == 0 )
 	{
-		mlt_properties properties = MLT_TRANSITION_PROPERTIES( this );
-		this->producer = producer;
+		mlt_properties properties = MLT_TRANSITION_PROPERTIES( self );
+		self->producer = producer;
 		mlt_properties_set_int( properties, "a_track", a_track );
 		mlt_properties_set_int( properties, "b_track", b_track );
 	}
@@ -130,14 +131,14 @@ int mlt_transition_connect( mlt_transition this, mlt_service producer, int a_tra
 /** Set the starting and ending time for when the transition is active.
  *
  * \public \memberof mlt_transition_s
- * \param this a transition
+ * \param self a transition
  * \param in the starting time
  * \param out the ending time
  */
 
-void mlt_transition_set_in_and_out( mlt_transition this, mlt_position in, mlt_position out )
+void mlt_transition_set_in_and_out( mlt_transition self, mlt_position in, mlt_position out )
 {
-	mlt_properties properties = MLT_TRANSITION_PROPERTIES( this );
+	mlt_properties properties = MLT_TRANSITION_PROPERTIES( self );
 	mlt_properties_set_position( properties, "in", in );
 	mlt_properties_set_position( properties, "out", out );
 }
@@ -145,49 +146,148 @@ void mlt_transition_set_in_and_out( mlt_transition this, mlt_position in, mlt_po
 /** Get the index of the a track.
  *
  * \public \memberof mlt_transition_s
- * \param this a transition
+ * \param self a transition
  * \return the 0-based index of the track of the first producer
  */
 
-int mlt_transition_get_a_track( mlt_transition this )
+int mlt_transition_get_a_track( mlt_transition self )
 {
-	return mlt_properties_get_int( MLT_TRANSITION_PROPERTIES( this ), "a_track" );
+	return mlt_properties_get_int( MLT_TRANSITION_PROPERTIES( self ), "a_track" );
 }
 
 /** Get the index of the b track.
  *
  * \public \memberof mlt_transition_s
- * \param this a transition
+ * \param self a transition
  * \return the 0-based index of the track of the second producer
  */
 
-int mlt_transition_get_b_track( mlt_transition this )
+int mlt_transition_get_b_track( mlt_transition self )
 {
-	return mlt_properties_get_int( MLT_TRANSITION_PROPERTIES( this ), "b_track" );
+	return mlt_properties_get_int( MLT_TRANSITION_PROPERTIES( self ), "b_track" );
 }
 
 /** Get the in point.
  *
  * \public \memberof mlt_transition_s
- * \param this a transition
+ * \param self a transition
  * \return the starting time
  */
 
-mlt_position mlt_transition_get_in( mlt_transition this )
+mlt_position mlt_transition_get_in( mlt_transition self )
 {
-	return mlt_properties_get_position( MLT_TRANSITION_PROPERTIES( this ), "in" );
+	return mlt_properties_get_position( MLT_TRANSITION_PROPERTIES( self ), "in" );
 }
 
 /** Get the out point.
  *
  * \public \memberof mlt_transition_s
- * \param this a transition
+ * \param self a transition
  * \return the ending time
  */
 
-mlt_position mlt_transition_get_out( mlt_transition this )
+mlt_position mlt_transition_get_out( mlt_transition self )
 {
-	return mlt_properties_get_position( MLT_TRANSITION_PROPERTIES( this ), "out" );
+	return mlt_properties_get_position( MLT_TRANSITION_PROPERTIES( self ), "out" );
+}
+
+/** Get the duration.
+ *
+ * \public \memberof mlt_transition_s
+ * \param self a transition
+ * \return the duration or zero if unlimited
+ */
+
+mlt_position mlt_transition_get_length( mlt_transition self )
+{
+	mlt_properties properties = MLT_SERVICE_PROPERTIES( &self->parent );
+	mlt_position in = mlt_properties_get_position( properties, "in" );
+	mlt_position out = mlt_properties_get_position( properties, "out" );
+	return ( out > 0 ) ? ( out - in + 1 ) : 0;
+}
+
+/** Get the position within the transition.
+ *
+ * The position is relative to the in point.
+ *
+ * \public \memberof mlt_transition_s
+ * \param self a transition
+ * \param frame a frame
+ * \return the position
+ */
+
+mlt_position mlt_transition_get_position( mlt_transition self, mlt_frame frame )
+{
+	mlt_position in = mlt_transition_get_in( self );
+	mlt_position position = mlt_frame_get_position( frame );
+	return position - in;
+}
+
+/** Get the percent complete.
+ *
+ * \public \memberof mlt_transition_s
+ * \param self a transition
+ * \param frame a frame
+ * \return the progress in the range 0.0 to 1.0
+ */
+
+double mlt_transition_get_progress( mlt_transition self, mlt_frame frame )
+{
+	double progress = 0;
+	mlt_position in = mlt_transition_get_in( self );
+	mlt_position out = mlt_transition_get_out( self );
+
+	if ( out == 0 )
+	{
+		// If always active, use the frame's producer
+		mlt_producer producer = mlt_frame_get_original_producer( frame );
+		if ( producer )
+		{
+			in = mlt_producer_get_in( producer );
+			out = mlt_producer_get_out( producer );
+		}
+	}
+	if ( out != 0 )
+	{
+		mlt_position position = mlt_frame_get_position( frame );
+		progress = ( double ) ( position - in ) / ( double ) ( out - in + 1 );
+	}
+	return progress;
+}
+
+/** Get the second field incremental progress.
+ *
+ * \public \memberof mlt_transition_s
+ * \param self a transition
+ * \param frame a frame
+ * \return the progress increment in the range 0.0 to 1.0
+ */
+
+double mlt_transition_get_progress_delta( mlt_transition self, mlt_frame frame )
+{
+	double progress = 0;
+	mlt_position in = mlt_transition_get_in( self );
+	mlt_position out = mlt_transition_get_out( self );
+
+	if ( out == 0 )
+	{
+		// If always active, use the frame's producer
+		mlt_producer producer = mlt_frame_get_original_producer( frame );
+		if ( producer )
+		{
+			in = mlt_producer_get_in( producer );
+			out = mlt_producer_get_out( producer );
+		}
+	}
+	if ( out != 0 )
+	{
+		mlt_position position = mlt_frame_get_position( frame );
+		double length = out - in + 1;
+		double x = ( double ) ( position - in ) / length;
+		double y = ( double ) ( position + 1 - in ) / length;
+		progress = length * ( y - x ) / 2.0;
+	}
+	return progress;
 }
 
 /** Process the frame.
@@ -195,21 +295,21 @@ mlt_position mlt_transition_get_out( mlt_transition this )
  * If we have no process method (unlikely), we simply return the a_frame unmolested.
  *
  * \public \memberof mlt_transition_s
- * \param this a transition
+ * \param self a transition
  * \param a_frame a frame from the first producer
  * \param b_frame a frame from the second producer
  * \return a frame
  */
 
-mlt_frame mlt_transition_process( mlt_transition this, mlt_frame a_frame, mlt_frame b_frame )
+mlt_frame mlt_transition_process( mlt_transition self, mlt_frame a_frame, mlt_frame b_frame )
 {
-	if ( this->process == NULL )
+	if ( self->process == NULL )
 		return a_frame;
 	else
-		return this->process( this, a_frame, b_frame );
+		return self->process( self, a_frame, b_frame );
 }
 
-/** Get a frame from this transition.
+/** Get a frame from a transition.
 
 	The logic is complex here. A transition is typically applied to frames on the a and
 	b tracks specified in the connect method above and only if both contain valid info
@@ -250,9 +350,9 @@ mlt_frame mlt_transition_process( mlt_transition this, mlt_frame a_frame, mlt_fr
 static int transition_get_frame( mlt_service service, mlt_frame_ptr frame, int index )
 {
 	int error = 0;
-	mlt_transition this = service->child;
+	mlt_transition self = service->child;
 
-	mlt_properties properties = MLT_TRANSITION_PROPERTIES( this );
+	mlt_properties properties = MLT_TRANSITION_PROPERTIES( self );
 
 	int accepts_blanks = mlt_properties_get_int( properties, "accepts_blanks" );
 	int a_track = mlt_properties_get_int( properties, "a_track" );
@@ -272,7 +372,7 @@ static int transition_get_frame( mlt_service service, mlt_frame_ptr frame, int i
 	}
 
 	// Only act on this operation once per multitrack iteration from the tractor
-	if ( !this->held )
+	if ( !self->held )
 	{
 		int active = 0;
 		int i = 0;
@@ -282,15 +382,15 @@ static int transition_get_frame( mlt_service service, mlt_frame_ptr frame, int i
 		int ( *invalid )( mlt_frame ) = type == 1 ? mlt_frame_is_test_card : mlt_frame_is_test_audio;
 
 		// Initialise temporary store
-		if ( this->frames == NULL )
-			this->frames = calloc( sizeof( mlt_frame ), b_track + 1 );
+		if ( self->frames == NULL )
+			self->frames = calloc( sizeof( mlt_frame ), b_track + 1 );
 
 		// Get all frames between a and b
 		for( i = a_track; i <= b_track; i ++ )
-			mlt_service_get_frame( this->producer, &this->frames[ i ], i );
+			mlt_service_get_frame( self->producer, &self->frames[ i ], i );
 
 		// We're holding these frames until the last_track frame property is received
-		this->held = 1;
+		self->held = 1;
 
 		// When we need to locate the a_frame
 		switch( type )
@@ -304,11 +404,11 @@ static int transition_get_frame( mlt_service service, mlt_frame_ptr frame, int i
 				if ( !active )
 				{
 					// Hunt for the a_frame
-					while( a_frame <= b_frame && invalid( this->frames[ a_frame ] ) )
+					while( a_frame <= b_frame && invalid( self->frames[ a_frame ] ) )
 						a_frame ++;
 
 					// Determine if we're active now
-					active = a_frame != b_frame && !invalid( this->frames[ b_frame ] );
+					active = a_frame != b_frame && !invalid( self->frames[ b_frame ] );
 				}
 				break;
 
@@ -321,23 +421,23 @@ static int transition_get_frame( mlt_service service, mlt_frame_ptr frame, int i
 		if ( active && !always_active )
 		{
 			// For non-always-active transitions, we need the current position of the a frame
-			position = mlt_frame_get_position( this->frames[ a_frame ] );
+			position = mlt_frame_get_position( self->frames[ a_frame ] );
 
 			// If a is in range, we're active
-			active = position >= in && position <= out;
+			active = position >= in && ( out == 0 || position <= out );
 		}
 
 		// Finally, process the a and b frames
 		if ( active )
 		{
-			mlt_frame a_frame_ptr = this->frames[ !reverse_order ? a_frame : b_frame ];
-			mlt_frame b_frame_ptr = this->frames[ !reverse_order ? b_frame : a_frame ];
+			mlt_frame a_frame_ptr = self->frames[ !reverse_order ? a_frame : b_frame ];
+			mlt_frame b_frame_ptr = self->frames[ !reverse_order ? b_frame : a_frame ];
 			int a_hide = mlt_properties_get_int( MLT_FRAME_PROPERTIES( a_frame_ptr ), "hide" );
 			int b_hide = mlt_properties_get_int( MLT_FRAME_PROPERTIES( b_frame_ptr ), "hide" );
 			if ( !( a_hide & type ) && !( b_hide & type ) )
 			{
 				// Process the transition
-				*frame = mlt_transition_process( this, a_frame_ptr, b_frame_ptr );
+				*frame = mlt_transition_process( self, a_frame_ptr, b_frame_ptr );
 
 				// We need to ensure that the tractor doesn't consider this frame for output
 				if ( *frame == a_frame_ptr )
@@ -353,12 +453,12 @@ static int transition_get_frame( mlt_service service, mlt_frame_ptr frame, int i
 
 	// Obtain the frame from the cache or the producer we're attached to
 	if ( index >= a_track && index <= b_track )
-		*frame = this->frames[ index ];
+		*frame = self->frames[ index ];
 	else
-		error = mlt_service_get_frame( this->producer, frame, index );
+		error = mlt_service_get_frame( self->producer, frame, index );
 
 	// Determine if that was the last track
-	this->held = !mlt_properties_get_int( MLT_FRAME_PROPERTIES( *frame ), "last_track" );
+	self->held = !mlt_properties_get_int( MLT_FRAME_PROPERTIES( *frame ), "last_track" );
 
 	return error;
 }
@@ -366,23 +466,23 @@ static int transition_get_frame( mlt_service service, mlt_frame_ptr frame, int i
 /** Close and destroy the transition.
  *
  * \public \memberof mlt_transition_s
- * \param this a transition
+ * \param self a transition
  */
 
-void mlt_transition_close( mlt_transition this )
+void mlt_transition_close( mlt_transition self )
 {
-	if ( this != NULL && mlt_properties_dec_ref( MLT_TRANSITION_PROPERTIES( this ) ) <= 0 )
+	if ( self != NULL && mlt_properties_dec_ref( MLT_TRANSITION_PROPERTIES( self ) ) <= 0 )
 	{
-		this->parent.close = NULL;
-		if ( this->close != NULL )
+		self->parent.close = NULL;
+		if ( self->close != NULL )
 		{
-			this->close( this );
+			self->close( self );
 		}
 		else
 		{
-			mlt_service_close( &this->parent );
-			free( this->frames );
-			free( this );
+			mlt_service_close( &self->parent );
+			free( self->frames );
+			free( self );
 		}
 	}
 }

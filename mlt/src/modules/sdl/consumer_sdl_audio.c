@@ -1,6 +1,6 @@
 /*
  * consumer_sdl_audio.c -- A Simple DirectMedia Layer audio-only consumer
- * Copyright (C) 2009 Ushodaya Enterprises Limited
+ * Copyright (C) 2009, 2010 Ushodaya Enterprises Limited
  * Author: Dan Dennedy <dan@dennedy.org>
  *
  * This library is free software; you can redistribute it and/or
@@ -28,8 +28,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-#include <SDL/SDL.h>
+#include <SDL.h>
 #include <sys/time.h>
+
+extern pthread_mutex_t mlt_sdl_mutex;
 
 /** This classes definition.
 */
@@ -109,7 +111,7 @@ mlt_consumer consumer_sdl_audio_init( mlt_profile profile, mlt_service_type type
 		mlt_properties_set_int( this->properties, "buffer", 1 );
 
 		// Default audio buffer
-		mlt_properties_set_int( this->properties, "audio_buffer", 512 );
+		mlt_properties_set_int( this->properties, "audio_buffer", 2048 );
 
 		// Ensure we don't join on a non-running object
 		this->joined = 1;
@@ -141,7 +143,7 @@ static void consumer_refresh_cb( mlt_consumer sdl, mlt_consumer parent, char *na
 	{
 		consumer_sdl this = parent->child;
 		pthread_mutex_lock( &this->refresh_mutex );
-		this->refresh_count = this->refresh_count <= 0 ? 1 : this->refresh_count ++;
+		this->refresh_count = this->refresh_count <= 0 ? 1 : this->refresh_count + 1;
 		pthread_cond_broadcast( &this->refresh_cond );
 		pthread_mutex_unlock( &this->refresh_mutex );
 	}
@@ -158,7 +160,11 @@ int consumer_start( mlt_consumer parent )
 		this->running = 1;
 		this->joined = 0;
 
-		if ( SDL_Init( SDL_INIT_AUDIO | SDL_INIT_NOPARACHUTE ) < 0 )
+
+		pthread_mutex_lock( &mlt_sdl_mutex );
+		int ret = SDL_Init( SDL_INIT_AUDIO | SDL_INIT_NOPARACHUTE );
+		pthread_mutex_unlock( &mlt_sdl_mutex );
+		if ( ret < 0 )
 		{
 			mlt_log_error( MLT_CONSUMER_SERVICE(parent), "Failed to initialize SDL: %s\n", SDL_GetError() );
 			return -1;
@@ -187,7 +193,9 @@ int consumer_stop( mlt_consumer parent )
 		pthread_mutex_unlock( &this->refresh_mutex );
 
 		// Cleanup the main thread
+#ifndef WIN32
 		if ( this->thread )
+#endif
 			pthread_join( this->thread, NULL );
 
 		// Unlatch the audio callback
@@ -459,7 +467,7 @@ static void *consumer_thread( void *arg )
 	int duration = 0;
 	int64_t playtime = 0;
 	struct timespec tm = { 0, 100000 };
-	int last_position = -1;
+//	int last_position = -1;
 	this->refresh_count = 0;
 
 	// Loop until told not to
@@ -528,19 +536,23 @@ static void *consumer_thread( void *arg )
 				pthread_mutex_unlock( &this->refresh_mutex );
 			}
 			else
+			{
 				mlt_frame_close( frame );
+				frame = NULL;
+			}
 
 			// Optimisation to reduce latency
-			if ( speed == 1.0 )
+			if ( frame && speed == 1.0 )
 			{
-				if ( last_position != -1 && last_position + 1 != mlt_frame_get_position( frame ) )
-					mlt_consumer_purge( consumer );
-				last_position = mlt_frame_get_position( frame );
+                // TODO: disabled due to misbehavior on parallel-consumer
+//				if ( last_position != -1 && last_position + 1 != mlt_frame_get_position( frame ) )
+//					mlt_consumer_purge( consumer );
+//				last_position = mlt_frame_get_position( frame );
 			}
 			else
 			{
 				mlt_consumer_purge( consumer );
-				last_position = -1;
+//				last_position = -1;
 			}
 		}
 	}

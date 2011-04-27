@@ -1,7 +1,8 @@
 /*
  * melt.c -- MLT command line utility
- * Copyright (C) 2002-2010 Ushodaya Enterprises Limited
- * Author: Charles Yates <charles.yates@pandora.be>
+ * Copyright (C) 2002-2011 Ushodaya Enterprises Limited
+ * Authors: Charles Yates <charles.yates@pandora.be>
+ *          Dan Dennedy <dan@dennedy.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,10 +27,11 @@
 #include <string.h>
 #include <sched.h>
 #include <libgen.h>
+#include <limits.h>
 
 #include <framework/mlt.h>
 
-#ifdef __DARWIN__
+#if defined(__DARWIN__) || defined(WIN32)
 #include <SDL.h>
 #endif
 
@@ -162,19 +164,42 @@ static void transport_action( mlt_producer producer, char *value )
 
 static mlt_consumer create_consumer( mlt_profile profile, char *id )
 {
-	char *arg = id != NULL ? strchr( id, ':' ) : NULL;
+	char *myid = id ? strdup( id ) : NULL;
+	char *arg = myid ? strchr( myid, ':' ) : NULL;
 	if ( arg != NULL )
 		*arg ++ = '\0';
-	mlt_consumer consumer = mlt_factory_consumer( profile, id, arg );
+	mlt_consumer consumer = mlt_factory_consumer( profile, myid, arg );
 	if ( consumer != NULL )
 	{
 		mlt_properties properties = MLT_CONSUMER_PROPERTIES( consumer );
 		mlt_properties_set_data( properties, "transport_callback", transport_action, 0, NULL, NULL );
 	}
+	if ( myid )
+		free( myid );
 	return consumer;
 }
 
-#ifdef __DARWIN__
+static void load_consumer( mlt_consumer *consumer, mlt_profile profile, int argc, char **argv )
+{
+	int i;
+	for ( i = 1; i < argc; i ++ )
+	{
+		if ( !strcmp( argv[ i ], "-consumer" ) )
+		{
+			if ( *consumer )
+				mlt_consumer_close( *consumer );
+			*consumer = create_consumer( profile, argv[ ++ i ] );
+			if ( *consumer )
+			{
+				mlt_properties properties = MLT_CONSUMER_PROPERTIES( *consumer );
+				while ( argv[ i + 1 ] != NULL && strstr( argv[ i + 1 ], "=" ) )
+					mlt_properties_parse( properties, argv[ ++ i ] );
+			}
+		}
+	}
+}
+
+#if defined(__DARWIN__) || defined(WIN32)
 
 static void event_handling( mlt_producer producer, mlt_consumer consumer )
 {
@@ -238,7 +263,7 @@ static void transport( mlt_producer producer, mlt_consumer consumer )
 				transport_action( producer, string );
 			}
 
-#ifdef __DARWIN__
+#if defined(__DARWIN__) || defined(WIN32)
 			event_handling( producer, consumer );
 #endif
 
@@ -256,7 +281,7 @@ static void transport( mlt_producer producer, mlt_consumer consumer )
 				}
 				else
 				{
-					fprintf( stderr, "Current Position: %10d\r", (int)mlt_producer_position( producer ) );
+					fprintf( stderr, "Current Position: %10d\r", (int)mlt_consumer_position( consumer ) );
 				}
 			}
 
@@ -267,6 +292,94 @@ static void transport( mlt_producer producer, mlt_consumer consumer )
 		if ( !silent )
 			fprintf( stderr, "\n" );
 	}
+}
+
+static void show_usage( char *program_name )
+{
+	fprintf( stderr,
+"Usage: %s [options] [producer [name=value]* ]+\n"
+"Options:\n"
+"  -attach filter[:arg] [name=value]*       Attach a filter to the output\n"
+"  -attach-cut filter[:arg] [name=value]*   Attach a filter to a cut\n"
+"  -attach-track filter[:arg] [name=value]* Attach a filter to a track\n"
+"  -attach-clip filter[:arg] [name=value]*  Attach a filter to a producer\n"
+"  -audio-track | -hide-video               Add an audio-only track\n"
+"  -blank frames                            Add blank silence to a track\n"
+"  -consumer id[:arg] [name=value]*         Set the consumer (sink)\n"
+"  -debug                                   Set the logging level to debug\n"
+"  -filter filter[:arg] [name=value]*       Add a filter to the current track\n"
+"  -group [name=value]*                     Apply properties repeatedly\n"
+"  -help                                    Show this message\n"
+"  -join clips                              Join multiple clips into one cut\n"
+"  -mix length                              Add a mix between the last two cuts\n"
+"  -mixer transition                        Add a transition to the mix\n"
+"  -null-track | -hide-track                Add a hidden track\n"
+"  -profile name                            Set the processing settings\n"
+"  -progress                                Display progress along with position\n"
+"  -remove                                  Remove the most recent cut\n"
+"  -repeat times                            Repeat the last cut\n"
+"  -query                                   List all of the registered services\n"
+"  -query \"consumers\" | \"consumer\"=id       List consumers or show info about one\n"
+"  -query \"filters\" | \"filter\"=id           List filters or show info about one\n"
+"  -query \"producers\" | \"producer\"=id       List producers or show info about one\n"
+"  -query \"transitions\" | \"transition\"=id   List transitions, show info about one\n"
+"  -serialise [filename]                    Write the commands to a text file\n"
+"  -silent                                  Do not display position/transport\n"
+"  -split relative-frame                    Split the last cut into two cuts\n"
+"  -swap                                    Rearrange the last two cuts\n"
+"  -track                                   Add a track\n"
+"  -transition id[:arg] [name=value]*       Add a transition\n"
+"  -verbose                                 Set the logging level to verbose\n"
+"  -version                                 Show the version and copyright\n"
+"  -video-track | -hide-audio               Add a video-only track\n"
+"For more help: <http://www.mltframework.org/>\n",
+	basename( program_name ) );
+}
+
+static void guess_profile( mlt_producer melt, mlt_profile profile )
+{
+	mlt_frame fr = NULL;
+	uint8_t *buffer;
+	mlt_image_format fmt = mlt_image_yuv422;
+	mlt_properties p;
+	int w = profile->width;
+	int h = profile->height;
+
+	if ( ! mlt_service_get_frame( MLT_PRODUCER_SERVICE(melt), &fr, 0 ) && fr )
+	{
+		mlt_properties_set_double( MLT_FRAME_PROPERTIES( fr ), "consumer_aspect_ratio", mlt_profile_sar( profile ) );
+		if ( ! mlt_frame_get_image( fr, &buffer, &fmt, &w, &h, 0 ) )
+		{
+			// Some source properties are not exposed until after the first get_image call.
+			mlt_frame_close( fr );
+			mlt_service_get_frame( MLT_PRODUCER_SERVICE(melt), &fr, 0 );
+			p = MLT_FRAME_PROPERTIES( fr );
+//			mlt_properties_dump(p, stderr);
+			if ( mlt_properties_get_int( p, "meta.media.frame_rate_den" ) && mlt_properties_get_int( p, "meta.media.sample_aspect_den" ) )
+			{
+				profile->width = mlt_properties_get_int( p, "meta.media.width" );
+				profile->height = mlt_properties_get_int( p, "meta.media.height" );
+				profile->progressive = mlt_properties_get_int( p, "meta.media.progressive" );
+				profile->frame_rate_num = mlt_properties_get_int( p, "meta.media.frame_rate_num" );
+				profile->frame_rate_den = mlt_properties_get_int( p, "meta.media.frame_rate_den" );
+				// AVCHD is mis-reported as double frame rate.
+				if ( profile->progressive == 0 && (
+				     profile->frame_rate_num / profile->frame_rate_den == 50 ||
+				     profile->frame_rate_num / profile->frame_rate_den == 59 ) )
+					profile->frame_rate_num /= 2;
+				profile->sample_aspect_num = mlt_properties_get_int( p, "meta.media.sample_aspect_num" );
+				profile->sample_aspect_den = mlt_properties_get_int( p, "meta.media.sample_aspect_den" );
+				profile->colorspace = mlt_properties_get_int( p, "meta.media.colorspace" );
+				profile->display_aspect_num = (int) ( (double) profile->sample_aspect_num * profile->width / profile->sample_aspect_den + 0.5 );
+				profile->display_aspect_den = profile->height;
+				free( profile->description );
+				profile->description = strdup( "automatic" );
+				profile->is_explicit = 0;
+			}
+		}
+	}
+	mlt_frame_close( fr );
+	mlt_producer_seek( melt, 0 );
 }
 
 static void query_metadata( mlt_repository repo, mlt_service_type type, const char *typestr, char *id )
@@ -319,6 +432,12 @@ static void query_services( mlt_repository repo, mlt_service_type type )
 	fprintf( stderr, "...\n" );
 }
 
+static void on_fatal_error( mlt_properties owner, mlt_consumer consumer )
+{
+	mlt_consumer_stop( consumer );
+	exit( EXIT_FAILURE );
+}
+
 int main( int argc, char **argv )
 {
 	int i;
@@ -329,10 +448,15 @@ int main( int argc, char **argv )
 	mlt_profile profile = NULL;
 	int is_progress = 0;
 	int is_silent = 0;
+	mlt_profile backup_profile;
 
 	// Construct the factory
 	mlt_repository repo = mlt_factory_init( NULL );
 
+#ifdef WIN32
+	is_silent = 1;
+#endif
+	
 	for ( i = 1; i < argc; i ++ )
 	{
 		// Check for serialisation switch
@@ -409,7 +533,7 @@ query_all:
 		else if ( !strcmp( argv[ i ], "-version" ) || !strcmp( argv[ i ], "--version" ) )
 		{
 			fprintf( stderr, "MLT %s " VERSION "\n"
-				"Copyright (C) 2002-2010 Ushodaya Enterprises Limited\n"
+				"Copyright (C) 2002-2011 Ushodaya Enterprises Limited\n"
 				"<http://www.mltframework.org/>\n"
 				"This is free software; see the source for copying conditions.  There is NO\n"
 				"warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n",
@@ -423,32 +547,52 @@ query_all:
 	}
 
 	// Create profile if not set explicitly
+	if ( getenv( "MLT_PROFILE" ) )
+		profile = mlt_profile_init( NULL );
 	if ( profile == NULL )
 		profile = mlt_profile_init( NULL );
+	else
+		profile->is_explicit = 1;
 
-	// Look for the consumer option
-	for ( i = 1; i < argc; i ++ )
-	{
-		if ( !strcmp( argv[ i ], "-consumer" ) )
-		{
-			consumer = create_consumer( profile, argv[ ++ i ] );
-			if ( consumer )
-			{
-				mlt_properties properties = MLT_CONSUMER_PROPERTIES( consumer );
-				while ( argv[ i + 1 ] != NULL && strstr( argv[ i + 1 ], "=" ) )
-					mlt_properties_parse( properties, argv[ ++ i ] );
-			}
-		}
-	}
+	// Look for the consumer option to load profile settings from consumer properties
+	backup_profile = mlt_profile_clone( profile );
+	load_consumer( &consumer, profile, argc, argv );
 
-	// If we have no consumer, default to sdl
-	if ( store == NULL && consumer == NULL )
-		consumer = create_consumer( profile, NULL );
+	// If the consumer changed the profile, then it is explicit.
+	if ( backup_profile && !profile->is_explicit && (
+	     profile->width != backup_profile->width ||
+	     profile->height != backup_profile->height ||
+	     profile->sample_aspect_num != backup_profile->sample_aspect_num ||
+	     profile->sample_aspect_den != backup_profile->sample_aspect_den ||
+	     profile->frame_rate_den != backup_profile->frame_rate_den ||
+	     profile->frame_rate_num != backup_profile->frame_rate_num ||
+	     profile->colorspace != backup_profile->colorspace ) )
+		profile->is_explicit = 1;
+	mlt_profile_close( backup_profile );
 
 	// Get melt producer
 	if ( argc > 1 )
 		melt = mlt_factory_producer( profile, "melt", &argv[ 1 ] );
 
+	if ( melt )
+	{
+		// Generate an automatic profile if needed.
+		if ( ! profile->is_explicit )
+		{
+			guess_profile( melt, profile );
+			mlt_producer_close( melt );
+			melt = mlt_factory_producer( profile, "melt", &argv[ 1 ] );
+		}
+		
+		// Reload the consumer with the fully qualified profile.
+		// The producer or guess_profile could have changed the profile.
+		load_consumer( &consumer, profile, argc, argv );
+
+		// If we have no consumer, default to sdl
+		if ( store == NULL && consumer == NULL )
+			consumer = create_consumer( profile, NULL );
+	}
+	
 	// Set transport properties on consumer and produder
 	if ( consumer != NULL && melt != NULL )
 	{
@@ -504,13 +648,15 @@ query_all:
 			mlt_consumer_connect( consumer, MLT_PRODUCER_SERVICE( melt ) );
 
 			// Start the consumer
-			mlt_consumer_start( consumer );
-
-			// Transport functionality
-			transport( melt, consumer );
-
-			// Stop the consumer
-			mlt_consumer_stop( consumer );
+			mlt_events_listen( properties, consumer, "consumer-fatal-error", ( mlt_listener )on_fatal_error );
+			if ( mlt_consumer_start( consumer ) == 0 )
+			{
+				// Transport functionality
+				transport( melt, consumer );
+				
+				// Stop the consumer
+				mlt_consumer_stop( consumer );
+			}	
 		}
 		else if ( store != NULL && store != stdout && name != NULL )
 		{
@@ -520,44 +666,7 @@ query_all:
 	}
 	else
 	{
-		fprintf( stderr,
-"Usage: %s [options] [producer [name=value]* ]+\n"
-"Options:\n"
-"  -attach filter[:arg] [name=value]*       Attach a filter to the output\n"
-"  -attach-cut filter[:arg] [name=value]*   Attach a filter to a cut\n"
-"  -attach-track filter[:arg] [name=value]* Attach a filter to a track\n"
-"  -attach-clip filter[:arg] [name=value]*  Attach a filter to a producer\n"
-"  -audio-track | -hide-video               Add an audio-only track\n"
-"  -blank frames                            Add blank silence to a track\n"
-"  -consumer id[:arg] [name=value]*         Set the consumer (sink)\n"
-"  -debug                                   Set the logging level to debug\n"
-"  -filter filter[:arg] [name=value]*       Add a filter to the current track\n"
-"  -group [name=value]*                     Apply properties repeatedly\n"
-"  -help                                    Show this message\n"
-"  -join clips                              Join multiple clips into one cut\n"
-"  -mix length                              Add a mix between the last two cuts\n"
-"  -mixer transition                        Add a transition to the mix\n"
-"  -null-track | -hide-track                Add a hidden track\n"
-"  -profile name                            Set the processing settings\n"
-"  -progress                                Display progress along with position\n"
-"  -remove                                  Remove the most recent cut\n"
-"  -repeat times                            Repeat the last cut\n"
-"  -query                                   List all of the registered services\n"
-"  -query \"consumers\" | \"consumer\"=id       List consumers or show info about one\n"
-"  -query \"filters\" | \"filter\"=id           List filters or show info about one\n"
-"  -query \"producers\" | \"producer\"=id       List producers or show info about one\n"
-"  -query \"transitions\" | \"transition\"=id   List transitions, show info about one\n"
-"  -serialise [filename]                    Write the commands to a text file\n"
-"  -silent                                  Do not display position/transport\n"
-"  -split relative-frame                    Split the last cut into two cuts\n"
-"  -swap                                    Rearrange the last two cuts\n"
-"  -track                                   Add a track\n"
-"  -transition id[:arg] [name=value]*       Add a transition\n"
-"  -verbose                                 Set the logging level to verbose\n"
-"  -version                                 Show the version and copyright\n"
-"  -video-track | -hide-audio               Add a video-only track\n"
-"For more help: <http://www.mltframework.org/>\n",
-		basename( argv[0] ) );
+		show_usage( argv[0] );
 	}
 
 	// Close the producer

@@ -44,14 +44,14 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 		char buf[256];
 		char typebuf[256];
 		
-		mlt_position in = mlt_filter_get_in( filter );
-		mlt_position out = mlt_filter_get_out( filter );
-		mlt_position time = mlt_frame_get_position( this );
-		double position = ( double )( time - in ) / ( double )( out - in + 1 );
-		srand(position*10000);
 		if (!width_line)
 			return 0;
+
+		double position = mlt_filter_get_progress( filter, this );
+		srand(position*10000);
 		
+		mlt_service_lock( MLT_FILTER_SERVICE( filter ) );
+
 		while (num--){
 			int type=(rand()%3)+1;
 			int x1=(double)w*rand()/RAND_MAX;
@@ -105,6 +105,7 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 			mlt_properties_set_int(MLT_FILTER_PROPERTIES( filter ),buf,x1);
 		}
 		mlt_properties_set_double(MLT_FILTER_PROPERTIES( filter ),"last_oldfilm_line_pos",position);
+		mlt_service_unlock( MLT_FILTER_SERVICE( filter ) );
 	}
 
 	return error;

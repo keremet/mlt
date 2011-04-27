@@ -41,6 +41,8 @@ static int framebuffer_get_image( mlt_frame this, uint8_t **image, mlt_image_for
 	int index = ( int )mlt_frame_pop_service( this );
 	mlt_properties properties = MLT_PRODUCER_PROPERTIES( producer );
 
+	mlt_service_lock( MLT_PRODUCER_SERVICE( producer ) );
+
 	// Frame properties objects
 	mlt_properties frame_properties = MLT_FRAME_PROPERTIES( this );
 	mlt_frame first_frame = mlt_properties_get_data( properties, "first_frame", NULL );
@@ -83,26 +85,7 @@ static int framebuffer_get_image( mlt_frame this, uint8_t **image, mlt_image_for
 	// Determine output buffer size
 	*width = mlt_properties_get_int( frame_properties, "width" );
 	*height = mlt_properties_get_int( frame_properties, "height" );
-	
-	int size;
-	switch ( *format )
-	{
-		case mlt_image_yuv420p:
-			size = *width * 3 * ( *height + 1 ) / 2;
-			break;
-		case mlt_image_rgb24:
-			size = *width * ( *height + 1 ) * 3;
-			break;
-		case mlt_image_rgb24a:
-		case mlt_image_opengl:
-			size = *width * ( *height + 1 ) * 4;
-			break;
-		default:
-			*format = mlt_image_yuv422;
-			size = *width * ( *height + 1 ) * 2;
-			break;
-	}
-	
+	int size = mlt_image_format_size( *format, *width, *height, NULL );
 
 	// Get output buffer
 	int buffersize = 0;
@@ -130,12 +113,13 @@ static int framebuffer_get_image( mlt_frame this, uint8_t **image, mlt_image_for
 
 		// Set the output image
 		*image = image_copy;
-		mlt_properties_set_data( frame_properties, "image", image_copy, size, ( mlt_destructor )mlt_pool_release, NULL );
+		mlt_frame_set_image( this, image_copy, size, mlt_pool_release );
 
 		*width = mlt_properties_get_int( properties, "_output_width" );
 		*height = mlt_properties_get_int( properties, "_output_height" );
 		*format = mlt_properties_get_int( properties, "_output_format" );
 
+		mlt_service_unlock( MLT_PRODUCER_SERVICE( producer ) );
 		return 0;
 	}
 
@@ -167,7 +151,8 @@ static int framebuffer_get_image( mlt_frame this, uint8_t **image, mlt_image_for
 		int error = mlt_frame_get_image( first_frame, &first_image, format, width, height, writable );
 
 		if ( error != 0 ) {
-			fprintf(stderr, "first_image == NULL get image died\n");
+			mlt_log_error( MLT_PRODUCER_SERVICE( producer ), "first_image == NULL get image died\n" );
+			mlt_service_unlock( MLT_PRODUCER_SERVICE( producer ) );
 			return error;
 		}
 		output = mlt_pool_alloc( size );
@@ -179,6 +164,7 @@ static int framebuffer_get_image( mlt_frame this, uint8_t **image, mlt_image_for
 		mlt_properties_set_int( properties, "_output_format", *format );
 	
 	}
+	mlt_service_unlock( MLT_PRODUCER_SERVICE( producer ) );
 
 	// Create a copy
 	uint8_t *image_copy = mlt_pool_alloc( size );
@@ -186,7 +172,7 @@ static int framebuffer_get_image( mlt_frame this, uint8_t **image, mlt_image_for
 
 	// Set the output image
 	*image = image_copy;
-	mlt_properties_set_data( frame_properties, "image", *image, size, ( mlt_destructor )mlt_pool_release, NULL );
+	mlt_frame_set_image( this, *image, size, mlt_pool_release );
 
 	return 0;
 }
@@ -202,12 +188,12 @@ static int producer_get_frame( mlt_producer this, mlt_frame_ptr frame, int index
 		mlt_frame_push_service( *frame, this );
 		mlt_frame_push_service( *frame, framebuffer_get_image );
 
-                mlt_properties properties = MLT_PRODUCER_PROPERTIES( this );
-                mlt_properties frame_properties = MLT_FRAME_PROPERTIES(*frame);
-                
-                double force_aspect_ratio = mlt_properties_get_double( properties, "force_aspect_ratio" );
-                if ( force_aspect_ratio <= 0.0 ) force_aspect_ratio = mlt_properties_get_double( properties, "aspect_ratio" );
-                mlt_properties_set_double( frame_properties, "aspect_ratio", force_aspect_ratio );
+		mlt_properties properties = MLT_PRODUCER_PROPERTIES( this );
+		mlt_properties frame_properties = MLT_FRAME_PROPERTIES(*frame);
+		
+		double force_aspect_ratio = mlt_properties_get_double( properties, "force_aspect_ratio" );
+		if ( force_aspect_ratio <= 0.0 ) force_aspect_ratio = mlt_properties_get_double( properties, "aspect_ratio" );
+		mlt_properties_set_double( frame_properties, "aspect_ratio", force_aspect_ratio );
                 
 		// Give the returned frame temporal identity
 		mlt_frame_set_position( *frame, mlt_producer_position( this ) );

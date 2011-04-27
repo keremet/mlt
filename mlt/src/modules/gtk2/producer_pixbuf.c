@@ -124,7 +124,7 @@ static void load_filenames( producer_pixbuf this, mlt_properties producer_proper
 	{
 		// Generate a temporary file for the svg
 		char fullname[ 1024 ] = "/tmp/mlt.XXXXXX";
-		int fd = mkstemp( fullname );
+		int fd = g_mkstemp( fullname );
 
 		if ( fd > -1 )
 		{
@@ -303,6 +303,9 @@ static void refresh_image( producer_pixbuf this, mlt_frame frame, int width, int
 					/* Free the EXIF data */
 					exif_data_unref(d);
 				}
+				
+				// Remember EXIF value, might be useful for someone
+				mlt_properties_set_int( producer_props, "_exif_orientation" , exif_orientation );
 
 				if ( exif_orientation > 1 )
 				{
@@ -372,7 +375,7 @@ static void refresh_image( producer_pixbuf this, mlt_frame frame, int width, int
 			interp = GDK_INTERP_NEAREST;
 		else if ( strcmp( interps, "tiles" ) == 0 )
 			interp = GDK_INTERP_TILES;
-		else if ( strcmp( interps, "hyper" ) == 0 )
+		else if ( strcmp( interps, "hyper" ) == 0 || strcmp( interps, "bicubic" ) == 0 )
 			interp = GDK_INTERP_HYPER;
 
 		// Note - the original pixbuf is already safe and ready for destruction
@@ -440,7 +443,7 @@ static void refresh_image( producer_pixbuf this, mlt_frame frame, int width, int
 		mlt_properties_set_int( cached_props, "height", this->height );
 		mlt_properties_set_int( cached_props, "real_width", mlt_properties_get_int( producer_props, "_real_width" ) );
 		mlt_properties_set_int( cached_props, "real_height", mlt_properties_get_int( producer_props, "_real_height" ) );
-		mlt_properties_set_data( cached_props, "image", this->image, this->width * ( this->alpha ? 4 : 3 ) * this->height, mlt_pool_release, NULL );
+		mlt_frame_set_image( cached, this->image, this->width * ( this->alpha ? 4 : 3 ) * this->height, mlt_pool_release );
 		mlt_properties_set_int( cached_props, "alpha", this->alpha );
 		mlt_properties_set_data( cache, image_key, cached, 0, ( mlt_destructor )mlt_frame_close, NULL );
 	}
@@ -461,6 +464,8 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 	*width = mlt_properties_get_int( properties, "rescale_width" );
 	*height = mlt_properties_get_int( properties, "rescale_height" );
 
+	mlt_service_lock( MLT_PRODUCER_SERVICE( &this->parent ) );
+
 	// Refresh the image
 	refresh_image( this, frame, *width, *height );
 
@@ -477,7 +482,7 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 		uint8_t *image_copy = mlt_pool_alloc( image_size );
 		memcpy( image_copy, this->image, image_size );
 		// Now update properties so we free the copy after
-		mlt_properties_set_data( properties, "image", image_copy, image_size, mlt_pool_release, NULL );
+		mlt_frame_set_image( frame, image_copy, image_size, mlt_pool_release );
 		// We're going to pass the copy on
 		*buffer = image_copy;
 		*format = this->alpha ? mlt_image_rgb24a : mlt_image_rgb24;
@@ -492,6 +497,7 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 	// Release references and locks
 	pthread_mutex_unlock( &this->mutex );
 	mlt_cache_item_close( this->image_cache );
+	mlt_service_unlock( MLT_PRODUCER_SERVICE( &this->parent ) );
 
 	return error;
 }
@@ -529,7 +535,12 @@ static int producer_get_frame( mlt_producer producer, mlt_frame_ptr frame, int i
 
 		// Set producer-specific frame properties
 		mlt_properties_set_int( properties, "progressive", mlt_properties_get_int( producer_properties, "progressive" ) );
-		mlt_properties_set_double( properties, "aspect_ratio", mlt_properties_get_double( producer_properties, "aspect_ratio" ) );
+		
+		double force_ratio = mlt_properties_get_double( producer_properties, "force_aspect_ratio" );
+		if ( force_ratio > 0.0 )
+			mlt_properties_set_double( properties, "aspect_ratio", force_ratio );
+		else
+			mlt_properties_set_double( properties, "aspect_ratio", mlt_properties_get_double( producer_properties, "aspect_ratio" ) );
 
 		// Push the get_image method
 		mlt_frame_push_get_image( *frame, producer_get_image );

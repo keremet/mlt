@@ -3,19 +3,24 @@ include ../../config.mak
 NAME = libmlt$(LIBSUF)
 TARGET = $(NAME).$(version)
 
-ifneq ($(targetos), Darwin)
-NAME = libmlt$(LIBSUF)
-TARGET = $(NAME).$(version)
-SONAME = $(NAME).$(soversion)
-SHFLAGS += -Wl,-soname,$(SONAME)
-else
+ifeq ($(targetos), Darwin)
 NAME = libmlt$(LIBSUF)
 TARGET = libmlt.$(version)$(LIBSUF)
 SONAME = libmlt.$(soversion)$(LIBSUF)
 SHFLAGS += -install_name $(libdir)/$(SONAME) -current_version $(version) -compatibility_version $(soversion)
+else ifeq ($(targetos), MinGW)
+NAME = libmlt$(LIBSUF)
+TARGET = libmlt-$(soversion)$(LIBSUF)
+SHFLAGS += -Wl,--output-def,libmlt.def
+else
+NAME = libmlt$(LIBSUF)
+TARGET = $(NAME).$(version)
+SONAME = $(NAME).$(soversion)
+SHFLAGS += -Wl,-soname,$(SONAME)
 endif
 
 OBJS = mlt_frame.o \
+	   mlt_version.o \
 	   mlt_geometry.o \
 	   mlt_deque.o \
 	   mlt_property.o \
@@ -40,6 +45,7 @@ OBJS = mlt_frame.o \
 	   mlt_cache.o
 
 INCS = mlt_consumer.h \
+	   mlt_version.h \
 	   mlt_factory.h \
 	   mlt_filter.h \
 	   mlt.h \
@@ -76,7 +82,9 @@ all:	$(TARGET)
 $(TARGET): $(OBJS)
 		$(CC) $(SHFLAGS) -o $@ $(OBJS) $(LDFLAGS)
 		ln -sf $(TARGET) $(NAME)
-		ln -sf $(TARGET) $(SONAME)
+		if [ "$(targetos)" != "MinGW" ]; then \
+			ln -sf $(TARGET) $(SONAME) ; \
+		fi
 
 depend:	$(SRCS)
 	$(CC) -MM $(CFLAGS) $^ 1>.depend
@@ -89,9 +97,15 @@ clean:
 
 install:
 	install -d $(DESTDIR)$(libdir)
-	install -m 755 $(TARGET) $(DESTDIR)$(libdir)
-	ln -sf $(TARGET) $(DESTDIR)$(libdir)/$(SONAME)
-	ln -sf $(TARGET) $(DESTDIR)$(libdir)/$(NAME)
+	if [ "$(targetos)" = "MinGW" ]; then \
+		install -m 755 $(TARGET) $(DESTDIR)$(prefix) ; \
+		install -m 755 $(TARGET) $(DESTDIR)$(libdir)/libmlt.dll ; \
+		install -m 644 libmlt.def $(DESTDIR)$(libdir) ; \
+	else \
+		install -m 755 $(TARGET) $(DESTDIR)$(libdir) ; \
+		ln -sf $(TARGET) $(DESTDIR)$(libdir)/$(SONAME) ; \
+		ln -sf $(TARGET) $(DESTDIR)$(libdir)/$(NAME) ; \
+	fi
 	install -d "$(DESTDIR)$(prefix)/include/mlt/framework"
 	install -m 644 $(INCS) "$(DESTDIR)$(prefix)/include/mlt/framework"
 	install -d "$(DESTDIR)$(datadir)/mlt"
@@ -99,8 +113,10 @@ install:
 
 uninstall:
 	rm -f "$(DESTDIR)$(libdir)/$(TARGET)"
-	rm -f "$(DESTDIR)$(libdir)/$(SONAME)"
-	rm -f "$(DESTDIR)$(libdir)/$(NAME)"
+	if [ "$(targetos)" != "MinGW" ]; then \
+		rm -f "$(DESTDIR)$(libdir)/$(SONAME)" ; \
+		rm -f "$(DESTDIR)$(libdir)/$(NAME)" ; \
+	fi
 	rm -rf "$(DESTDIR)$(prefix)/include/mlt/framework"
 	rm -f "$(DESTDIR)$(datadir)/mlt/metaschema.yaml"
 

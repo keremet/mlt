@@ -86,30 +86,14 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 		int bpp;
 
 		// Subsampled YUV is messy and less precise.
-		if ( *format == mlt_image_yuv422 )
+		if ( *format == mlt_image_yuv422 && this->convert_image )
 		{
-			*format = mlt_image_rgb24;
-			mlt_frame_get_image( this, image, format, width, height, writable );
+			mlt_image_format requested_format = mlt_image_rgb24;
+			this->convert_image( this, image, format, requested_format );
 		}
 	
 		mlt_log_debug( NULL, "[filter crop] %s %dx%d -> %dx%d\n", mlt_image_format_name(*format),
 				 *width, *height, owidth, oheight);
-		switch ( *format )
-		{
-			case mlt_image_yuv422:
-				bpp = 2;
-				break;
-			case mlt_image_rgb24:
-				bpp = 3;
-				break;
-			case mlt_image_rgb24a:
-			case mlt_image_opengl:
-				bpp = 4;
-				break;
-			default:
-				// XXX: we only know how to crop packed formats
-				return 1;
-		}
 
 		// Provides a manual override for misreported field order
 		if ( mlt_properties_get( properties, "meta.top_field_first" ) )
@@ -122,17 +106,16 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 			mlt_properties_set_int( properties, "top_field_first", !mlt_properties_get_int( properties, "top_field_first" ) );
 		
 		// Create the output image
-		uint8_t *output = mlt_pool_alloc( owidth * ( oheight + 1 ) * bpp );
+		int size = mlt_image_format_size( *format, owidth, oheight, &bpp );
+		uint8_t *output = mlt_pool_alloc( size );
 		if ( output )
 		{
 			// Call the generic resize
 			crop( *image, output, bpp, *width, *height, left, right, top, bottom );
 
 			// Now update the frame
+			mlt_frame_set_image( this, output, size, mlt_pool_release );
 			*image = output;
-			mlt_properties_set_data( properties, "image", output, owidth * ( oheight + 1 ) * bpp, ( mlt_destructor )mlt_pool_release, NULL );
-			mlt_properties_set_int( properties, "width", owidth );
-			mlt_properties_set_int( properties, "height", oheight );
 		}
 
 		// We should resize the alpha too
@@ -145,7 +128,7 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 			if ( newalpha )
 			{
 				crop( alpha, newalpha, 1, *width, *height, left, right, top, bottom );
-				mlt_properties_set_data( properties, "alpha", newalpha, owidth * oheight, ( mlt_destructor )mlt_pool_release, NULL );
+				mlt_frame_set_alpha( this, newalpha, owidth * oheight, mlt_pool_release );
 				this->get_alpha_mask = NULL;
 			}
 		}
@@ -176,7 +159,16 @@ static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
 		int bottom = mlt_properties_get_int( filter_props, "bottom" );
 		int width  = mlt_properties_get_int( frame_props, "real_width" );
 		int height = mlt_properties_get_int( frame_props, "real_height" );
+		int use_profile = mlt_properties_get_int( filter_props, "use_profile" );
+		mlt_profile profile = mlt_service_profile( MLT_FILTER_SERVICE( this ) );
 
+		if ( use_profile )
+		{
+			top = top * height / profile->height;
+			bottom = bottom * height / profile->height;
+			left = left * width / profile->width;
+			right = right * width / profile->width;
+		}
 		if ( mlt_properties_get_int( filter_props, "center" ) )
 		{
 			double aspect_ratio = mlt_frame_get_aspect_ratio( frame );
@@ -191,6 +183,8 @@ static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
 				left = right = ( width - rint( output_ar * height / aspect_ratio ) ) / 2;
 				if ( abs(bias) > left )
 					bias = bias < 0 ? -left : left;
+				else if ( use_profile )
+					bias = bias * width / profile->width;
 				left -= bias;
 				right += bias;
 			}
@@ -199,6 +193,8 @@ static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
 				top = bottom = ( height - rint( aspect_ratio * width / output_ar ) ) / 2;
 				if ( abs(bias) > top )
 					bias = bias < 0 ? -top : top;
+				else if ( use_profile )
+					bias = bias * height / profile->height;
 				top -= bias;
 				bottom += bias;
 			}

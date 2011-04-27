@@ -1,6 +1,6 @@
 /*
  * consumer_sdl.c -- A Simple DirectMedia Layer consumer
- * Copyright (C) 2003-2004 Ushodaya Enterprises Limited
+ * Copyright (C) 2003-2004, 2010 Ushodaya Enterprises Limited
  * Author: Dan Dennedy <dan@dennedy.org>
  *
  * This library is free software; you can redistribute it and/or
@@ -28,8 +28,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-#include <SDL/SDL.h>
-#include <SDL/SDL_syswm.h>
+#include <SDL.h>
+#include <SDL_syswm.h>
 #include <sys/time.h>
 #include "consumer_sdl_osx.h"
 
@@ -122,21 +122,27 @@ mlt_consumer consumer_sdl_init( mlt_profile profile, mlt_service_type type, cons
 		mlt_properties_set_int( this->properties, "buffer", 1 );
 
 		// Default audio buffer
-		mlt_properties_set_int( this->properties, "audio_buffer", 512 );
+		mlt_properties_set_int( this->properties, "audio_buffer", 2048 );
 
 		// Ensure we don't join on a non-running object
 		this->joined = 1;
 		
 		// process actual param
-		if ( arg == NULL || sscanf( arg, "%dx%d", &this->width, &this->height ) != 2 )
+		if ( arg && sscanf( arg, "%dx%d", &this->width, &this->height ) )
+		{
+			mlt_properties_set_int( this->properties, "_arg_size", 1 );
+		}
+		else
 		{
 			this->width = mlt_properties_get_int( this->properties, "width" );
 			this->height = mlt_properties_get_int( this->properties, "height" );
 		}
-
+	
 		// Set the sdl flags
-		this->sdl_flags = SDL_HWSURFACE | SDL_ASYNCBLIT | SDL_HWACCEL | SDL_RESIZABLE | SDL_DOUBLEBUF;
-
+		this->sdl_flags = SDL_HWSURFACE | SDL_ASYNCBLIT | SDL_HWACCEL | SDL_DOUBLEBUF;
+#if !defined(__DARWIN__)
+		this->sdl_flags |= SDL_RESIZABLE;
+#endif		
 		// Allow thread to be started/stopped
 		parent->start = consumer_start;
 		parent->stop = consumer_stop;
@@ -168,27 +174,34 @@ int consumer_start( mlt_consumer parent )
 
 	if ( !this->running )
 	{
-		int video_off = mlt_properties_get_int( MLT_CONSUMER_PROPERTIES( parent ), "video_off" );
-		int preview_off = mlt_properties_get_int( MLT_CONSUMER_PROPERTIES( parent ), "preview_off" );
+		mlt_properties properties = MLT_CONSUMER_PROPERTIES( parent );
+		int video_off = mlt_properties_get_int( properties, "video_off" );
+		int preview_off = mlt_properties_get_int( properties, "preview_off" );
 		int display_off = video_off | preview_off;
-		int audio_off = mlt_properties_get_int( MLT_CONSUMER_PROPERTIES( parent ), "audio_off" );
-		int sdl_started = mlt_properties_get_int( MLT_CONSUMER_PROPERTIES( parent ), "sdl_started" );
+		int audio_off = mlt_properties_get_int( properties, "audio_off" );
+		int sdl_started = mlt_properties_get_int( properties, "sdl_started" );
 
 		consumer_stop( parent );
 
 		this->running = 1;
 		this->joined = 0;
 
-		if ( mlt_properties_get_int( this->properties, "width" ) > 0 )
-			this->width = mlt_properties_get_int( this->properties, "width" );
-		if ( mlt_properties_get_int( this->properties, "height" ) > 0 )
-			this->height = mlt_properties_get_int( this->properties, "height" );
+		if ( ! mlt_properties_get_int( this->properties, "_arg_size" ) )
+		{
+			if ( mlt_properties_get_int( this->properties, "width" ) > 0 )
+				this->width = mlt_properties_get_int( this->properties, "width" );
+			if ( mlt_properties_get_int( this->properties, "height" ) > 0 )
+				this->height = mlt_properties_get_int( this->properties, "height" );
+		}
 
 		this->bpp = mlt_properties_get_int( this->properties, "bpp" );
 
 		if ( sdl_started == 0 && display_off == 0 )
 		{
-			if ( SDL_Init( SDL_INIT_VIDEO | SDL_INIT_NOPARACHUTE ) < 0 )
+			pthread_mutex_lock( &mlt_sdl_mutex );
+			int ret = SDL_Init( SDL_INIT_VIDEO | SDL_INIT_NOPARACHUTE );
+			pthread_mutex_unlock( &mlt_sdl_mutex );
+			if ( ret < 0 )
 			{
 				mlt_log_error( MLT_CONSUMER_SERVICE(parent), "Failed to initialize SDL: %s\n", SDL_GetError() );
 				return -1;
@@ -199,22 +212,35 @@ int consumer_start( mlt_consumer parent )
 		}
 		else if ( display_off == 0 )
 		{
+			pthread_mutex_lock( &mlt_sdl_mutex );
 			this->sdl_screen = SDL_GetVideoSurface( );
+			pthread_mutex_unlock( &mlt_sdl_mutex );
 		}
 
 		if ( audio_off == 0 )
 			SDL_InitSubSystem( SDL_INIT_AUDIO );
 
 		// Default window size
-		double display_ratio = mlt_properties_get_double( this->properties, "display_ratio" );
-		this->window_width = ( double )this->height * display_ratio;
-		this->window_height = this->height;
+		if ( mlt_properties_get_int( this->properties, "_arg_size" ) )
+		{
+			this->window_width = this->width;
+			this->window_height = this->height;
+		}
+		else
+		{
+			double display_ratio = mlt_properties_get_double( this->properties, "display_ratio" );
+			this->window_width = ( double )this->height * display_ratio + 0.5;
+			this->window_height = this->height;
+		}
 
 		if ( this->sdl_screen == NULL && display_off == 0 )
 		{
 			if ( mlt_properties_get_int( this->properties, "fullscreen" ) )
 			{
-				const SDL_VideoInfo *vi = SDL_GetVideoInfo();
+				const SDL_VideoInfo *vi;
+				pthread_mutex_lock( &mlt_sdl_mutex );
+				vi = SDL_GetVideoInfo();
+				pthread_mutex_unlock( &mlt_sdl_mutex );
 				this->window_width = vi->current_w;
 				this->window_height = vi->current_h;
 				this->sdl_flags |= SDL_FULLSCREEN;
@@ -241,7 +267,9 @@ int consumer_stop( mlt_consumer parent )
 		// Kill the thread and clean up
 		this->joined = 1;
 		this->running = 0;
+#ifndef WIN32
 		if ( this->thread )
+#endif
 			pthread_join( this->thread, NULL );
 
 		// internal cleanup
@@ -461,7 +489,6 @@ static int consumer_play_video( consumer_sdl this, mlt_frame frame )
 	{
 		// Get the image, width and height
 		mlt_frame_get_image( frame, &image, &vfmt, &width, &height, 0 );
-		mlt_properties_set_int( MLT_FRAME_PROPERTIES( frame ), "format", vfmt );
 		
 		void *pool = mlt_cocoa_autorelease_init();
 
@@ -620,7 +647,6 @@ static int consumer_play_video( consumer_sdl this, mlt_frame frame )
 		vfmt = preview_format == mlt_image_none ? mlt_image_rgb24a : preview_format;
 		if ( !video_off )
 			mlt_frame_get_image( frame, &image, &vfmt, &width, &height, 0 );
-		mlt_properties_set_int( MLT_FRAME_PROPERTIES( frame ), "format", vfmt );
 		mlt_events_fire( properties, "consumer-frame-show", frame, NULL );
 	}
 
@@ -706,7 +732,8 @@ static void *video_thread( void *arg )
 		}
 		else
 		{
-			mlt_log_debug( MLT_CONSUMER_SERVICE(&this->parent), "dropped video frame\n" );
+			static int dropped = 0;
+			mlt_log_info( MLT_CONSUMER_SERVICE(&this->parent), "dropped video frame %d\n", ++dropped );
 		}
 
 		// This frame can now be closed
@@ -744,27 +771,23 @@ static void *consumer_thread( void *arg )
 	int init_audio = 1;
 	int init_video = 1;
 	mlt_frame frame = NULL;
-	mlt_properties properties = NULL;
 	int duration = 0;
 	int64_t playtime = 0;
 	struct timespec tm = { 0, 100000 };
 
 	// Loop until told not to
-	while( !terminated && this->running )
+	while( this->running )
 	{
 		// Get a frame from the attached producer
-		frame = mlt_consumer_rt_frame( consumer );
+		frame = !terminated? mlt_consumer_rt_frame( consumer ) : NULL;
 
 		// Check for termination
-		if ( terminate_on_pause && frame != NULL )
+		if ( terminate_on_pause && frame )
 			terminated = mlt_properties_get_double( MLT_FRAME_PROPERTIES( frame ), "_speed" ) == 0.0;
 
 		// Ensure that we have a frame
-		if ( frame != NULL )
+		if ( frame )
 		{
-			// Get the frame properties
-			properties =  MLT_FRAME_PROPERTIES( frame );
-
 			// Play audio
 			init_audio = consumer_play_audio( this, frame, init_audio, &duration );
 
@@ -779,7 +802,7 @@ static void *consumer_thread( void *arg )
 			}
 
 			// Set playtime for this frame
-			mlt_properties_set_int( properties, "playtime", playtime );
+			mlt_properties_set_int( MLT_FRAME_PROPERTIES( frame ), "playtime", playtime );
 
 			while ( this->running && mlt_deque_count( this->queue ) > 15 )
 				nanosleep( &tm, NULL );
@@ -793,9 +816,25 @@ static void *consumer_thread( void *arg )
 			// Calculate the next playtime
 			playtime += ( duration * 1000 );
 		}
+		else if ( terminated )
+		{
+			if ( init_video || mlt_deque_count( this->queue ) == 0 )
+				break;
+			else
+				nanosleep( &tm, NULL );
+		}
 	}
 
 	this->running = 0;
+	
+	// Unblock sdl_preview
+	if ( mlt_properties_get_int( MLT_CONSUMER_PROPERTIES( consumer ), "put_mode" ) == 1 )
+	{
+		frame = mlt_consumer_get_frame( consumer );
+		if ( frame )
+			mlt_frame_close( frame );
+		frame = NULL;
+	}
 
 	// Kill the video thread
 	if ( init_video == 0 )
@@ -832,6 +871,7 @@ static int consumer_get_dimensions( int *width, int *height )
 	// Get the wm structure
 	if ( SDL_GetWMInfo( &wm ) == 1 )
 	{
+#ifndef WIN32
 		// Check that we have the X11 wm
 		if ( wm.subsystem == SDL_SYSWM_X11 ) 
 		{
@@ -852,6 +892,7 @@ static int consumer_get_dimensions( int *width, int *height )
 			*width = attr.width;
 			*height = attr.height;
 		}
+#endif
 	}
 #endif
 

@@ -44,6 +44,7 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 	// Only process if we have no error and a valid colour space
 	if ( error == 0 )
 	{
+		mlt_service_lock( MLT_FILTER_SERVICE( filter ) );
 		mlt_producer producer = mlt_properties_get_data( properties, "producer", NULL );
 		mlt_transition transition = mlt_properties_get_data( properties, "transition", NULL );
 		mlt_frame a_frame = NULL;
@@ -65,8 +66,7 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 
 		if ( producer != NULL && transition != NULL )
 		{
-			char *name = mlt_properties_get( properties, "_unique_id" );
-			mlt_position position = mlt_properties_get_position( MLT_FRAME_PROPERTIES( this ), name );
+			mlt_position position = mlt_filter_get_position( filter, this );
 			mlt_properties frame_properties = MLT_FRAME_PROPERTIES( this );
 			mlt_position in = mlt_filter_get_in( filter );
 			mlt_position out = mlt_filter_get_out( filter );
@@ -76,12 +76,12 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 				mlt_properties_set_position( MLT_PRODUCER_PROPERTIES( producer ), "length", out - in + 1 );
 				mlt_producer_set_in_and_out( producer, in, out );
 			}
-			mlt_producer_seek( producer, position - in );
+			mlt_producer_seek( producer, in + position );
 			mlt_frame_set_position( this, position );
 			mlt_properties_pass( MLT_PRODUCER_PROPERTIES( producer ), properties, "producer." );
 			mlt_properties_pass( MLT_TRANSITION_PROPERTIES( transition ), properties, "transition." );
 			mlt_service_get_frame( MLT_PRODUCER_SERVICE( producer ), &a_frame, 0 );
-			mlt_frame_set_position( a_frame, position );
+			mlt_frame_set_position( a_frame, in + position );
 //			mlt_properties_set_int( MLT_FRAME_PROPERTIES( a_frame ), "distort", 1 );
 
 			// Special case - aspect_ratio = 0
@@ -91,11 +91,25 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 				mlt_properties_set_double( MLT_FRAME_PROPERTIES( a_frame ), "aspect_ratio", consumer_ar );
 			mlt_properties_set_double( MLT_FRAME_PROPERTIES( a_frame ), "consumer_aspect_ratio", consumer_ar );
 
+			// Add the affine transition onto the frame stack
+			mlt_service_unlock( MLT_FILTER_SERVICE( filter ) );
 			mlt_transition_process( transition, a_frame, this );
+
+			if (mlt_properties_get_int( properties, "use_normalised" ))
+			{
+				// Use the normalised width & height from the a_frame
+				*width = mlt_properties_get_int( MLT_FRAME_PROPERTIES( a_frame ), "normalised_width" );
+				*height = mlt_properties_get_int( MLT_FRAME_PROPERTIES( a_frame ), "normalised_height" );
+			}
+			
 			mlt_frame_get_image( a_frame, image, format, width, height, writable );
 			mlt_properties_set_data( frame_properties, "affine_frame", a_frame, 0, (mlt_destructor)mlt_frame_close, NULL );
-			mlt_properties_set_data( frame_properties, "image", *image, *width * *height * 4, NULL, NULL );
-			mlt_properties_set_data( frame_properties, "alpha", mlt_frame_get_alpha_mask( a_frame ), *width * *height, NULL, NULL );
+			mlt_frame_set_image( this, *image, *width * *height * 4, NULL );
+			mlt_frame_set_alpha( this, mlt_frame_get_alpha_mask( a_frame ), *width * *height, NULL );
+		}
+		else
+		{
+			mlt_service_unlock( MLT_FILTER_SERVICE( filter ) );
 		}
 	}
 
@@ -107,15 +121,6 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 
 static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
 {
-	// Get the properties of the frame
-	mlt_properties properties = MLT_FRAME_PROPERTIES( frame );
-
-	// Get a unique name to store the frame position
-	char *name = mlt_properties_get( MLT_FILTER_PROPERTIES( this ), "_unique_id" );
-
-	// Assign the current position to the name
-	mlt_properties_set_position( properties, name, mlt_frame_get_position( frame ) );
-
 	// Push the frame filter
 	mlt_frame_push_service( frame, this );
 	mlt_frame_push_get_image( frame, filter_get_image );
@@ -132,7 +137,7 @@ mlt_filter filter_affine_init( mlt_profile profile, mlt_service_type type, const
 	if ( this != NULL )
 	{
 		this->process = filter_process;
-		mlt_properties_set( MLT_FILTER_PROPERTIES( this ), "background", "colour:black" );
+		mlt_properties_set( MLT_FILTER_PROPERTIES( this ), "background", arg ? arg : "colour:black" );
 	}
 	return this;
 }

@@ -10,6 +10,14 @@ LDFLAGS += -L../framework -lmlt -lpthread
 
 SRCS := $(OBJS:.o=.c)
 
+ifeq ($(targetos), MinGW)
+CFLAGS += `sdl-config --cflags`
+LDFLAGS += `sdl-config --libs`
+OBJS += ../win32/win32.o
+SRCS += ../win32/win32.c
+bindir = $(prefix)
+endif
+
 all: $(TARGET)
 
 $(TARGET): $(OBJS)

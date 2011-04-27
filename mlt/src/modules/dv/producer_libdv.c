@@ -326,7 +326,7 @@ static int producer_get_image( mlt_frame this, uint8_t **buffer, mlt_image_forma
 		uint8_t *image = mlt_pool_alloc( *width * ( *height + 1 ) * 2 );
 
 		// Pass to properties for clean up
-		mlt_properties_set_data( properties, "image", image, *width * ( *height + 1 ) * 2, ( mlt_destructor )mlt_pool_release, NULL );
+		mlt_frame_set_image( this, image, *width * ( *height + 1 ) * 2, mlt_pool_release );
 
 		// Decode the image
 		pitches[ 0 ] = *width * 2;
@@ -343,7 +343,7 @@ static int producer_get_image( mlt_frame this, uint8_t **buffer, mlt_image_forma
 		uint8_t *image = mlt_pool_alloc( *width * ( *height + 1 ) * 3 );
 
 		// Pass to properties for clean up
-		mlt_properties_set_data( properties, "image", image, *width * ( *height + 1 ) * 3, ( mlt_destructor )mlt_pool_release, NULL );
+		mlt_frame_set_image( this, image, *width * ( *height + 1 ) * 3, mlt_pool_release );
 
 		// Decode the frame
 		pitches[ 0 ] = 720 * 3;
@@ -491,6 +491,7 @@ static int producer_get_frame( mlt_producer producer, mlt_frame_ptr frame, int i
 		mlt_properties_set_int( properties, "real_width", 720 );
 		mlt_properties_set_int( properties, "real_height", this->is_pal ? 576 : 480 );
 		mlt_properties_set_int( properties, "top_field_first", !this->is_pal ? 0 : ( data[ 5 ] & 0x07 ) == 0 ? 0 : 1 );
+		mlt_properties_set_int( properties, "colorspace", 601 );
 	
 		// Parse the header for meta info
 		dv_parse_header( dv_decoder, data );

@@ -171,12 +171,8 @@ static int filter_get_audio( mlt_frame frame, void **buffer, mlt_audio_format *f
 	// Get the properties from the filter
 	mlt_properties filter_props = MLT_FILTER_PROPERTIES( this );
 
-	// Get the properties of the a frame
-	mlt_properties properties = MLT_FRAME_PROPERTIES( frame );
-
 	// Get the frame's filter instance properties
-	char *name = mlt_properties_get( filter_props, "_unique_id" );
-	mlt_properties instance_props = mlt_properties_get_data( properties, name, NULL );
+	mlt_properties instance_props = mlt_frame_unique_properties( frame, MLT_FILTER_SERVICE( this ) );
 
 	// Get the parameters
 	double gain = mlt_properties_get_double( instance_props, "gain" );
@@ -200,6 +196,8 @@ static int filter_get_audio( mlt_frame frame, void **buffer, mlt_audio_format *f
 	int bytes_per_samp = (samp_width - 1) / 8 + 1;
 	int samplemax = (1 << (bytes_per_samp * 8 - 1)) - 1;
 	int samplemin = -samplemax - 1;
+
+	mlt_service_lock( MLT_FILTER_SERVICE( this ) );
 
 	if ( normalise )
 	{
@@ -252,6 +250,8 @@ static int filter_get_audio( mlt_frame frame, void **buffer, mlt_audio_format *f
 	mlt_properties_set_double( filter_props, "_previous_gain", gain );
 	mlt_properties_set_position( filter_props, "_last_position", current_position );
 
+	mlt_service_unlock( MLT_FILTER_SERVICE( this ) );
+
 	// Ramp from the previous gain to the current
 	gain = previous_gain;
 
@@ -290,12 +290,8 @@ static int filter_get_audio( mlt_frame frame, void **buffer, mlt_audio_format *f
 
 static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
 {
-	mlt_properties properties = MLT_FRAME_PROPERTIES( frame );
 	mlt_properties filter_props = MLT_FILTER_PROPERTIES( this );
-	mlt_properties instance_props = mlt_properties_new();
-	char *name = mlt_properties_get( filter_props, "_unique_id" );
-
-	mlt_properties_set_data( properties, name, instance_props, 0, (mlt_destructor) mlt_properties_close, NULL );
+	mlt_properties instance_props = mlt_frame_unique_properties( frame, MLT_FILTER_SERVICE( this ) );
 
 	double gain = 1.0; // no adjustment
 
@@ -323,12 +319,6 @@ static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
 			// If there is an end adjust gain to the range
 			if ( mlt_properties_get( filter_props, "end" ) != NULL )
 			{
-				// Determine the time position of this frame in the transition duration
-				mlt_position in = mlt_filter_get_in( this );
-				mlt_position out = mlt_filter_get_out( this );
-				mlt_position time = mlt_frame_get_position( frame );
-				double position = ( double )( time - in ) / ( double )( out - in + 1 );
-
 				double end = -1;
 				char *p = mlt_properties_get( filter_props, "end" );
 				if ( strcmp( p, "" ) != 0 )
@@ -344,7 +334,7 @@ static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
 					end = fabs( end );
 
 				if ( end != -1 )
-					gain += ( end - gain ) * position;
+					gain += ( end - gain ) * mlt_filter_get_progress( this, frame );
 			}
 		}
 	}
@@ -423,12 +413,7 @@ static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
 		// If there is an end adjust gain to the range
 		if ( mlt_properties_get( filter_props, "end" ) != NULL )
 		{
-			// Determine the time position of this frame in the transition duration
-			mlt_position in = mlt_filter_get_in( this );
-			mlt_position out = mlt_filter_get_out( this );
-			mlt_position time = mlt_frame_get_position( frame );
-			double position = ( double )( time - in ) / ( double )( out - in + 1 );
-			amplitude *= position;
+			amplitude *= mlt_filter_get_progress( this, frame );
 		}
 		mlt_properties_set_int( instance_props, "normalise", 1 );
 		mlt_properties_set_double( instance_props, "amplitude", amplitude );

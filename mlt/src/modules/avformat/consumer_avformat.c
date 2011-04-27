@@ -24,6 +24,7 @@
 #include <framework/mlt_frame.h>
 #include <framework/mlt_profile.h>
 #include <framework/mlt_log.h>
+#include <framework/mlt_events.h>
 
 // System header files
 #include <stdio.h>
@@ -35,11 +36,11 @@
 #include <unistd.h>
 
 // avformat header files
-#include <avformat.h>
+#include <libavformat/avformat.h>
 #ifdef SWSCALE
-#include <swscale.h>
+#include <libswscale/swscale.h>
 #endif
-#include <opt.h>
+#include <libavcodec/opt.h>
 #if LIBAVUTIL_VERSION_INT >= ((50<<16)+(8<<8)+0)
 #include <libavutil/pixdesc.h>
 #endif
@@ -51,6 +52,11 @@
 
 #define MAX_AUDIO_STREAMS (8)
 #define AUDIO_ENCODE_BUFFER_SIZE (48000 * 2 * MAX_AUDIO_STREAMS)
+#define AUDIO_BUFFER_SIZE (1024 * 42)
+#define VIDEO_BUFFER_SIZE (2048 * 1024)
+
+void avformat_lock( );
+void avformat_unlock( );
 
 //
 // This structure should be extended and made globally available in mlt
@@ -69,82 +75,82 @@ typedef struct
 
 sample_fifo sample_fifo_init( int frequency, int channels )
 {
-	sample_fifo this = calloc( 1, sizeof( sample_fifo_s ) );
-	this->frequency = frequency;
-	this->channels = channels;
-	return this;
+	sample_fifo fifo = calloc( 1, sizeof( sample_fifo_s ) );
+	fifo->frequency = frequency;
+	fifo->channels = channels;
+	return fifo;
 }
 
 // sample_fifo_clear and check are temporarily aborted (not working as intended)
 
-void sample_fifo_clear( sample_fifo this, double time )
+void sample_fifo_clear( sample_fifo fifo, double time )
 {
-	int words = ( float )( time - this->time ) * this->frequency * this->channels;
-	if ( ( int )( ( float )time * 100 ) < ( int )( ( float )this->time * 100 ) && this->used > words && words > 0 )
+	int words = ( float )( time - fifo->time ) * fifo->frequency * fifo->channels;
+	if ( ( int )( ( float )time * 100 ) < ( int )( ( float )fifo->time * 100 ) && fifo->used > words && words > 0 )
 	{
-		memmove( this->buffer, &this->buffer[ words ], ( this->used - words ) * sizeof( int16_t ) );
-		this->used -= words;
-		this->time = time;
+		memmove( fifo->buffer, &fifo->buffer[ words ], ( fifo->used - words ) * sizeof( int16_t ) );
+		fifo->used -= words;
+		fifo->time = time;
 	}
-	else if ( ( int )( ( float )time * 100 ) != ( int )( ( float )this->time * 100 ) )
+	else if ( ( int )( ( float )time * 100 ) != ( int )( ( float )fifo->time * 100 ) )
 	{
-		this->used = 0;
-		this->time = time;
-	}
-}
-
-void sample_fifo_check( sample_fifo this, double time )
-{
-	if ( this->used == 0 )
-	{
-		if ( ( int )( ( float )time * 100 ) < ( int )( ( float )this->time * 100 ) )
-			this->time = time;
+		fifo->used = 0;
+		fifo->time = time;
 	}
 }
 
-void sample_fifo_append( sample_fifo this, int16_t *samples, int count )
+void sample_fifo_check( sample_fifo fifo, double time )
 {
-	if ( ( this->size - this->used ) < count )
+	if ( fifo->used == 0 )
 	{
-		this->size += count * 5;
-		this->buffer = realloc( this->buffer, this->size * sizeof( int16_t ) );
+		if ( ( int )( ( float )time * 100 ) < ( int )( ( float )fifo->time * 100 ) )
+			fifo->time = time;
+	}
+}
+
+void sample_fifo_append( sample_fifo fifo, int16_t *samples, int count )
+{
+	if ( ( fifo->size - fifo->used ) < count )
+	{
+		fifo->size += count * 5;
+		fifo->buffer = realloc( fifo->buffer, fifo->size * sizeof( int16_t ) );
 	}
 
-	memcpy( &this->buffer[ this->used ], samples, count * sizeof( int16_t ) );
-	this->used += count;
+	memcpy( &fifo->buffer[ fifo->used ], samples, count * sizeof( int16_t ) );
+	fifo->used += count;
 }
 
-int sample_fifo_used( sample_fifo this )
+int sample_fifo_used( sample_fifo fifo )
 {
-	return this->used;
+	return fifo->used;
 }
 
-int sample_fifo_fetch( sample_fifo this, int16_t *samples, int count )
+int sample_fifo_fetch( sample_fifo fifo, int16_t *samples, int count )
 {
-	if ( count > this->used )
-		count = this->used;
+	if ( count > fifo->used )
+		count = fifo->used;
 
-	memcpy( samples, this->buffer, count * sizeof( int16_t ) );
-	this->used -= count;
-	memmove( this->buffer, &this->buffer[ count ], this->used * sizeof( int16_t ) );
+	memcpy( samples, fifo->buffer, count * sizeof( int16_t ) );
+	fifo->used -= count;
+	memmove( fifo->buffer, &fifo->buffer[ count ], fifo->used * sizeof( int16_t ) );
 
-	this->time += ( double )count / this->channels / this->frequency;
+	fifo->time += ( double )count / fifo->channels / fifo->frequency;
 
 	return count;
 }
 
-void sample_fifo_close( sample_fifo this )
+void sample_fifo_close( sample_fifo fifo )
 {
-	free( this->buffer );
-	free( this );
+	free( fifo->buffer );
+	free( fifo );
 }
 
 // Forward references.
-static int consumer_start( mlt_consumer this );
-static int consumer_stop( mlt_consumer this );
-static int consumer_is_stopped( mlt_consumer this );
+static int consumer_start( mlt_consumer consumer );
+static int consumer_stop( mlt_consumer consumer );
+static int consumer_is_stopped( mlt_consumer consumer );
 static void *consumer_thread( void *arg );
-static void consumer_close( mlt_consumer this );
+static void consumer_close( mlt_consumer consumer );
 
 /** Initialise the consumer.
 */
@@ -152,16 +158,16 @@ static void consumer_close( mlt_consumer this );
 mlt_consumer consumer_avformat_init( mlt_profile profile, char *arg )
 {
 	// Allocate the consumer
-	mlt_consumer this = mlt_consumer_new( profile );
+	mlt_consumer consumer = mlt_consumer_new( profile );
 
 	// If memory allocated and initialises without error
-	if ( this != NULL )
+	if ( consumer != NULL )
 	{
 		// Get properties from the consumer
-		mlt_properties properties = MLT_CONSUMER_PROPERTIES( this );
+		mlt_properties properties = MLT_CONSUMER_PROPERTIES( consumer );
 
 		// Assign close callback
-		this->close = consumer_close;
+		consumer->close = consumer_close;
 
 		// Interpret the argument
 		if ( arg != NULL )
@@ -189,55 +195,84 @@ mlt_consumer consumer_avformat_init( mlt_profile profile, char *arg )
 		mlt_properties_set_int( properties, "prefill", 1 );
 
 		// Set up start/stop/terminated callbacks
-		this->start = consumer_start;
-		this->stop = consumer_stop;
-		this->is_stopped = consumer_is_stopped;
+		consumer->start = consumer_start;
+		consumer->stop = consumer_stop;
+		consumer->is_stopped = consumer_is_stopped;
+		
+		mlt_events_register( properties, "consumer-fatal-error", NULL );
 	}
 
-	// Return this
-	return this;
+	// Return consumer
+	return consumer;
 }
 
 /** Start the consumer.
 */
 
-static int consumer_start( mlt_consumer this )
+static int consumer_start( mlt_consumer consumer )
 {
 	// Get the properties
-	mlt_properties properties = MLT_CONSUMER_PROPERTIES( this );
+	mlt_properties properties = MLT_CONSUMER_PROPERTIES( consumer );
 	int error = 0;
 
 	// Report information about available muxers and codecs as YAML Tiny
 	char *s = mlt_properties_get( properties, "f" );
 	if ( s && strcmp( s, "list" ) == 0 )
 	{
-		fprintf( stderr, "---\nformats:\n" );
+		mlt_properties doc = mlt_properties_new();
+		mlt_properties formats = mlt_properties_new();
+		char key[20];
 		AVOutputFormat *format = NULL;
+		
+		mlt_properties_set_data( properties, "f", formats, 0, (mlt_destructor) mlt_properties_close, NULL );
+		mlt_properties_set_data( doc, "formats", formats, 0, NULL, NULL );
 		while ( ( format = av_oformat_next( format ) ) )
-			fprintf( stderr, "  - %s\n", format->name );
-		fprintf( stderr, "...\n" );
+		{
+			snprintf( key, sizeof(key), "%d", mlt_properties_count( formats ) );
+			mlt_properties_set( formats, key, format->name );
+		}
+		fprintf( stderr, "%s", mlt_properties_serialise_yaml( doc ) );
+		mlt_properties_close( doc );
 		error = 1;
 	}
 	s = mlt_properties_get( properties, "acodec" );
 	if ( s && strcmp( s, "list" ) == 0 )
 	{
-		fprintf( stderr, "---\naudio_codecs:\n" );
+		mlt_properties doc = mlt_properties_new();
+		mlt_properties codecs = mlt_properties_new();
+		char key[20];
 		AVCodec *codec = NULL;
+
+		mlt_properties_set_data( properties, "acodec", codecs, 0, (mlt_destructor) mlt_properties_close, NULL );
+		mlt_properties_set_data( doc, "audio_codecs", codecs, 0, NULL, NULL );
 		while ( ( codec = av_codec_next( codec ) ) )
 			if ( codec->encode && codec->type == CODEC_TYPE_AUDIO )
-				fprintf( stderr, "  - %s\n", codec->name );
-		fprintf( stderr, "...\n" );
+			{
+				snprintf( key, sizeof(key), "%d", mlt_properties_count( codecs ) );
+				mlt_properties_set( codecs, key, codec->name );
+			}
+		fprintf( stderr, "%s", mlt_properties_serialise_yaml( doc ) );
+		mlt_properties_close( doc );
 		error = 1;
 	}
 	s = mlt_properties_get( properties, "vcodec" );
 	if ( s && strcmp( s, "list" ) == 0 )
 	{
-		fprintf( stderr, "---\nvideo_codecs:\n" );
+		mlt_properties doc = mlt_properties_new();
+		mlt_properties codecs = mlt_properties_new();
+		char key[20];
 		AVCodec *codec = NULL;
+
+		mlt_properties_set_data( properties, "vcodec", codecs, 0, (mlt_destructor) mlt_properties_close, NULL );
+		mlt_properties_set_data( doc, "video_codecs", codecs, 0, NULL, NULL );
 		while ( ( codec = av_codec_next( codec ) ) )
 			if ( codec->encode && codec->type == CODEC_TYPE_VIDEO )
-				fprintf( stderr, "  - %s\n", codec->name );
-		fprintf( stderr, "...\n" );
+			{
+				snprintf( key, sizeof(key), "%d", mlt_properties_count( codecs ) );
+				mlt_properties_set( codecs, key, codec->name );
+			}
+		fprintf( stderr, "%s", mlt_properties_serialise_yaml( doc ) );
+		mlt_properties_close( doc );
 		error = 1;
 	}
 
@@ -265,7 +300,7 @@ static int consumer_start( mlt_consumer this )
 			}
 			else
 			{
-				mlt_log_warning( MLT_CONSUMER_SERVICE( this ), "Invalid size property %s - ignoring.\n", size );
+				mlt_log_warning( MLT_CONSUMER_SERVICE( consumer ), "Invalid size property %s - ignoring.\n", size );
 			}
 		}
 		
@@ -277,7 +312,7 @@ static int consumer_start( mlt_consumer this )
 
 		// We need to set these on the profile as well because the s property is
 		// an alias to mlt properties that correspond to profile settings.
-		mlt_profile profile = mlt_service_profile( MLT_CONSUMER_SERVICE( this ) );
+		mlt_profile profile = mlt_service_profile( MLT_CONSUMER_SERVICE( consumer ) );
 		if ( profile )
 		{
 			profile->width = width;
@@ -312,7 +347,7 @@ static int consumer_start( mlt_consumer this )
 		mlt_properties_set_int( properties, "running", 1 );
 
 		// Create the thread
-		pthread_create( thread, NULL, consumer_thread, this );
+		pthread_create( thread, NULL, consumer_thread, consumer );
 	}
 	return error;
 }
@@ -320,10 +355,10 @@ static int consumer_start( mlt_consumer this )
 /** Stop the consumer.
 */
 
-static int consumer_stop( mlt_consumer this )
+static int consumer_stop( mlt_consumer consumer )
 {
 	// Get the properties
-	mlt_properties properties = MLT_CONSUMER_PROPERTIES( this );
+	mlt_properties properties = MLT_CONSUMER_PROPERTIES( consumer );
 
 	// Check that we're running
 	if ( mlt_properties_get_int( properties, "running" ) )
@@ -344,10 +379,10 @@ static int consumer_stop( mlt_consumer this )
 /** Determine if the consumer is stopped.
 */
 
-static int consumer_is_stopped( mlt_consumer this )
+static int consumer_is_stopped( mlt_consumer consumer )
 {
 	// Get the properties
-	mlt_properties properties = MLT_CONSUMER_PROPERTIES( this );
+	mlt_properties properties = MLT_CONSUMER_PROPERTIES( consumer );
 	return !mlt_properties_get_int( properties, "running" );
 }
 
@@ -364,11 +399,11 @@ static void apply_properties( void *obj, mlt_properties properties, int flags, i
 		const AVOption *opt = av_find_opt( obj, opt_name, NULL, flags, flags );
 		if ( opt != NULL )
 #if LIBAVCODEC_VERSION_INT >= ((52<<16)+(7<<8)+0)
-			av_set_string3( obj, opt_name, mlt_properties_get( properties, opt_name), alloc, NULL );
+			av_set_string3( obj, opt_name, mlt_properties_get_value( properties, i), alloc, NULL );
 #elif LIBAVCODEC_VERSION_INT >= ((51<<16)+(59<<8)+0)
-			av_set_string2( obj, opt_name, mlt_properties_get( properties, opt_name), alloc );
+			av_set_string2( obj, opt_name, mlt_properties_get_value( properties, i), alloc );
 #else
-			av_set_string( obj, opt_name, mlt_properties_get( properties, opt_name) );
+			av_set_string( obj, opt_name, mlt_properties_get_value( properties, i) );
 #endif
 	}
 }
@@ -376,10 +411,10 @@ static void apply_properties( void *obj, mlt_properties properties, int flags, i
 /** Add an audio output stream
 */
 
-static AVStream *add_audio_stream( mlt_consumer this, AVFormatContext *oc, int codec_id, int channels )
+static AVStream *add_audio_stream( mlt_consumer consumer, AVFormatContext *oc, int codec_id, int channels )
 {
 	// Get the properties
-	mlt_properties properties = MLT_CONSUMER_PROPERTIES( this );
+	mlt_properties properties = MLT_CONSUMER_PROPERTIES( consumer );
 
 	// Create a new stream
 	AVStream *st = av_new_stream( oc, oc->nb_streams );
@@ -446,13 +481,13 @@ static AVStream *add_audio_stream( mlt_consumer this, AVFormatContext *oc, int c
 	}
 	else
 	{
-		mlt_log_error( MLT_CONSUMER_SERVICE( this ), "Could not allocate a stream for audio\n" );
+		mlt_log_error( MLT_CONSUMER_SERVICE( consumer ), "Could not allocate a stream for audio\n" );
 	}
 
 	return st;
 }
 
-static int open_audio( AVFormatContext *oc, AVStream *st, int audio_outbuf_size )
+static int open_audio( AVFormatContext *oc, AVStream *st, int audio_outbuf_size, const char *codec_name )
 {
 	// We will return the audio input size from here
 	int audio_input_frame_size = 0;
@@ -461,8 +496,14 @@ static int open_audio( AVFormatContext *oc, AVStream *st, int audio_outbuf_size 
 	AVCodecContext *c = st->codec;
 
 	// Find the encoder
-	AVCodec *codec = avcodec_find_encoder( c->codec_id );
+	AVCodec *codec;
+	if ( codec_name )
+		codec = avcodec_find_encoder_by_name( codec_name );
+	else
+		codec = avcodec_find_encoder( c->codec_id );
 
+	avformat_lock();
+	
 	// Continue if codec found and we can open it
 	if ( codec != NULL && avcodec_open( c, codec ) >= 0 )
 	{
@@ -498,6 +539,8 @@ static int open_audio( AVFormatContext *oc, AVStream *st, int audio_outbuf_size 
 	{
 		mlt_log_warning( NULL, "%s: Unable to encode audio - disabling audio output.\n", __FILE__ );
 	}
+	
+	avformat_unlock();
 
 	return audio_input_frame_size;
 }
@@ -505,16 +548,20 @@ static int open_audio( AVFormatContext *oc, AVStream *st, int audio_outbuf_size 
 static void close_audio( AVFormatContext *oc, AVStream *st )
 {
 	if ( st && st->codec )
+	{
+		avformat_lock();
 		avcodec_close( st->codec );
+		avformat_unlock();
+	}
 }
 
 /** Add a video output stream 
 */
 
-static AVStream *add_video_stream( mlt_consumer this, AVFormatContext *oc, int codec_id )
+static AVStream *add_video_stream( mlt_consumer consumer, AVFormatContext *oc, int codec_id )
 {
  	// Get the properties
-	mlt_properties properties = MLT_CONSUMER_PROPERTIES( this );
+	mlt_properties properties = MLT_CONSUMER_PROPERTIES( consumer );
 
 	// Create a new stream
 	AVStream *st = av_new_stream( oc, oc->nb_streams );
@@ -542,10 +589,37 @@ static AVStream *add_video_stream( mlt_consumer this, AVFormatContext *oc, int c
 		if ( vpre )
 		{
 			mlt_properties p = mlt_properties_load( vpre );
+#ifdef AVDATADIR
+			if ( mlt_properties_count( p ) < 1 )
+			{
+				AVCodec *codec = avcodec_find_encoder( c->codec_id );
+				if ( codec )
+				{
+					char *path = malloc( strlen(AVDATADIR) + strlen(codec->name) + strlen(vpre) + strlen(".ffpreset") + 2 );
+					strcpy( path, AVDATADIR );
+					strcat( path, codec->name );
+					strcat( path, "-" );
+					strcat( path, vpre );
+					strcat( path, ".ffpreset" );
+					
+					mlt_properties_close( p );
+					p = mlt_properties_load( path );
+					mlt_properties_debug( p, path, stderr );
+					free( path );	
+				}
+			}
+			else
+			{
+				mlt_properties_debug( p, vpre, stderr );			
+			}
+#endif
 			apply_properties( c, p, AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM, 1 );
 			mlt_properties_close( p );
 		}
+		int colorspace = mlt_properties_get_int( properties, "colorspace" );
+		mlt_properties_set( properties, "colorspace", NULL );
 		apply_properties( c, properties, AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM, 0 );
+		mlt_properties_set_int( properties, "colorspace", colorspace );
 
 		// Set options controlled by MLT
 		c->width = mlt_properties_get_int( properties, "width" );
@@ -559,6 +633,27 @@ static AVStream *add_video_stream( mlt_consumer this, AVFormatContext *oc, int c
 #else
 		c->pix_fmt = pix_fmt ? avcodec_get_pix_fmt( pix_fmt ) : PIX_FMT_YUV420P;
 #endif
+		
+#if LIBAVCODEC_VERSION_INT > ((52<<16)+(28<<8)+0)
+		switch ( colorspace )
+		{
+		case 170:
+			c->colorspace = AVCOL_SPC_SMPTE170M;
+			break;
+		case 240:
+			c->colorspace = AVCOL_SPC_SMPTE240M;
+			break;
+		case 470:
+			c->colorspace = AVCOL_SPC_BT470BG;
+			break;
+		case 601:
+			c->colorspace = ( 576 % c->height ) ? AVCOL_SPC_SMPTE170M : AVCOL_SPC_BT470BG;
+			break;
+		case 709:
+			c->colorspace = AVCOL_SPC_BT709;
+			break;
+		}
+#endif
 
 		if ( mlt_properties_get( properties, "aspect" ) )
 		{
@@ -570,7 +665,7 @@ static AVStream *add_video_stream( mlt_consumer this, AVFormatContext *oc, int c
 			// for mlt properties that correspond to profile settings
 			mlt_properties_set_int( properties, "display_aspect_num", rational.num );
 			mlt_properties_set_int( properties, "display_aspect_den", rational.den );
-			mlt_profile profile = mlt_service_profile( MLT_CONSUMER_SERVICE( this ) );
+			mlt_profile profile = mlt_service_profile( MLT_CONSUMER_SERVICE( consumer ) );
 			if ( profile )
 			{
 				profile->display_aspect_num = rational.num;
@@ -640,7 +735,7 @@ static AVStream *add_video_stream( mlt_consumer this, AVFormatContext *oc, int c
 			int start, end, q;
 			int e = sscanf( rc_override, "%d,%d,%d", &start, &end, &q );
 			if ( e != 3 )
-				mlt_log_warning( MLT_CONSUMER_SERVICE( this ), "Error parsing rc_override\n" );
+				mlt_log_warning( MLT_CONSUMER_SERVICE( consumer ), "Error parsing rc_override\n" );
 			c->rc_override = av_realloc( c->rc_override, sizeof( RcOverride ) * ( i + 1 ) );
 			c->rc_override[i].start_frame = start;
 			c->rc_override[i].end_frame = end;
@@ -702,7 +797,7 @@ static AVStream *add_video_stream( mlt_consumer this, AVFormatContext *oc, int c
 					fseek( f, 0, SEEK_SET );
 					logbuffer = av_malloc( size + 1 );
 					if ( !logbuffer )
-						mlt_log_fatal( MLT_CONSUMER_SERVICE( this ), "Could not allocate log buffer\n" );
+						mlt_log_fatal( MLT_CONSUMER_SERVICE( consumer ), "Could not allocate log buffer\n" );
 					else
 					{
 						size = fread( logbuffer, 1, size, f );
@@ -717,7 +812,7 @@ static AVStream *add_video_stream( mlt_consumer this, AVFormatContext *oc, int c
 	}
 	else
 	{
-		mlt_log_error( MLT_CONSUMER_SERVICE( this ), "Could not allocate a stream for video\n" );
+		mlt_log_error( MLT_CONSUMER_SERVICE( consumer ), "Could not allocate a stream for video\n" );
 	}
  
 	return st;
@@ -751,13 +846,17 @@ static AVFrame *alloc_picture( int pix_fmt, int width, int height )
 	return picture;
 }
 	
-static int open_video(AVFormatContext *oc, AVStream *st)
+static int open_video(AVFormatContext *oc, AVStream *st, const char *codec_name)
 {
 	// Get the codec
 	AVCodecContext *video_enc = st->codec;
 
 	// find the video encoder
-	AVCodec *codec = avcodec_find_encoder( video_enc->codec_id );
+	AVCodec *codec;
+	if ( codec_name )
+		codec = avcodec_find_encoder_by_name( codec_name );
+	else
+		codec = avcodec_find_encoder( video_enc->codec_id );
 
 	if( codec && codec->pix_fmts )
 	{
@@ -772,13 +871,21 @@ static int open_video(AVFormatContext *oc, AVStream *st)
 	}
 
 	// Open the codec safely
-	return codec != NULL && avcodec_open( video_enc, codec ) >= 0;
+	avformat_lock();
+	int result = codec != NULL && avcodec_open( video_enc, codec ) >= 0;
+	avformat_unlock();
+	
+	return result;
 }
 
 void close_video(AVFormatContext *oc, AVStream *st)
 {
 	if ( st && st->codec )
+	{
+		avformat_lock();
 		avcodec_close(st->codec);
+		avformat_unlock();
+	}
 }
 
 static inline long time_difference( struct timeval *time1 )
@@ -794,10 +901,10 @@ static inline long time_difference( struct timeval *time1 )
 static void *consumer_thread( void *arg )
 {
 	// Map the argument to the object
-	mlt_consumer this = arg;
+	mlt_consumer consumer = arg;
 
 	// Get the properties
-	mlt_properties properties = MLT_CONSUMER_PROPERTIES( this );
+	mlt_properties properties = MLT_CONSUMER_PROPERTIES( consumer );
 
 	// Get the terminate on pause property
 	int terminate_on_pause = mlt_properties_get_int( properties, "terminate_on_pause" );
@@ -827,13 +934,13 @@ static void *consumer_thread( void *arg )
 	int samples = 0;
 
 	// AVFormat audio buffer and frame size
-	int audio_outbuf_size = ( 1024 * 42 );
+	int audio_outbuf_size = AUDIO_BUFFER_SIZE;
 	uint8_t *audio_outbuf = av_malloc( audio_outbuf_size );
 	int audio_input_frame_size = 0;
 
 	// AVFormat video buffer and frame count
 	int frame_count = 0;
-	int video_outbuf_size = ( 1024 * 1024 );
+	int video_outbuf_size = VIDEO_BUFFER_SIZE;
 	uint8_t *video_outbuf = av_malloc( video_outbuf_size );
 
 	// Used for the frame properties
@@ -935,9 +1042,16 @@ static void *consumer_thread( void *arg )
 	{
 		AVCodec *p = avcodec_find_encoder_by_name( acodec );
 		if ( p != NULL )
+		{
 			audio_codec_id = p->id;
+			if ( audio_codec_id == CODEC_ID_AC3 && avcodec_find_encoder_by_name( "ac3_fixed" ) )
+			{
+				mlt_properties_set( properties, "_acodec", "ac3_fixed" );
+				acodec = mlt_properties_get( properties, "_acodec" );
+			}
+		}
 		else
-			mlt_log_warning( MLT_CONSUMER_SERVICE( this ), "audio codec %s unrecognised - ignoring\n", acodec );
+			mlt_log_warning( MLT_CONSUMER_SERVICE( consumer ), "audio codec %s unrecognised - ignoring\n", acodec );
 	}
 
 	// Check for video codec overides
@@ -949,10 +1063,32 @@ static void *consumer_thread( void *arg )
 		if ( p != NULL )
 			video_codec_id = p->id;
 		else
-			mlt_log_warning( MLT_CONSUMER_SERVICE( this ), "video codec %s unrecognised - ignoring\n", vcodec );
+			mlt_log_warning( MLT_CONSUMER_SERVICE( consumer ), "video codec %s unrecognised - ignoring\n", vcodec );
 	}
 
 	// Write metadata
+#if LIBAVFORMAT_VERSION_INT >= ((52<<16)+(31<<8)+0)
+	for ( i = 0; i < mlt_properties_count( properties ); i++ )
+	{
+		char *name = mlt_properties_get_name( properties, i );
+		if ( name && !strncmp( name, "meta.attr.", 10 ) )
+		{
+			char *key = strdup( name + 10 );
+			char *markup = strrchr( key, '.' );
+			if ( markup && !strcmp( markup, ".markup") )
+			{
+				markup[0] = '\0';
+				if ( !strstr( key, ".stream." ) )
+#if LIBAVFORMAT_VERSION_INT >= ((52<<16)+(43<<8)+0)
+					av_metadata_set2( &oc->metadata, key, mlt_properties_get_value( properties, i ), 0 );
+#else
+					av_metadata_set( &oc->metadata, key, mlt_properties_get_value( properties, i ) );
+#endif
+			}
+			free( key );
+		}
+	}
+#else
 	char *tmp = NULL;
 	int metavalue;
 
@@ -976,13 +1112,14 @@ static void *consumer_thread( void *arg )
 
 	metavalue = mlt_properties_get_int( properties, "meta.attr.track.markup");
 	if (metavalue != 0) oc->track = metavalue;
+#endif
 
 	oc->oformat = fmt;
 	snprintf( oc->filename, sizeof(oc->filename), "%s", filename );
 
 	// Add audio and video streams
 	if ( video_codec_id != CODEC_ID_NONE )
-		video_st = add_video_stream( this, oc, video_codec_id );
+		video_st = add_video_stream( consumer, oc, video_codec_id );
 	if ( audio_codec_id != CODEC_ID_NONE )
 	{
 		int is_multi = 0;
@@ -997,13 +1134,13 @@ static void *consumer_thread( void *arg )
 			{
 				is_multi = 1;
 				total_channels += j;
-				audio_st[i] = add_audio_stream( this, oc, audio_codec_id, j );
+				audio_st[i] = add_audio_stream( consumer, oc, audio_codec_id, j );
 			}
 		}
 		// single track
 		if ( !is_multi )
 		{
-			audio_st[0] = add_audio_stream( this, oc, audio_codec_id, channels );
+			audio_st[0] = add_audio_stream( consumer, oc, audio_codec_id, channels );
 			total_channels = channels;
 		}
 	}
@@ -1024,11 +1161,12 @@ static void *consumer_thread( void *arg )
 		}
 		apply_properties( oc, properties, AV_OPT_FLAG_ENCODING_PARAM, 0 );
 
-		if ( video_st && !open_video( oc, video_st ) )
+		if ( video_st && !open_video( oc, video_st, vcodec? vcodec : NULL ) )
 			video_st = NULL;
 		for ( i = 0; i < MAX_AUDIO_STREAMS && audio_st[i]; i++ )
 		{
-			audio_input_frame_size = open_audio( oc, audio_st[i], audio_outbuf_size );
+			audio_input_frame_size = open_audio( oc, audio_st[i], audio_outbuf_size,
+				acodec? acodec : NULL );
 			if ( !audio_input_frame_size )
 				audio_st[i] = NULL;
 		}
@@ -1038,7 +1176,7 @@ static void *consumer_thread( void *arg )
 		{
 			if ( url_fopen( &oc->pb, filename, URL_WRONLY ) < 0 ) 
 			{
-				mlt_log_error( MLT_CONSUMER_SERVICE( this ), "Could not open '%s'\n", filename );
+				mlt_log_error( MLT_CONSUMER_SERVICE( consumer ), "Could not open '%s'\n", filename );
 				mlt_properties_set_int( properties, "running", 0 );
 			}
 		}
@@ -1049,7 +1187,7 @@ static void *consumer_thread( void *arg )
 	}
 	else
 	{
-		mlt_log_error( MLT_CONSUMER_SERVICE( this ), "Invalid output format parameters\n" );
+		mlt_log_error( MLT_CONSUMER_SERVICE( consumer ), "Invalid output format parameters\n" );
 		mlt_properties_set_int( properties, "running", 0 );
 	}
 
@@ -1068,7 +1206,7 @@ static void *consumer_thread( void *arg )
 	while( mlt_properties_get_int( properties, "running" ) &&
 	       ( !terminated || ( video_st && mlt_deque_count( queue ) ) ) )
 	{
-		frame = mlt_consumer_rt_frame( this );
+		frame = mlt_consumer_rt_frame( consumer );
 
 		// Check that we have a frame to work with
 		if ( frame != NULL )
@@ -1105,6 +1243,9 @@ static void *consumer_thread( void *arg )
 				// Append the samples
 				sample_fifo_append( fifo, pcm, samples * channels );
 				total_time += ( samples * 1000000 ) / frequency;
+
+				if ( !video_st )
+					mlt_events_fire( properties, "consumer-frame-show", frame, NULL );
 			}
 
 			// Encode the image
@@ -1128,9 +1269,20 @@ static void *consumer_thread( void *arg )
 
 					// Get the audio samples
 					if ( n > 0 )
+					{
 						sample_fifo_fetch( fifo, audio_buf_1, n );
+					}
+					else if ( audio_codec_id == CODEC_ID_VORBIS && terminated )
+					{
+						// This prevents an infinite loop when some versions of vorbis do not
+						// increment pts when encoding silence.
+						audio_pts = video_pts;
+						break;
+					}
 					else
+					{
 						memset( audio_buf_1, 0, AUDIO_ENCODE_BUFFER_SIZE );
+					}
 					samples = n / channels;
 
 					// For each output stream
@@ -1219,7 +1371,7 @@ static void *consumer_thread( void *arg )
 						if ( codec->coded_frame && codec->coded_frame->pts != AV_NOPTS_VALUE )
 						{
 							pkt.pts = av_rescale_q( codec->coded_frame->pts, codec->time_base, stream->time_base );
-							mlt_log_debug( MLT_CONSUMER_SERVICE( this ), "audio stream %d pkt pts %lld frame pts %lld",
+							mlt_log_debug( MLT_CONSUMER_SERVICE( consumer ), "audio stream %d pkt pts %lld frame pts %lld",
 								stream->index, pkt.pts, codec->coded_frame->pts );
 						}
 						pkt.flags |= PKT_FLAG_KEY;
@@ -1229,10 +1381,14 @@ static void *consumer_thread( void *arg )
 						if ( pkt.size > 0 )
 						{
 							if ( av_interleaved_write_frame( oc, &pkt ) )
-								mlt_log_error( MLT_CONSUMER_SERVICE( this ), "error writing audio frame %d\n", frames - 1 );
+							{
+								mlt_log_fatal( MLT_CONSUMER_SERVICE( consumer ), "error writing audio frame\n" );
+								mlt_events_fire( properties, "consumer-fatal-error", NULL );
+								goto on_fatal_error;
+							}
 						}
 
-						mlt_log_debug( MLT_CONSUMER_SERVICE( this ), " frame_size %d\n", codec->frame_size );
+						mlt_log_debug( MLT_CONSUMER_SERVICE( consumer ), " frame_size %d\n", codec->frame_size );
 						if ( i == 0 )
 						{
 							audio_pts = (double)stream->pts.val * av_q2d( stream->time_base );
@@ -1249,7 +1405,7 @@ static void *consumer_thread( void *arg )
 				// Write video
 				if ( mlt_deque_count( queue ) )
 				{
-					int out_size, ret;
+					int out_size, ret = 0;
 					AVCodecContext *c;
 
 					frame = mlt_deque_pop_front( queue );
@@ -1260,7 +1416,6 @@ static void *consumer_thread( void *arg )
 					if ( mlt_properties_get_int( frame_properties, "rendered" ) )
 					{
 						int i = 0;
-						int j = 0;
 						uint8_t *p;
 						uint8_t *q;
 
@@ -1272,12 +1427,8 @@ static void *consumer_thread( void *arg )
 						for ( i = 0; i < height; i ++ )
 						{
 							p = input->data[ 0 ] + i * input->linesize[ 0 ];
-							j = width;
-							while( j -- )
-							{
-								*p ++ = *q ++;
-								*p ++ = *q ++;
-							}
+							memcpy( p, q, width * 2 );
+							q += width * 2;
 						}
 
 						// Do the colour space conversion
@@ -1363,7 +1514,7 @@ static void *consumer_thread( void *arg )
 
 							if ( c->coded_frame && c->coded_frame->pts != AV_NOPTS_VALUE )
 								pkt.pts= av_rescale_q( c->coded_frame->pts, c->time_base, video_st->time_base );
-							mlt_log_debug( MLT_CONSUMER_SERVICE( this ), "video pkt pts %lld frame pts %lld", pkt.pts, c->coded_frame->pts );
+							mlt_log_debug( MLT_CONSUMER_SERVICE( consumer ), "video pkt pts %lld frame pts %lld", pkt.pts, c->coded_frame->pts );
 							if( c->coded_frame && c->coded_frame->key_frame )
 								pkt.flags |= PKT_FLAG_KEY;
 							pkt.stream_index= video_st->index;
@@ -1372,7 +1523,7 @@ static void *consumer_thread( void *arg )
 
 							// write the compressed frame in the media file
 							ret = av_interleaved_write_frame(oc, &pkt);
-							mlt_log_debug( MLT_CONSUMER_SERVICE( this ), " frame_size %d\n", c->frame_size );
+							mlt_log_debug( MLT_CONSUMER_SERVICE( consumer ), " frame_size %d\n", c->frame_size );
 							video_pts = (double)video_st->pts.val * av_q2d( video_st->time_base );
 							
 							// Dual pass logging
@@ -1381,10 +1532,16 @@ static void *consumer_thread( void *arg )
 	 					} 
 						else if ( out_size < 0 )
 						{
-							mlt_log_warning( MLT_CONSUMER_SERVICE( this ), "error with video encode %d\n", frame_count );
+							mlt_log_warning( MLT_CONSUMER_SERVICE( consumer ), "error with video encode %d\n", frame_count );
 						}
  					}
  					frame_count++;
+					if ( ret )
+					{
+						mlt_log_fatal( MLT_CONSUMER_SERVICE( consumer ), "error writing video frame\n" );
+						mlt_events_fire( properties, "consumer-fatal-error", NULL );
+						goto on_fatal_error;
+					}
 					mlt_frame_close( frame );
 				}
 				else
@@ -1393,10 +1550,10 @@ static void *consumer_thread( void *arg )
 				}
 			}
 			if ( audio_st[0] )
-				mlt_log_debug( MLT_CONSUMER_SERVICE( this ), "audio pts %lld (%f) ", audio_st[0]->pts.val, audio_pts );
+				mlt_log_debug( MLT_CONSUMER_SERVICE( consumer ), "audio pts %lld (%f) ", audio_st[0]->pts.val, audio_pts );
 			if ( video_st )
-				mlt_log_debug( MLT_CONSUMER_SERVICE( this ), "video pts %lld (%f) ", video_st->pts.val, video_pts );
-			mlt_log_debug( MLT_CONSUMER_SERVICE( this ), "\n" );
+				mlt_log_debug( MLT_CONSUMER_SERVICE( consumer ), "video pts %lld (%f) ", video_st->pts.val, video_pts );
+			mlt_log_debug( MLT_CONSUMER_SERVICE( consumer ), "\n" );
 		}
 
 		if ( real_time_output == 1 && frames % 2 == 0 )
@@ -1436,7 +1593,7 @@ static void *consumer_thread( void *arg )
 			}
 			if ( pkt.size <= 0 )
 				pkt.size = avcodec_encode_audio( c, audio_outbuf, audio_outbuf_size, NULL );
-			mlt_log_debug( MLT_CONSUMER_SERVICE( this ), "flushing audio size %d\n", pkt.size );
+			mlt_log_debug( MLT_CONSUMER_SERVICE( consumer ), "flushing audio size %d\n", pkt.size );
 			if ( pkt.size <= 0 )
 				break;
 
@@ -1448,8 +1605,9 @@ static void *consumer_thread( void *arg )
 			pkt.data = audio_outbuf;
 			if ( av_interleaved_write_frame( oc, &pkt ) != 0 )
 			{
-				mlt_log_error( MLT_CONSUMER_SERVICE( this ), "%s: error writing flushed audio frame\n", __FILE__ );
-				break;
+				mlt_log_fatal( MLT_CONSUMER_SERVICE( consumer ), "error writing flushed audio frame\n" );
+				mlt_events_fire( properties, "consumer-fatal-error", NULL );
+				goto on_fatal_error;
 			}
 		}
 
@@ -1462,7 +1620,7 @@ static void *consumer_thread( void *arg )
 
 			// Encode the image
 			pkt.size = avcodec_encode_video( c, video_outbuf, video_outbuf_size, NULL );
-			mlt_log_debug( MLT_CONSUMER_SERVICE( this ), "flushing video size %d\n", pkt.size );
+			mlt_log_debug( MLT_CONSUMER_SERVICE( consumer ), "flushing video size %d\n", pkt.size );
 			if ( pkt.size <= 0 )
 				break;
 
@@ -1476,8 +1634,9 @@ static void *consumer_thread( void *arg )
 			// write the compressed frame in the media file
 			if ( av_interleaved_write_frame( oc, &pkt ) != 0 )
 			{
-				mlt_log_error( MLT_CONSUMER_SERVICE(this), "error writing flushed video frame\n" );
-				break;
+				mlt_log_fatal( MLT_CONSUMER_SERVICE(consumer), "error writing flushed video frame\n" );
+				mlt_events_fire( properties, "consumer-fatal-error", NULL );
+				goto on_fatal_error;
 			}
 			// Dual pass logging
 			if ( mlt_properties_get_data( properties, "_logfile", NULL ) && c->stats_out )
@@ -1485,6 +1644,8 @@ static void *consumer_thread( void *arg )
 		}
 	}
 
+on_fatal_error:
+	
 	// Write the trailer, if any
 	av_write_trailer( oc );
 
@@ -1522,7 +1683,7 @@ static void *consumer_thread( void *arg )
 	// Just in case we terminated on pause
 	mlt_properties_set_int( properties, "running", 0 );
 
-	mlt_consumer_stopped( this );
+	mlt_consumer_stopped( consumer );
 	mlt_properties_close( frame_meta_properties );
 
 	if ( mlt_properties_get_int( properties, "pass" ) > 1 )
@@ -1558,14 +1719,14 @@ static void *consumer_thread( void *arg )
 /** Close the consumer.
 */
 
-static void consumer_close( mlt_consumer this )
+static void consumer_close( mlt_consumer consumer )
 {
 	// Stop the consumer
-	mlt_consumer_stop( this );
+	mlt_consumer_stop( consumer );
 
 	// Close the parent
-	mlt_consumer_close( this );
+	mlt_consumer_close( consumer );
 
 	// Free the memory
-	free( this );
+	free( consumer );
 }

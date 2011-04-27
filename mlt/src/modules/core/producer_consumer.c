@@ -52,10 +52,19 @@ static int get_image( mlt_frame frame, uint8_t **image, mlt_image_format *format
 
 	// Update the frame
 	mlt_properties properties = mlt_frame_properties( frame );
-	mlt_properties_set_data( properties, "image", new_image, size, mlt_pool_release, NULL );
+	mlt_frame_set_image( frame, new_image, size, mlt_pool_release );
 	memcpy( new_image, *image, size );
 	mlt_properties_set( properties, "progressive", mlt_properties_get( MLT_FRAME_PROPERTIES(nested_frame), "progressive" ) );
 	*image = new_image;
+	
+	// Copy the alpha channel
+	uint8_t *alpha = mlt_properties_get_data( MLT_FRAME_PROPERTIES( nested_frame ), "alpha", &size );
+	if ( alpha && size > 0 )
+	{
+		new_image = mlt_pool_alloc( size );
+		memcpy( new_image, alpha, size );
+		mlt_frame_set_alpha( frame, new_image, size, mlt_pool_release );
+	}
 
 	return result;
 }
@@ -64,21 +73,9 @@ static int get_audio( mlt_frame frame, void **buffer, mlt_audio_format *format, 
 {
 	mlt_frame nested_frame = mlt_frame_pop_audio( frame );
 	int result = mlt_frame_get_audio( nested_frame, buffer, format, frequency, channels, samples );
-	int size = *channels * *samples;
-
-	switch ( *format )
-	{
-		case mlt_audio_s16:
-			size *= sizeof( int16_t );
-			break;
-		case mlt_audio_s32:
-			size *= sizeof( int32_t );
-		case mlt_audio_float:
-			size *= sizeof( float );
-		default:
-			mlt_log_error( NULL, "[producer consumer] Invalid audio format\n" );
-	}
+	int size = mlt_audio_format_size( *format, *samples, *channels );
 	int16_t *new_buffer = mlt_pool_alloc( size );
+
 	mlt_properties_set_data( MLT_FRAME_PROPERTIES( frame ), "audio", new_buffer, size, mlt_pool_release, NULL );
 	memcpy( new_buffer, *buffer, size );
 	*buffer = new_buffer;
@@ -104,17 +101,28 @@ static int get_frame( mlt_producer this, mlt_frame_ptr frame, int index )
 		{
 			cx->profile = mlt_profile_init( profile_name );
 			cx->is_close_profile = 1;
+			cx->profile->is_explicit = 1;
 		}
 		else
 		{
 			cx->profile = profile;
 			cx->is_close_profile = 0;
+			cx->profile->is_explicit = 0;
 		}
 
 		// For now, we must conform the nested network's frame rate to the parent network's
 		// framerate.
 		cx->profile->frame_rate_num = profile->frame_rate_num;
 		cx->profile->frame_rate_den = profile->frame_rate_den;
+
+		// Encapsulate a real producer for the resource
+		cx->producer = mlt_factory_producer( cx->profile, NULL,
+			mlt_properties_get( properties, "resource" ) );
+		mlt_properties_pass_list( properties, MLT_PRODUCER_PROPERTIES( cx->producer ),
+			"out, length" );
+
+		// Since we control the seeking, prevent it from seeking on its own
+		mlt_producer_set_speed( cx->producer, 0 );
 
 		// We will encapsulate a consumer
 		cx->consumer = mlt_consumer_new( cx->profile );
@@ -125,15 +133,6 @@ static int get_frame( mlt_producer this, mlt_frame_ptr frame, int index )
 		mlt_properties_pass_list( MLT_CONSUMER_PROPERTIES( cx->consumer ), properties,
 			"buffer, prefill, deinterlace_method, rescale" );
 	
-		// Encapsulate a real producer for the resource
-		cx->producer = mlt_factory_producer( cx->profile, NULL,
-			mlt_properties_get( properties, "resource" ) );
-		mlt_properties_pass_list( properties, MLT_PRODUCER_PROPERTIES( cx->producer ),
-			"out, length" );
-
-		// Since we control the seeking, prevent it from seeking on its own
-		mlt_producer_set_speed( cx->producer, 0 );
-
 		// Connect it all together
 		mlt_consumer_connect( cx->consumer, MLT_PRODUCER_SERVICE( cx->producer ) );
 		mlt_consumer_start( cx->consumer );
@@ -148,7 +147,9 @@ static int get_frame( mlt_producer this, mlt_frame_ptr frame, int index )
 
 		// Seek the producer to the correct place
 		// Calculate our positions
-		double actual_position = mlt_producer_get_speed( this ) * (double)mlt_producer_position( this );
+		double actual_position = (double)mlt_producer_position( this );
+		if ( mlt_producer_get_speed( this ) != 0 )
+			actual_position *= mlt_producer_get_speed( this );
 		mlt_position need_first = floor( actual_position );
 		mlt_producer_seek( cx->producer, need_first );
 		
@@ -205,10 +206,11 @@ static void producer_close( mlt_producer this )
 
 mlt_producer producer_consumer_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg )
 {
-	mlt_producer this = mlt_producer_new( );
+	mlt_producer this = mlt_producer_new( profile );
 
 	// Encapsulate the real producer
-	mlt_producer real_producer = mlt_factory_producer( profile, NULL, arg );
+	mlt_profile temp_profile = mlt_profile_init( NULL );
+	mlt_producer real_producer = mlt_factory_producer( temp_profile, NULL, arg );
 
 	if ( this && real_producer )
 	{
@@ -233,5 +235,6 @@ mlt_producer producer_consumer_init( mlt_profile profile, mlt_service_type type,
 
 		this = NULL;
 	}
+	mlt_profile_close( temp_profile );
 	return this;
 }

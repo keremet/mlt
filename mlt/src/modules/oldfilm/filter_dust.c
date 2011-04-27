@@ -66,11 +66,6 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 	int maxdia = mlt_properties_get_int( MLT_FILTER_PROPERTIES( filter ), "maxdiameter" );
 	int maxcount = mlt_properties_get_int( MLT_FILTER_PROPERTIES( filter ), "maxcount" );
 
-	mlt_position in = mlt_filter_get_in( filter );
-	mlt_position out = mlt_filter_get_out( filter );
-	mlt_position time = mlt_frame_get_position( this );
-	double position = ( double )( time - in ) / ( double )( out - in + 1 );
-	
 	*format = mlt_image_yuv422;
 	int error = mlt_frame_get_image( this, image, format, width, height, 1 );	
 	// load svg
@@ -84,7 +79,11 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 	
 	if (!maxcount)
 		return 0;
+
+	double position = mlt_filter_get_progress( filter, this );
 	srand(position*10000);
+
+	mlt_service_lock( MLT_FILTER_SERVICE( filter ) );
 
 	int im=rand()%maxcount;
 	int piccount=mlt_properties_count(direntries);
@@ -155,6 +154,9 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 			overlay_image ( *image , *width, *height , luma_image , dx , mlt_properties_get_int ( properties , cachedy ) , alpha , x1 , y1 , updown , mirror );
 		}
 	}
+
+	mlt_service_unlock( MLT_FILTER_SERVICE( filter ) );
+
 	if (piccount>0 )
 		return 0;
 	if ( error == 0 && *image )

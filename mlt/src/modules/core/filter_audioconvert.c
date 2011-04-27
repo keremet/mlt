@@ -27,11 +27,11 @@
 
 static int convert_audio( mlt_frame frame, void **audio, mlt_audio_format *format, mlt_audio_format requested_format )
 {
-	int error = 0;
+	int error = 1;
 	mlt_properties properties = MLT_FRAME_PROPERTIES( frame );
 	int channels = mlt_properties_get_int( properties, "audio_channels" );
 	int samples = mlt_properties_get_int( properties, "audio_samples" );
-	int size = 0;
+	int size = mlt_audio_format_size( requested_format, samples, channels );
 
 	if ( *format != requested_format )
 	{
@@ -45,7 +45,6 @@ static int convert_audio( mlt_frame frame, void **audio, mlt_audio_format *forma
 			{
 			case mlt_audio_s32:
 			{
-				size = channels * samples * sizeof(int32_t);
 				int32_t *buffer = mlt_pool_alloc( size );
 				int32_t *p = buffer;
 				int c;
@@ -60,11 +59,11 @@ static int convert_audio( mlt_frame frame, void **audio, mlt_audio_format *forma
 					}
 				}
 				*audio = buffer;
+				error = 0;
 				break;
 			}
 			case mlt_audio_float:
 			{
-				size = channels * samples * sizeof(float);
 				float *buffer = mlt_pool_alloc( size );
 				float *p = buffer;
 				int c;
@@ -79,10 +78,11 @@ static int convert_audio( mlt_frame frame, void **audio, mlt_audio_format *forma
 					}
 				}
 				*audio = buffer;
+				error = 0;
 				break;
 			}
 			default:
-				error = 1;
+				break;
 			}
 			break;
 		case mlt_audio_s32:
@@ -90,7 +90,6 @@ static int convert_audio( mlt_frame frame, void **audio, mlt_audio_format *forma
 			{
 			case mlt_audio_s16:
 			{
-				size = channels * samples * sizeof(int16_t);
 				int16_t *buffer = mlt_pool_alloc( size );
 				int16_t *p = buffer;
 				int32_t *q = (int32_t*) *audio;
@@ -99,11 +98,11 @@ static int convert_audio( mlt_frame frame, void **audio, mlt_audio_format *forma
 					for ( c = 0; c < channels; c++ )
 						*p++ = *( q + c * samples + s ) >> 16;
 				*audio = buffer;
+				error = 0;
 				break;
 			}
 			case mlt_audio_float:
 			{
-				size = channels * samples * sizeof(float);
 				float *buffer = mlt_pool_alloc( size );
 				float *p = buffer;
 				int32_t *q = (int32_t*) *audio;
@@ -111,10 +110,11 @@ static int convert_audio( mlt_frame frame, void **audio, mlt_audio_format *forma
 				while ( --i )
 					*p++ = (float)( *q++ ) / 2147483648.0;
 				*audio = buffer;
+				error = 0;
 				break;
 			}
 			default:
-				error = 1;
+				break;
 			}
 			break;
 		case mlt_audio_float:
@@ -122,7 +122,6 @@ static int convert_audio( mlt_frame frame, void **audio, mlt_audio_format *forma
 			{
 			case mlt_audio_s16:
 			{
-				size = channels * samples * sizeof(int16_t);
 				int16_t *buffer = mlt_pool_alloc( size );
 				int16_t *p = buffer;
 				float *q = (float*) *audio;
@@ -135,11 +134,11 @@ static int convert_audio( mlt_frame frame, void **audio, mlt_audio_format *forma
 						*p++ = 32767 * f;
 					}
 				*audio = buffer;
+				error = 0;
 				break;
 			}
 			case mlt_audio_s32:
 			{
-				size = channels * samples * sizeof(int32_t);
 				int32_t *buffer = mlt_pool_alloc( size );
 				int32_t *p = buffer;
 				float *q = (float*) *audio;
@@ -151,17 +150,18 @@ static int convert_audio( mlt_frame frame, void **audio, mlt_audio_format *forma
 					*p++ = ( f > 0 ? 2147483647LL : 2147483648LL ) * f;
 				}
 				*audio = buffer;
+				error = 0;
 				break;
 			}
 			default:
-				error = 1;
+				break;
 			}
 			break;
 		default:
-			error = 1;
+			break;
 		}
 	}
-	if ( size )
+	if ( !error )
 	{
 		mlt_frame_set_audio( frame, *audio, requested_format, size, mlt_pool_release );
 		*format = requested_format;

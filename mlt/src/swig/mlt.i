@@ -38,6 +38,7 @@ namespace Mlt {
 %newobject Factory::transition( Profile &, char *, char * );
 %newobject Factory::consumer( Profile &, char *, char * );
 %newobject Properties::listen( const char *, void *, mlt_listener );
+%newobject Properties::setup_wait_for( const char * );
 %newobject Properties::parse_yaml( const char * );
 %newobject Service::producer( );
 %newobject Service::consumer( );
@@ -66,6 +67,7 @@ namespace Mlt {
 
 %include <framework/mlt_types.h>
 %include <framework/mlt_factory.h>
+%include <framework/mlt_version.h>
 int mlt_log_get_level( void );
 void mlt_log_set_level( int );
 %include <MltFactory.h>
