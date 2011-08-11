@@ -239,7 +239,7 @@ static int consumer_start( mlt_consumer consumer )
 			snprintf( key, sizeof(key), "%d", mlt_properties_count( formats ) );
 			mlt_properties_set( formats, key, format->name );
 		}
-		fprintf( stderr, "%s", mlt_properties_serialise_yaml( doc ) );
+		fprintf( stdout, "%s", mlt_properties_serialise_yaml( doc ) );
 		mlt_properties_close( doc );
 		error = 1;
 	}
@@ -259,7 +259,7 @@ static int consumer_start( mlt_consumer consumer )
 				snprintf( key, sizeof(key), "%d", mlt_properties_count( codecs ) );
 				mlt_properties_set( codecs, key, codec->name );
 			}
-		fprintf( stderr, "%s", mlt_properties_serialise_yaml( doc ) );
+		fprintf( stdout, "%s", mlt_properties_serialise_yaml( doc ) );
 		mlt_properties_close( doc );
 		error = 1;
 	}
@@ -279,7 +279,7 @@ static int consumer_start( mlt_consumer consumer )
 				snprintf( key, sizeof(key), "%d", mlt_properties_count( codecs ) );
 				mlt_properties_set( codecs, key, codec->name );
 			}
-		fprintf( stderr, "%s", mlt_properties_serialise_yaml( doc ) );
+		fprintf( stdout, "%s", mlt_properties_serialise_yaml( doc ) );
 		mlt_properties_close( doc );
 		error = 1;
 	}
@@ -397,10 +397,12 @@ static int consumer_is_stopped( mlt_consumer consumer )
 /** Process properties as AVOptions and apply to AV context obj
 */
 
-static void apply_properties( void *obj, mlt_properties properties, int flags, int alloc )
+static void apply_properties( void *obj, mlt_properties properties, int flags )
 {
 	int i;
 	int count = mlt_properties_count( properties );
+	int alloc = 1;
+
 	for ( i = 0; i < count; i++ )
 	{
 		const char *opt_name = mlt_properties_get_name( properties, i );
@@ -468,10 +470,10 @@ static AVStream *add_audio_stream( mlt_consumer consumer, AVFormatContext *oc, i
 		if ( apre )
 		{
 			mlt_properties p = mlt_properties_load( apre );
-			apply_properties( c, p, AV_OPT_FLAG_AUDIO_PARAM | AV_OPT_FLAG_ENCODING_PARAM, 1 );
+			apply_properties( c, p, AV_OPT_FLAG_AUDIO_PARAM | AV_OPT_FLAG_ENCODING_PARAM );
 			mlt_properties_close( p );
 		}
-		apply_properties( c, properties, AV_OPT_FLAG_AUDIO_PARAM | AV_OPT_FLAG_ENCODING_PARAM, 0 );
+		apply_properties( c, properties, AV_OPT_FLAG_AUDIO_PARAM | AV_OPT_FLAG_ENCODING_PARAM );
 
 		int audio_qscale = mlt_properties_get_int( properties, "aq" );
         if ( audio_qscale > QSCALE_NONE )
@@ -518,16 +520,22 @@ static int open_audio( mlt_properties properties, AVFormatContext *oc, AVStream 
 
 #if LIBAVCODEC_VERSION_MAJOR > 52
 	// Process properties as AVOptions on the AVCodec
-	if ( codec && codec->priv_class && c->priv_data )
+	if ( codec && codec->priv_class )
 	{
 		char *apre = mlt_properties_get( properties, "apre" );
+		if ( !c->priv_data && codec->priv_data_size )
+		{
+			c->priv_data = av_mallocz( codec->priv_data_size );
+			*(const AVClass **) c->priv_data = codec->priv_class;
+//			av_opt_set_defaults( c );
+		}
 		if ( apre )
 		{
 			mlt_properties p = mlt_properties_load( apre );
-			apply_properties( c->priv_data, p, AV_OPT_FLAG_AUDIO_PARAM | AV_OPT_FLAG_ENCODING_PARAM, 1 );
+			apply_properties( c->priv_data, p, AV_OPT_FLAG_AUDIO_PARAM | AV_OPT_FLAG_ENCODING_PARAM );
 			mlt_properties_close( p );
 		}
-		apply_properties( c->priv_data, properties, AV_OPT_FLAG_AUDIO_PARAM | AV_OPT_FLAG_ENCODING_PARAM, 0 );
+		apply_properties( c->priv_data, properties, AV_OPT_FLAG_AUDIO_PARAM | AV_OPT_FLAG_ENCODING_PARAM );
 	}
 #endif
 
@@ -633,7 +641,8 @@ static AVStream *add_video_stream( mlt_consumer consumer, AVFormatContext *oc, i
 					
 					mlt_properties_close( p );
 					p = mlt_properties_load( path );
-					mlt_properties_debug( p, path, stderr );
+					if ( mlt_properties_count( p ) > 0 )
+						mlt_properties_debug( p, path, stderr );
 					free( path );	
 				}
 			}
@@ -642,12 +651,12 @@ static AVStream *add_video_stream( mlt_consumer consumer, AVFormatContext *oc, i
 				mlt_properties_debug( p, vpre, stderr );			
 			}
 #endif
-			apply_properties( c, p, AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM, 1 );
+			apply_properties( c, p, AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM );
 			mlt_properties_close( p );
 		}
 		int colorspace = mlt_properties_get_int( properties, "colorspace" );
 		mlt_properties_set( properties, "colorspace", NULL );
-		apply_properties( c, properties, AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM, 0 );
+		apply_properties( c, properties, AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM );
 		mlt_properties_set_int( properties, "colorspace", colorspace );
 
 		// Set options controlled by MLT
@@ -889,16 +898,22 @@ static int open_video( mlt_properties properties, AVFormatContext *oc, AVStream 
 
 #if LIBAVCODEC_VERSION_MAJOR > 52
 	// Process properties as AVOptions on the AVCodec
-	if ( codec && codec->priv_class && video_enc->priv_data )
+	if ( codec && codec->priv_class )
 	{
 		char *vpre = mlt_properties_get( properties, "vpre" );
+		if ( !video_enc->priv_data && codec->priv_data_size )
+		{
+			video_enc->priv_data = av_mallocz( codec->priv_data_size );
+			*(const AVClass **) video_enc->priv_data = codec->priv_class;
+//			av_opt_set_defaults( video_enc );
+		}
 		if ( vpre )
 		{
 			mlt_properties p = mlt_properties_load( vpre );
-			apply_properties( video_enc->priv_data, p, AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM, 1 );
+			apply_properties( video_enc->priv_data, p, AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM );
 			mlt_properties_close( p );
 		}
-		apply_properties( video_enc->priv_data, properties, AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM, 0 );
+		apply_properties( video_enc->priv_data, properties, AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM );
 	}
 #endif
 
@@ -1208,17 +1223,17 @@ static void *consumer_thread( void *arg )
 		if ( fpre )
 		{
 			mlt_properties p = mlt_properties_load( fpre );
-			apply_properties( oc, p, AV_OPT_FLAG_ENCODING_PARAM, 1 );
+			apply_properties( oc, p, AV_OPT_FLAG_ENCODING_PARAM );
 #if LIBAVFORMAT_VERSION_MAJOR > 52
 			if ( oc->oformat && oc->oformat->priv_class && oc->priv_data )
-				apply_properties( oc->priv_data, p, AV_OPT_FLAG_ENCODING_PARAM, 1 );
+				apply_properties( oc->priv_data, p, AV_OPT_FLAG_ENCODING_PARAM );
 #endif
 			mlt_properties_close( p );
 		}
-		apply_properties( oc, properties, AV_OPT_FLAG_ENCODING_PARAM, 0 );
+		apply_properties( oc, properties, AV_OPT_FLAG_ENCODING_PARAM );
 #if LIBAVFORMAT_VERSION_MAJOR > 52
 		if ( oc->oformat && oc->oformat->priv_class && oc->priv_data )
-			apply_properties( oc->priv_data, properties, AV_OPT_FLAG_ENCODING_PARAM, 1 );
+			apply_properties( oc->priv_data, properties, AV_OPT_FLAG_ENCODING_PARAM );
 #endif
 
 		if ( video_st && !open_video( properties, oc, video_st, vcodec? vcodec : NULL ) )
@@ -1778,6 +1793,9 @@ on_fatal_error:
 		free( cwd );
 		remove( "x264_2pass.log.temp" );
 	}
+
+	while ( ( frame = mlt_deque_pop_back( queue ) ) )
+		mlt_frame_close( frame );
 
 	return NULL;
 }

@@ -49,11 +49,6 @@ endif
 
 SRCS := $(OBJS:.o=.c)
 
-ifeq ($(targetos), MinGW)
-OBJS += ../../win32/win32.o
-SRCS += ../../win32/win32.c
-endif
-
 all: 	$(TARGET)
 
 $(TARGET): $(OBJS) $(ASM_OBJS)
@@ -76,6 +71,8 @@ clean:
 
 install: all
 	install -m 755 $(TARGET) "$(DESTDIR)$(libdir)/mlt"
+	install -d "$(DESTDIR)$(datadir)/mlt/gtk2"
+	install -m 644 *.yml "$(DESTDIR)$(datadir)/mlt/gtk2"
 
 ifneq ($(wildcard .depend),)
 include .depend

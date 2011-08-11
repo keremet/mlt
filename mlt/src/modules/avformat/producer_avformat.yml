@@ -25,14 +25,13 @@ bugs:
 
 parameters:
   - identifier: argument # 'argument' is a reserved name for a value supplied to the factory
-    title: File/URI
+    title: File/URL
     type: string
     description: |
       A file name specification or URL in the form:
       [{protocol}|{format}]:{resource}[?{format-parameter}[&{format-parameter}...]]
-      For example, video4linux:/dev/video1?width:320&height:240
+      For example, video4linux2:/dev/video1?width=320&height=240
       Note: on the bash command line, & must be escaped as '\&'.
-      Also, note the use of ':' instead of '=' for parameters.
       Use 'f-list' to see a list of supported file formats.
       Use 'vcodec-list' to see a list of supported video decoders.
       Use 'acodec-list' to see a list of supported audio decoders.
@@ -107,7 +106,7 @@ parameters:
     # no default property means it should be blank in the UI and not applied unless provided
 
   - identifier: resource
-    title: File/URI
+    title: File/URL
     type: string
     description: file or protocol specification
     readonly: yes
@@ -137,11 +136,6 @@ parameters:
     title: Supports seeking
     description: if the resource can seek
     readonly: yes
-
-  - identifier: adjust_length
-    title: Adjust length
-    type: time
-    description: Adjust the detected length.
 
   - identifier: width
     title: Width
@@ -205,3 +199,13 @@ parameters:
       - 240 # SMPTE 240M
       - 601 # ITU-R BT.601
       - 709 # ITU-R BT.709
+
+  - identifier: video_delay
+    title: Video delay
+    description: >
+      Manually adjust A/V synchronization.
+      A negative value advances the video instead of delaying it.
+    type: float
+    default: 0
+    unit: seconds
+    widget: timecode

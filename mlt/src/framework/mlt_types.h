@@ -52,7 +52,9 @@ typedef enum
 	mlt_audio_pcm = 1, /**< \deprecated signed 16-bit interleaved PCM */
 	mlt_audio_s16 = 1, /**< signed 16-bit interleaved PCM */
 	mlt_audio_s32,     /**< signed 32-bit non-interleaved PCM */
-	mlt_audio_float    /**< 32-bit non-interleaved floating point */
+	mlt_audio_float,   /**< 32-bit non-interleaved floating point */
+	mlt_audio_s32le,   /**< signed 32-bit interleaved PCM, may only used by producers */
+	mlt_audio_f32le    /**< 32-bit interleaved floating point, may only be used by producers */
 }
 mlt_audio_format;
 
@@ -125,5 +127,13 @@ typedef char *( *mlt_serialiser )( void *, int length );/**< pointer to serializ
 #define MLT_TRANSITION(x) ( ( mlt_transition )( x ) )   /**< Cast to a Transition pointer */
 #define MLT_CONSUMER(x) ( ( mlt_consumer )( x ) )       /**< Cast to a Consumer pointer */
 #define MLT_FRAME(x)      ( ( mlt_frame )( x ) )        /**< Cast to a Frame pointer */
+
+#ifdef WIN32
+#include <pthread.h>
+/* Win32 compatibility function declarations */
+extern int usleep(unsigned int useconds);
+extern int nanosleep( const struct timespec * rqtp, struct timespec * rmtp );
+extern int setenv(const char *name, const char *value, int overwrite);
+#endif
 
 #endif

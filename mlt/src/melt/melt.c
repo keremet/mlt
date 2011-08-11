@@ -28,6 +28,7 @@
 #include <sched.h>
 #include <libgen.h>
 #include <limits.h>
+#include <unistd.h>
 
 #include <framework/mlt.h>
 
@@ -42,6 +43,8 @@ static void transport_action( mlt_producer producer, char *value )
 	mlt_properties properties = MLT_PRODUCER_PROPERTIES( producer );
 	mlt_multitrack multitrack = mlt_properties_get_data( properties, "multitrack", NULL );
 	mlt_consumer consumer = mlt_properties_get_data( properties, "transport_consumer", NULL );
+	mlt_properties jack = mlt_properties_get_data( MLT_CONSUMER_PROPERTIES( consumer ), "jack_filter", NULL );
+	mlt_position position = mlt_producer_position( producer );
 
 	mlt_properties_set_int( properties, "stats_off", 1 );
 
@@ -52,10 +55,14 @@ static void transport_action( mlt_producer producer, char *value )
 			case 'q':
 			case 'Q':
 				mlt_properties_set_int( properties, "done", 1 );
+				mlt_events_fire( jack, "jack-stop", NULL );
 				break;
 			case '0':
+				position = 0;
 				mlt_producer_set_speed( producer, 1 );
-				mlt_producer_seek( producer, 0 );
+				mlt_producer_seek( producer, position );
+				mlt_consumer_purge( consumer );
+				mlt_events_fire( jack, "jack-seek", &position, NULL );
 				break;
 			case '1':
 				mlt_producer_set_speed( producer, -10 );
@@ -71,10 +78,15 @@ static void transport_action( mlt_producer producer, char *value )
 				break;
 			case '5':
 				mlt_producer_set_speed( producer, 0 );
+				mlt_consumer_purge( consumer );
+				mlt_events_fire( jack, "jack-stop", NULL );
 				break;
 			case '6':
 			case ' ':
-				mlt_producer_set_speed( producer, 1 );
+				if ( !jack || mlt_producer_get_speed( producer ) != 0 )
+					mlt_producer_set_speed( producer, 1 );
+				mlt_consumer_purge( consumer );
+				mlt_events_fire( jack, "jack-start", NULL );
 				break;
 			case '7':
 				mlt_producer_set_speed( producer, 2 );
@@ -93,11 +105,11 @@ static void transport_action( mlt_producer producer, char *value )
 					fprintf( stderr, "\n" );
 					for ( i = 0; 1; i ++ )
 					{
-						mlt_position time = mlt_multitrack_clip( multitrack, mlt_whence_relative_start, i );
-						if ( time == last )
+						position = mlt_multitrack_clip( multitrack, mlt_whence_relative_start, i );
+						if ( position == last )
 							break;
-						last = time;
-						fprintf( stderr, "%d: %d\n", i, (int)time );
+						last = position;
+						fprintf( stderr, "%d: %d\n", i, (int)position );
 					}
 				}
 				break;
@@ -105,54 +117,74 @@ static void transport_action( mlt_producer producer, char *value )
 			case 'g':
 				if ( multitrack != NULL )
 				{
-					mlt_position time = mlt_multitrack_clip( multitrack, mlt_whence_relative_current, 0 );
-					mlt_producer_seek( producer, time );
+					position = mlt_multitrack_clip( multitrack, mlt_whence_relative_current, 0 );
+					mlt_producer_seek( producer, position );
+					mlt_consumer_purge( consumer );
+					mlt_events_fire( jack, "jack-seek", &position, NULL );
 				}
 				break;
 			case 'H':
 				if ( producer != NULL )
 				{
-					mlt_position position = mlt_producer_position( producer );
-					mlt_producer_seek( producer, position - ( mlt_producer_get_fps( producer ) * 60 ) );
+					position -= mlt_producer_get_fps( producer ) * 60;
+					mlt_consumer_purge( consumer );
+					mlt_producer_seek( producer, position );
+					mlt_events_fire( jack, "jack-seek", &position, NULL );
 				}
 				break;
 			case 'h':
 				if ( producer != NULL )
 				{
-					mlt_position position = mlt_producer_position( producer );
+					position--;
 					mlt_producer_set_speed( producer, 0 );
-					mlt_producer_seek( producer, position - 1 );
+					mlt_consumer_purge( consumer );
+					mlt_producer_seek( producer, position );
+					mlt_events_fire( jack, "jack-stop", NULL );
+					mlt_events_fire( jack, "jack-seek", &position, NULL );
 				}
 				break;
 			case 'j':
 				if ( multitrack != NULL )
 				{
-					mlt_position time = mlt_multitrack_clip( multitrack, mlt_whence_relative_current, 1 );
-					mlt_producer_seek( producer, time );
+					position = mlt_multitrack_clip( multitrack, mlt_whence_relative_current, 1 );
+					mlt_consumer_purge( consumer );
+					mlt_producer_seek( producer, position );
+					mlt_events_fire( jack, "jack-seek", &position, NULL );
 				}
 				break;
 			case 'k':
 				if ( multitrack != NULL )
 				{
-					mlt_position time = mlt_multitrack_clip( multitrack, mlt_whence_relative_current, -1 );
-					mlt_producer_seek( producer, time );
+					position = mlt_multitrack_clip( multitrack, mlt_whence_relative_current, -1 );
+					mlt_consumer_purge( consumer );
+					mlt_producer_seek( producer, position );
+					mlt_events_fire( jack, "jack-seek", &position, NULL );
 				}
 				break;
 			case 'l':
 				if ( producer != NULL )
 				{
-					mlt_position position = mlt_producer_position( producer );
+					position++;
+					mlt_consumer_purge( consumer );
 					if ( mlt_producer_get_speed( producer ) != 0 )
+					{
 						mlt_producer_set_speed( producer, 0 );
+						mlt_events_fire( jack, "jack-stop", NULL );
+					}
 					else
-						mlt_producer_seek( producer, position + 1 );
+					{
+						mlt_producer_seek( producer, position );
+						mlt_events_fire( jack, "jack-seek", &position, NULL );
+					}
 				}
 				break;
 			case 'L':
 				if ( producer != NULL )
 				{
-					mlt_position position = mlt_producer_position( producer );
-					mlt_producer_seek( producer, position + ( mlt_producer_get_fps( producer ) * 60 ) );
+					position += mlt_producer_get_fps( producer ) * 60;
+					mlt_consumer_purge( consumer );
+					mlt_producer_seek( producer, position );
+					mlt_events_fire( jack, "jack-seek", &position, NULL );
 				}
 				break;
 		}
@@ -161,6 +193,53 @@ static void transport_action( mlt_producer producer, char *value )
 	}
 
 	mlt_properties_set_int( properties, "stats_off", 0 );
+}
+
+static void on_jack_started( mlt_properties owner, mlt_consumer consumer, mlt_position *position )
+{
+	mlt_producer producer = mlt_properties_get_data( MLT_CONSUMER_PROPERTIES(consumer), "transport_producer", NULL );
+	if ( producer )
+	{
+		if ( mlt_producer_get_speed( producer ) != 0 )
+		{
+			mlt_properties jack = mlt_properties_get_data( MLT_CONSUMER_PROPERTIES( consumer ), "jack_filter", NULL );
+			mlt_events_fire( jack, "jack-stop", NULL );
+		}
+		else
+		{
+			mlt_producer_set_speed( producer, 1 );
+			mlt_consumer_purge( consumer );
+			mlt_producer_seek( producer, *position );
+			mlt_properties_set_int( MLT_CONSUMER_PROPERTIES( consumer ), "refresh", 1 );
+		}
+	}
+}
+
+static void on_jack_stopped( mlt_properties owner, mlt_consumer consumer, mlt_position *position )
+{
+	mlt_producer producer = mlt_properties_get_data( MLT_CONSUMER_PROPERTIES(consumer), "transport_producer", NULL );
+	if ( producer )
+	{
+		mlt_producer_set_speed( producer, 0 );
+		mlt_consumer_purge( consumer );
+		mlt_producer_seek( producer, *position );
+		mlt_properties_set_int( MLT_CONSUMER_PROPERTIES( consumer ), "refresh", 1 );
+	}
+}
+
+static void setup_jack_transport( mlt_consumer consumer, mlt_profile profile )
+{
+	mlt_properties properties = MLT_CONSUMER_PROPERTIES( consumer );
+	mlt_filter jack = mlt_factory_filter( profile, "jackrack", NULL );
+	mlt_properties jack_properties = MLT_FILTER_PROPERTIES(jack);
+
+	mlt_service_attach( MLT_CONSUMER_SERVICE(consumer), jack );
+	mlt_properties_set_int( properties, "audio_off", 1 );
+	mlt_properties_set_data( properties, "jack_filter", jack, 0, (mlt_destructor) mlt_filter_close, NULL );
+//	mlt_properties_set( jack_properties, "out_1", "system:playback_1" );
+//	mlt_properties_set( jack_properties, "out_2", "system:playback_2" );
+	mlt_events_listen( jack_properties, consumer, "jack-started", (mlt_listener) on_jack_started );
+	mlt_events_listen( jack_properties, consumer, "jack-stopped", (mlt_listener) on_jack_stopped );
 }
 
 static mlt_consumer create_consumer( mlt_profile profile, char *id )
@@ -297,7 +376,7 @@ static void transport( mlt_producer producer, mlt_consumer consumer )
 
 static void show_usage( char *program_name )
 {
-	fprintf( stderr,
+	fprintf( stdout,
 "Usage: %s [options] [producer [name=value]* ]+\n"
 "Options:\n"
 "  -attach filter[:arg] [name=value]*       Attach a filter to the output\n"
@@ -311,6 +390,7 @@ static void show_usage( char *program_name )
 "  -filter filter[:arg] [name=value]*       Add a filter to the current track\n"
 "  -group [name=value]*                     Apply properties repeatedly\n"
 "  -help                                    Show this message\n"
+"  -jack                                    Enable JACK transport synchronization\n"
 "  -join clips                              Join multiple clips into one cut\n"
 "  -mix length                              Add a mix between the last two cuts\n"
 "  -mixer transition                        Add a transition to the mix\n"
@@ -325,6 +405,7 @@ static void show_usage( char *program_name )
 "  -query \"producers\" | \"producer\"=id       List producers or show info about one\n"
 "  -query \"transitions\" | \"transition\"=id   List transitions, show info about one\n"
 "  -query \"profiles\" | \"profile\"=id         List profiles, show info about one\n"
+"  -query \"presets\" | \"preset\"=id           List presets, show info about one\n"
 "  -query \"formats\"                         List audio/video formats\n"
 "  -query \"audio_codecs\"                    List audio codecs\n"
 "  -query \"video_codecs\"                    List video codecs\n"
@@ -341,64 +422,18 @@ static void show_usage( char *program_name )
 	basename( program_name ) );
 }
 
-static void guess_profile( mlt_producer melt, mlt_profile profile )
-{
-	mlt_frame fr = NULL;
-	uint8_t *buffer;
-	mlt_image_format fmt = mlt_image_yuv422;
-	mlt_properties p;
-	int w = profile->width;
-	int h = profile->height;
-
-	if ( ! mlt_service_get_frame( MLT_PRODUCER_SERVICE(melt), &fr, 0 ) && fr )
-	{
-		mlt_properties_set_double( MLT_FRAME_PROPERTIES( fr ), "consumer_aspect_ratio", mlt_profile_sar( profile ) );
-		if ( ! mlt_frame_get_image( fr, &buffer, &fmt, &w, &h, 0 ) )
-		{
-			// Some source properties are not exposed until after the first get_image call.
-			mlt_frame_close( fr );
-			mlt_service_get_frame( MLT_PRODUCER_SERVICE(melt), &fr, 0 );
-			p = MLT_FRAME_PROPERTIES( fr );
-//			mlt_properties_dump(p, stderr);
-			if ( mlt_properties_get_int( p, "meta.media.frame_rate_den" ) && mlt_properties_get_int( p, "meta.media.sample_aspect_den" ) )
-			{
-				profile->width = mlt_properties_get_int( p, "meta.media.width" );
-				profile->height = mlt_properties_get_int( p, "meta.media.height" );
-				profile->progressive = mlt_properties_get_int( p, "meta.media.progressive" );
-				profile->frame_rate_num = mlt_properties_get_int( p, "meta.media.frame_rate_num" );
-				profile->frame_rate_den = mlt_properties_get_int( p, "meta.media.frame_rate_den" );
-				// AVCHD is mis-reported as double frame rate.
-				if ( profile->progressive == 0 && (
-				     profile->frame_rate_num / profile->frame_rate_den == 50 ||
-				     profile->frame_rate_num / profile->frame_rate_den == 59 ) )
-					profile->frame_rate_num /= 2;
-				profile->sample_aspect_num = mlt_properties_get_int( p, "meta.media.sample_aspect_num" );
-				profile->sample_aspect_den = mlt_properties_get_int( p, "meta.media.sample_aspect_den" );
-				profile->colorspace = mlt_properties_get_int( p, "meta.media.colorspace" );
-				profile->display_aspect_num = (int) ( (double) profile->sample_aspect_num * profile->width / profile->sample_aspect_den + 0.5 );
-				profile->display_aspect_den = profile->height;
-				free( profile->description );
-				profile->description = strdup( "automatic" );
-				profile->is_explicit = 0;
-			}
-		}
-	}
-	mlt_frame_close( fr );
-	mlt_producer_seek( melt, 0 );
-}
-
 static void query_metadata( mlt_repository repo, mlt_service_type type, const char *typestr, char *id )
 {
 	mlt_properties metadata = mlt_repository_metadata( repo, type, id );
 	if ( metadata )
 	{
 		char *s = mlt_properties_serialise_yaml( metadata );
-		fprintf( stderr, "%s", s );
+		fprintf( stdout, "%s", s );
 		free( s );
 	}
 	else
 	{
-		fprintf( stderr, "# No metadata for %s \"%s\"\n", typestr, id );
+		fprintf( stdout, "# No metadata for %s \"%s\"\n", typestr, id );
 	}
 }
 
@@ -427,27 +462,27 @@ static void query_services( mlt_repository repo, mlt_service_type type )
 		default:
 			return;
 	}
-	fprintf( stderr, "---\n%s:\n", typestr );
+	fprintf( stdout, "---\n%s:\n", typestr );
 	if ( services )
 	{
 		int j;
 		for ( j = 0; j < mlt_properties_count( services ); j++ )
-			fprintf( stderr, "  - %s\n", mlt_properties_get_name( services, j ) );
+			fprintf( stdout, "  - %s\n", mlt_properties_get_name( services, j ) );
 	}
-	fprintf( stderr, "...\n" );
+	fprintf( stdout, "...\n" );
 }
 
 static void query_profiles()
 {
 	mlt_properties profiles = mlt_profile_list();
-	fprintf( stderr, "---\nprofiles:\n" );
+	fprintf( stdout, "---\nprofiles:\n" );
 	if ( profiles )
 	{
 		int j;
 		for ( j = 0; j < mlt_properties_count( profiles ); j++ )
-			fprintf( stderr, "  - %s\n", mlt_properties_get_name( profiles, j ) );
+			fprintf( stdout, "  - %s\n", mlt_properties_get_name( profiles, j ) );
 	}
-	fprintf( stderr, "...\n" );
+	fprintf( stdout, "...\n" );
 	mlt_properties_close( profiles );
 }
 
@@ -458,14 +493,45 @@ static void query_profile( const char *id )
 	if ( profile )
 	{
 		char *s = mlt_properties_serialise_yaml( profile );
-		fprintf( stderr, "%s", s );
+		fprintf( stdout, "%s", s );
 		free( s );
 	}
 	else
 	{
-		fprintf( stderr, "# No metadata for profile \"%s\"\n", id );
+		fprintf( stdout, "# No metadata for profile \"%s\"\n", id );
 	}
 	mlt_properties_close( profiles );
+}
+
+static void query_presets()
+{
+	mlt_properties presets = mlt_repository_presets();
+	fprintf( stdout, "---\npresets:\n" );
+	if ( presets )
+	{
+		int j;
+		for ( j = 0; j < mlt_properties_count( presets ); j++ )
+			fprintf( stdout, "  - %s\n", mlt_properties_get_name( presets, j ) );
+	}
+	fprintf( stdout, "...\n" );
+	mlt_properties_close( presets );
+}
+
+static void query_preset( const char *id )
+{
+	mlt_properties presets = mlt_repository_presets();
+	mlt_properties preset = mlt_properties_get_data( presets, id, NULL );
+	if ( preset )
+	{
+		char *s = mlt_properties_serialise_yaml( preset );
+		fprintf( stdout, "%s", s );
+		free( s );
+	}
+	else
+	{
+		fprintf( stdout, "# No metadata for preset \"%s\"\n", id );
+	}
+	mlt_properties_close( presets );
 }
 
 static void query_formats( )
@@ -479,7 +545,7 @@ static void query_formats( )
 	}
 	else
 	{
-		fprintf( stderr, "# No formats - failed to load avformat consumer\n" );
+		fprintf( stdout, "# No formats - failed to load avformat consumer\n" );
 	}
 }
 
@@ -494,7 +560,7 @@ static void query_acodecs( )
 	}
 	else
 	{
-		fprintf( stderr, "# No audio codecs - failed to load avformat consumer\n" );
+		fprintf( stdout, "# No audio codecs - failed to load avformat consumer\n" );
 	}
 }
 
@@ -509,7 +575,7 @@ static void query_vcodecs( )
 	}
 	else
 	{
-		fprintf( stderr, "# No video codecs - failed to load avformat consumer\n" );
+		fprintf( stdout, "# No video codecs - failed to load avformat consumer\n" );
 	}
 }
 
@@ -580,6 +646,8 @@ int main( int argc, char **argv )
 					query_services( repo, transition_type );
 				else if ( !strcmp( pname, "profiles" ) || !strcmp( pname, "profile" ) )
 					query_profiles();
+				else if ( !strcmp( pname, "presets" ) || !strcmp( pname, "preset" ) )
+					query_presets();
 				else if ( !strncmp( pname, "format", 6 ) )
 					query_formats();
 				else if ( !strncmp( pname, "acodec", 6 ) || !strcmp( pname, "audio_codecs" ) )
@@ -597,6 +665,8 @@ int main( int argc, char **argv )
 					query_metadata( repo, transition_type, "transition", strchr( pname, '=' ) + 1 );
 				else if ( !strncmp( pname, "profile=", 8 ) )
 					query_profile( strchr( pname, '=' ) + 1 );
+				else if ( !strncmp( pname, "preset=", 7 ) )
+					query_preset( strchr( pname, '=' ) + 1 );
 				else
 					goto query_all;
 			}
@@ -607,7 +677,7 @@ query_all:
 				query_services( repo, filter_type );
 				query_services( repo, producer_type );
 				query_services( repo, transition_type );
-				fprintf( stderr, "# You can query the metadata for a specific service using:\n"
+				fprintf( stdout, "# You can query the metadata for a specific service using:\n"
 					"# -query <type>=<identifer>\n"
 					"# where <type> is one of: consumer, filter, producer, or transition.\n" );
 			}
@@ -623,7 +693,7 @@ query_all:
 		}
 		else if ( !strcmp( argv[ i ], "-version" ) || !strcmp( argv[ i ], "--version" ) )
 		{
-			fprintf( stderr, "MLT %s " VERSION "\n"
+			fprintf( stdout, "MLT %s " VERSION "\n"
 				"Copyright (C) 2002-2011 Ushodaya Enterprises Limited\n"
 				"<http://www.mltframework.org/>\n"
 				"This is free software; see the source for copying conditions.  There is NO\n"
@@ -636,6 +706,8 @@ query_all:
 			mlt_log_set_level( MLT_LOG_DEBUG );
 		}
 	}
+	if ( !is_silent && !isatty( STDIN_FILENO ) )
+		is_progress = 1;
 
 	// Create profile if not set explicitly
 	if ( getenv( "MLT_PROFILE" ) )
@@ -670,13 +742,13 @@ query_all:
 		// Generate an automatic profile if needed.
 		if ( ! profile->is_explicit )
 		{
-			guess_profile( melt, profile );
+			mlt_profile_from_producer( profile, melt );
 			mlt_producer_close( melt );
 			melt = mlt_factory_producer( profile, "melt", &argv[ 1 ] );
 		}
 		
 		// Reload the consumer with the fully qualified profile.
-		// The producer or guess_profile could have changed the profile.
+		// The producer or auto-profile could have changed the profile.
 		load_consumer( &consumer, profile, argc, argv );
 
 		// If we have no consumer, default to sdl
@@ -700,7 +772,11 @@ query_all:
 		// Parse the arguments
 		for ( i = 1; i < argc; i ++ )
 		{
-			if ( !strcmp( argv[ i ], "-serialise" ) )
+			if ( !strcmp( argv[ i ], "-jack" ) )
+			{
+				setup_jack_transport( consumer, profile );
+			}
+			else if ( !strcmp( argv[ i ], "-serialise" ) )
 			{
 				if ( store != stdout )
 					i ++;

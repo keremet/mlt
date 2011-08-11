@@ -32,6 +32,8 @@ clean:
 
 install: all
 	install -m 755 $(TARGET) "$(DESTDIR)$(libdir)/mlt"
+	install -d "$(DESTDIR)$(datadir)/mlt/motion_est"
+	install -m 644 *.yml "$(DESTDIR)$(datadir)/mlt/motion_est"
 
 test: $(TARGET)
 	~/mlt-devel/mlt/src/melt/melt -filter motion_est -filter vismv -filter benchmark -consumer sdl rescale=none real_time=0 audio_off=1 silent=1 /media/cdrecorder/BBC.The.Private.Life.Of.Plants.Pt5.Living.Together.DivX505.AC3.www.MVGroup.org.uk.avi in=50000
@@ -41,7 +43,7 @@ hist: $(TARGET)
 
 
 test2: $(TARGET)
-	melt colour:black -filter watermark:"+mello.txt" composite.geometry="0,0:10%x10%;99=90%,90%" composite.out=99 -filter crop_detect -filter motion_est -filter vismv
+	melt colour:black -filter watermark:"+mello.txt" composite.geometry="0/0:10%x10%;99=90%/90%" composite.out=99 -filter crop_detect -filter motion_est -filter vismv
 
 realtime: $(TARGET)
 	~/mlt-devel/mlt/src/melt/melt -filter motion_est -filter vismv -consumer sdl rescale=none /media/cdrecorder/BBC.The.Private.Life.Of.Plants.Pt5.Living.Together.DivX505.AC3.www.MVGroup.org.uk.avi in=30000

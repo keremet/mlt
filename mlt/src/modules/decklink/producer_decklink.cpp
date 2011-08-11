@@ -22,7 +22,14 @@
 #include <pthread.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
+#include <sys/time.h>
+#ifdef WIN32
+#include <objbase.h>
+#include "DeckLinkAPI_h.h"
+#else
 #include "DeckLinkAPI.h"
+#endif
 
 class DeckLinkProducer
 	: public IDeckLinkInputCallback
@@ -35,12 +42,16 @@ private:
 	pthread_mutex_t  m_mutex;
 	pthread_cond_t   m_condition;
 	bool             m_started;
+	int              m_dropped;
+	bool             m_isBuffering;
+	int              m_topFieldFirst;
+	int              m_colorspace;
 
 	BMDDisplayMode getDisplayMode( mlt_profile profile )
 	{
 		IDeckLinkDisplayModeIterator* iter;
 		IDeckLinkDisplayMode* mode;
-		BMDDisplayMode result = bmdDisplayModeNotSupported;
+		BMDDisplayMode result = (BMDDisplayMode) bmdDisplayModeNotSupported;
 
 		if ( m_decklinkInput->GetDisplayModeIterator( &iter ) == S_OK )
 		{
@@ -53,9 +64,12 @@ private:
 				mode->GetFrameRate( &duration, &timescale );
 				double fps = (double) timescale / duration;
 				int p = mode->GetFieldDominance() == bmdProgressiveFrame;
-				mlt_log_verbose( getProducer(), "BMD mode %dx%d %.3f fps prog %d\n", width, height, fps, p );
+				m_topFieldFirst = mode->GetFieldDominance() == bmdUpperFieldFirst;
+				m_colorspace = ( mode->GetFlags() & bmdDisplayModeColorspaceRec709 ) ? 709 : 601;
+				mlt_log_verbose( getProducer(), "BMD mode %dx%d %.3f fps prog %d tff %d\n", width, height, fps, p, m_topFieldFirst );
 
-				if ( width == profile->width && height == profile->height && p == profile->progressive
+				if ( width == profile->width && p == profile->progressive
+					 && ( height == profile->height || ( height == 486 && profile->height == 480 ) )
 					 && fps == mlt_profile_fps( profile ) )
 					result = mode->GetDisplayMode();
 			}
@@ -86,11 +100,21 @@ public:
 
 	bool open( mlt_profile profile, unsigned card =  0 )
 	{
-		IDeckLinkIterator* decklinkIterator = CreateDeckLinkIteratorInstance();
+		IDeckLinkIterator* decklinkIterator = NULL;
 		try
 		{
+#ifdef WIN32
+			HRESULT result =  CoInitialize( NULL );
+			if ( FAILED( result ) )
+				throw "COM initialization failed";
+			result = CoCreateInstance( CLSID_CDeckLinkIterator, NULL, CLSCTX_ALL, IID_IDeckLinkIterator, (void**) &decklinkIterator );
+			if ( FAILED( result ) )
+				throw "The DeckLink drivers are not installed.";
+#else
+			decklinkIterator = CreateDeckLinkIteratorInstance();
 			if ( !decklinkIterator )
 				throw "The DeckLink drivers are not installed.";
+#endif
 
 			// Connect to the Nth DeckLink instance
 			unsigned i = 0;
@@ -112,6 +136,8 @@ public:
 			pthread_cond_init( &m_condition, NULL );
 			m_queue = mlt_deque_init();
 			m_started = false;
+			m_dropped = 0;
+			m_isBuffering = true;
 		}
 		catch ( const char *error )
 		{
@@ -134,12 +160,27 @@ public:
 
 			// Get the display mode
 			BMDDisplayMode displayMode = getDisplayMode( profile );
-			if ( displayMode == bmdDisplayModeNotSupported )
+			if ( displayMode == (BMDDisplayMode) bmdDisplayModeNotSupported )
 				throw "Profile is not compatible with decklink.";
+
+			// Determine if supports input format detection
+#ifdef WIN32
+			BOOL doesDetectFormat = FALSE;
+#else
+			bool doesDetectFormat = false;
+#endif
+			IDeckLinkAttributes *decklinkAttributes = 0;
+			if ( m_decklink->QueryInterface( IID_IDeckLinkAttributes, (void**) &decklinkAttributes ) == S_OK )
+			{
+				if ( decklinkAttributes->GetFlag( BMDDeckLinkSupportsInputFormatDetection, &doesDetectFormat ) != S_OK )
+					doesDetectFormat = false;
+				decklinkAttributes->Release();
+			}
+			mlt_log_verbose( getProducer(), "%s format detection\n", doesDetectFormat ? "supports" : "does not support" );
 
 			// Enable video capture
 			BMDPixelFormat pixelFormat = bmdFormat8BitYUV;
-			BMDVideoInputFlags flags = bmdVideoInputFlagDefault;
+			BMDVideoInputFlags flags = doesDetectFormat ? bmdVideoInputEnableFormatDetection : bmdVideoInputFlagDefault;
 			if ( S_OK != m_decklinkInput->EnableVideoInput( displayMode, pixelFormat, flags ) )
 				throw "Failed to enable video capture.";
 
@@ -151,6 +192,8 @@ public:
 				throw "Failed to enable audio capture.";
 
 			// Start capture
+			m_dropped = 0;
+			mlt_properties_set_int( MLT_PRODUCER_PROPERTIES( getProducer() ), "dropped", m_dropped );
 			m_started = m_decklinkInput->StartStreams() == S_OK;
 			if ( !m_started )
 				throw "Failed to start capture.";
@@ -188,30 +231,78 @@ public:
 	mlt_frame getFrame()
 	{
 		mlt_frame frame = NULL;
+		struct timeval now;
+		struct timespec tm;
+		double fps = mlt_producer_get_fps( getProducer() );
+
+		// Allow the buffer to fill to the requested initial buffer level.
+		if ( m_isBuffering )
+		{
+			int prefill = mlt_properties_get_int( MLT_PRODUCER_PROPERTIES( getProducer() ), "prefill" );
+			int buffer = mlt_properties_get_int( MLT_PRODUCER_PROPERTIES( getProducer() ), "buffer" );
+
+			m_isBuffering = false;
+			prefill = prefill > buffer ? buffer : prefill;
+			pthread_mutex_lock( &m_mutex );
+			while ( mlt_deque_count( m_queue ) < prefill )
+			{
+				// Wait up to buffer/fps seconds
+				gettimeofday( &now, NULL );
+				long usec = now.tv_sec * 1000000 + now.tv_usec;
+				usec += 1000000 * buffer / fps;
+				tm.tv_sec = usec / 1000000;
+				tm.tv_nsec = (usec % 1000000) * 1000;
+				if ( pthread_cond_timedwait( &m_condition, &m_mutex, &tm ) )
+					break;
+			}
+			pthread_mutex_unlock( &m_mutex );
+		}
 
 		// Wait if queue is empty
 		pthread_mutex_lock( &m_mutex );
 		while ( mlt_deque_count( m_queue ) < 1 )
-			pthread_cond_wait( &m_condition, &m_mutex );
+		{
+			// Wait up to twice frame duration
+			gettimeofday( &now, NULL );
+			long usec = now.tv_sec * 1000000 + now.tv_usec;
+			usec += 2000000 / fps;
+			tm.tv_sec = usec / 1000000;
+			tm.tv_nsec = (usec % 1000000) * 1000;
+			if ( pthread_cond_timedwait( &m_condition, &m_mutex, &tm ) )
+				// Stop waiting if error (timed out)
+				break;
+		}
 
 		// Get the first frame from the queue
 		frame = ( mlt_frame ) mlt_deque_pop_front( m_queue );
 		pthread_mutex_unlock( &m_mutex );
 
 		// Set frame timestamp and properties
-		mlt_profile profile = mlt_service_profile( MLT_PRODUCER_SERVICE( getProducer() ) );
-		mlt_properties properties = MLT_FRAME_PROPERTIES( frame );
-		mlt_properties_set_int( properties, "progressive", profile->progressive );
-		mlt_properties_set_double( properties, "aspect_ratio", mlt_profile_sar( profile ) );
-		mlt_properties_set_int( properties, "width", profile->width );
-		mlt_properties_set_int( properties, "real_width", profile->width );
-		mlt_properties_set_int( properties, "height", profile->height );
-		mlt_properties_set_int( properties, "real_height", profile->height );
-		mlt_properties_set_int( properties, "format", mlt_image_yuv422 );
-		mlt_properties_set_int( properties, "audio_frequency", 48000 );
-		mlt_properties_set_int( properties, "audio_channels",
-			mlt_properties_get_int( MLT_PRODUCER_PROPERTIES( getProducer() ), "channels" ) );
-
+		if ( frame )
+		{
+			mlt_profile profile = mlt_service_profile( MLT_PRODUCER_SERVICE( getProducer() ) );
+			mlt_properties properties = MLT_FRAME_PROPERTIES( frame );
+			mlt_properties_set_int( properties, "progressive", profile->progressive );
+			mlt_properties_set_int( properties, "meta.media.progressive", profile->progressive );
+			mlt_properties_set_int( properties, "top_field_first", m_topFieldFirst );
+			mlt_properties_set_double( properties, "aspect_ratio", mlt_profile_sar( profile ) );
+			mlt_properties_set_int( properties, "meta.media.sample_aspect_num", profile->sample_aspect_num );
+			mlt_properties_set_int( properties, "meta.media.sample_aspect_den", profile->sample_aspect_den );
+			mlt_properties_set_int( properties, "meta.media.frame_rate_num", profile->frame_rate_num );
+			mlt_properties_set_int( properties, "meta.media.frame_rate_den", profile->frame_rate_den );
+			mlt_properties_set_int( properties, "width", profile->width );
+			mlt_properties_set_int( properties, "real_width", profile->width );
+			mlt_properties_set_int( properties, "meta.media.width", profile->width );
+			mlt_properties_set_int( properties, "height", profile->height );
+			mlt_properties_set_int( properties, "real_height", profile->height );
+			mlt_properties_set_int( properties, "meta.media.height", profile->height );
+			mlt_properties_set_int( properties, "format", mlt_image_yuv422 );
+			mlt_properties_set_int( properties, "colorspace", m_colorspace );
+			mlt_properties_set_int( properties, "meta.media.colorspace", m_colorspace );
+			mlt_properties_set_int( properties, "audio_frequency", 48000 );
+			mlt_properties_set_int( properties, "audio_channels",
+				mlt_properties_get_int( MLT_PRODUCER_PROPERTIES( getProducer() ), "channels" ) );
+		}
 		return frame;
 	}
 
@@ -246,7 +337,7 @@ public:
 				video->GetBytes( &buffer );
 				if ( image && buffer )
 				{
-					swab( buffer, image, size );
+					swab( (char*) buffer, (char*) image, size );
 					mlt_frame_set_image( frame, (uint8_t*) image, size, mlt_pool_release );
 				}
 				else if ( image )
@@ -306,6 +397,12 @@ public:
 				mlt_deque_push_back( m_queue, frame );
 				pthread_cond_broadcast( &m_condition );
 			}
+			else
+			{
+				mlt_frame_close( frame );
+				mlt_properties_set_int( MLT_PRODUCER_PROPERTIES( getProducer() ), "dropped", ++m_dropped );
+				mlt_log_warning( getProducer(), "frame dropped %d\n", m_dropped );
+			}
 			pthread_mutex_unlock( &m_mutex );
 		}
 
@@ -317,6 +414,57 @@ public:
 			IDeckLinkDisplayMode* mode,
 			BMDDetectedVideoInputFormatFlags flags )
 	{
+		mlt_profile profile = mlt_service_profile( MLT_PRODUCER_SERVICE( getProducer() ) );
+		if ( events & bmdVideoInputDisplayModeChanged )
+		{
+			BMDTimeValue duration;
+			BMDTimeScale timescale;
+			mode->GetFrameRate( &duration, &timescale );
+			profile->width = mode->GetWidth();
+			profile->height = mode->GetHeight();
+			profile->height = profile->height == 486 ? 480 : profile->height;
+			profile->frame_rate_num = timescale;
+			profile->frame_rate_den = duration;
+			if ( profile->width == 720 )
+			{
+				if ( profile->height == 576 )
+				{
+					profile->sample_aspect_num = 16;
+					profile->sample_aspect_den = 15;
+				}
+				else
+				{
+					profile->sample_aspect_num = 8;
+					profile->sample_aspect_den = 9;
+				}
+				profile->display_aspect_num = 4;
+				profile->display_aspect_den = 3;
+			}
+			else
+			{
+				profile->sample_aspect_num = 1;
+				profile->sample_aspect_den = 1;
+				profile->display_aspect_num = 16;
+				profile->display_aspect_den = 9;
+			}
+			free( profile->description );
+			profile->description = strdup( "decklink" );
+			mlt_log_verbose( getProducer(), "format changed %dx%d %.3f fps\n",
+				profile->width, profile->height, (double) profile->frame_rate_num / profile->frame_rate_den );
+		}
+		if ( events & bmdVideoInputFieldDominanceChanged )
+		{
+			profile->progressive = mode->GetFieldDominance() == bmdProgressiveFrame;
+			m_topFieldFirst = mode->GetFieldDominance() == bmdUpperFieldFirst;
+			mlt_log_verbose( getProducer(), "field dominance changed prog %d tff %d\n",
+				profile->progressive, m_topFieldFirst );
+		}
+		if ( events & bmdVideoInputColorspaceChanged )
+		{
+			profile->colorspace = m_colorspace =
+				( mode->GetFlags() & bmdDisplayModeColorspaceRec709 ) ? 709 : 601;
+			mlt_log_verbose( getProducer(), "colorspace changed %d\n", profile->colorspace );
+		}
 		return S_OK;
 	}
 };
@@ -337,6 +485,8 @@ static int get_frame( mlt_producer producer, mlt_frame_ptr frame, int index )
 
 	// Get the next frame from the decklink object
 	*frame = decklink->getFrame();
+	if ( !*frame )
+		*frame = mlt_frame_init( MLT_PRODUCER_SERVICE( producer ) );
 
 	// Calculate the next timecode
 	mlt_frame_set_position( *frame, mlt_producer_position( producer ) );
@@ -373,15 +523,22 @@ mlt_producer producer_decklink_init( mlt_profile profile, mlt_service_type type,
 		if ( decklink->open( profile, arg? atoi( arg ) : 0 ) )
 		{
 			producer = decklink->getProducer();
+			mlt_properties properties = MLT_PRODUCER_PROPERTIES( producer );
 
 			// Set callbacks
 			producer->close = (mlt_destructor) producer_close;
 			producer->get_frame = get_frame;
 
 			// Set properties
-			mlt_properties_set( MLT_PRODUCER_PROPERTIES( producer ), "resource", arg );
-			mlt_properties_set_int( MLT_PRODUCER_PROPERTIES( producer ), "channels", 2 );
-			mlt_properties_set_int( MLT_PRODUCER_PROPERTIES( producer ), "buffer", 25 );
+			mlt_properties_set( properties, "resource", arg? arg : "0" );
+			mlt_properties_set_int( properties, "channels", 2 );
+			mlt_properties_set_int( properties, "buffer", 25 );
+			mlt_properties_set_int( properties, "prefill", 25 );
+
+			// These properties effectively make it infinite.
+			mlt_properties_set_int( properties, "length", INT_MAX );
+			mlt_properties_set_int( properties, "out", INT_MAX - 1 );
+			mlt_properties_set( properties, "eof", "loop" );
 
 			// Start immediately
 			if ( !decklink->start( profile ) )

@@ -86,6 +86,7 @@ int mlt_consumer_init( mlt_consumer self, void *child, mlt_profile profile )
 
 		// Default read ahead buffer size
 		mlt_properties_set_int( properties, "buffer", 25 );
+		mlt_properties_set_int( properties, "drop_max", 5 );
 
 		// Default audio frequency and channels
 		mlt_properties_set_int( properties, "frequency", 48000 );
@@ -154,7 +155,7 @@ static void apply_profile_properties( mlt_consumer self, mlt_profile profile, ml
 
 static void mlt_consumer_property_changed( mlt_properties owner, mlt_consumer self, char *name )
 {
-	if ( !strcmp( name, "profile" ) )
+	if ( !strcmp( name, "mlt_profile" ) )
 	{
 		// Get the properies
 		mlt_properties properties = MLT_CONSUMER_PROPERTIES( self );
@@ -391,6 +392,9 @@ int mlt_consumer_connect( mlt_consumer self, mlt_service producer )
 
 int mlt_consumer_start( mlt_consumer self )
 {
+	if ( !mlt_consumer_is_stopped( self ) )
+		return 0;
+
 	// Stop listening to the property-changed event
 	mlt_event_block( self->event_listener );
 
@@ -447,7 +451,7 @@ int mlt_consumer_start( mlt_consumer self )
 
 	// For worker threads implementation, buffer must be at least # threads
 	if ( abs( self->real_time ) > 1 && mlt_properties_get_int( properties, "buffer" ) <= abs( self->real_time ) )
-		mlt_properties_set_int( properties, "buffer", abs( self->real_time ) + 1 );
+		mlt_properties_set_int( properties, "_buffer", abs( self->real_time ) + 1 );
 
 	// Start the service
 	if ( self->start != NULL )
@@ -635,12 +639,15 @@ static void *consumer_read_ahead_thread( void *arg )
 	struct timeval ante;
 
 	// Average time for get_frame and get_image
-	int count = 1;
+	int count = 0;
 	int skipped = 0;
-	int64_t time_wait = 0;
-	int64_t time_frame = 0;
 	int64_t time_process = 0;
 	int skip_next = 0;
+	mlt_position pos = 0;
+	mlt_position start_pos = 0;
+	mlt_position last_pos = 0;
+	int frame_duration = mlt_properties_get_int( properties, "frame_duration" );
+	int drop_max = mlt_properties_get_int( properties, "drop_max" );
 
 	if ( preview_off && preview_format != 0 )
 		self->format = preview_format;
@@ -665,6 +672,7 @@ static void *consumer_read_ahead_thread( void *arg )
 
 		// Mark as rendered
 		mlt_properties_set_int( MLT_FRAME_PROPERTIES( frame ), "rendered", 1 );
+		last_pos = start_pos = pos = mlt_frame_get_position( frame );
 	}
 
 	// Get the starting time (can ignore the times above)
@@ -673,10 +681,6 @@ static void *consumer_read_ahead_thread( void *arg )
 	// Continue to read ahead
 	while ( self->ahead )
 	{
-		// Fetch width/height again
-		width = mlt_properties_get_int( properties, "width" );
-		height = mlt_properties_get_int( properties, "height" );
-
 		// Put the current frame into the queue
 		pthread_mutex_lock( &self->queue_mutex );
 		while( self->ahead && mlt_deque_count( self->queue ) >= buffer )
@@ -685,58 +689,59 @@ static void *consumer_read_ahead_thread( void *arg )
 		pthread_cond_broadcast( &self->queue_cond );
 		pthread_mutex_unlock( &self->queue_mutex );
 
-		time_wait += time_difference( &ante );
-
 		// Get the next frame
 		frame = mlt_consumer_get_frame( self );
-		time_frame += time_difference( &ante );
 
 		// If there's no frame, we're probably stopped...
 		if ( frame == NULL )
 			continue;
+		pos = mlt_frame_get_position( frame );
 
-		// Increment the count
+		// Increment the counter used for averaging processing cost
 		count ++;
 
-		// All non normal playback frames should be shown
+		// All non-normal playback frames should be shown
 		if ( mlt_properties_get_int( MLT_FRAME_PROPERTIES( frame ), "_speed" ) != 1 )
 		{
 #ifdef DEINTERLACE_ON_NOT_NORMAL_SPEED
 			mlt_properties_set_int( MLT_FRAME_PROPERTIES( frame ), "consumer_deinterlace", 1 );
 #endif
-			skipped = 0;
-			time_frame = 0;
-			time_process = 0;
-			time_wait = 0;
-			count = 1;
-			skip_next = 0;
+			// Indicate seeking or trick-play
+			start_pos = pos;
 		}
 
-		// Get the image
+		// If skip flag not set or frame-dropping disabled
 		if ( !skip_next || self->real_time == -1 )
 		{
-			// Get the image, mark as rendered and time it
 			if ( !video_off )
 			{
+				// Reset width/height - could have been changed by previous mlt_frame_get_image
+				width = mlt_properties_get_int( properties, "width" );
+				height = mlt_properties_get_int( properties, "height" );
+
+				// Get the image
 				mlt_events_fire( MLT_CONSUMER_PROPERTIES( self ), "consumer-frame-render", frame, NULL );
 				mlt_frame_get_image( frame, &image, &self->format, &width, &height, 0 );
 			}
-			mlt_properties_set_int( MLT_FRAME_PROPERTIES( frame ), "rendered", 1 );
-		}
-		else
-		{
-			// Increment the number of sequentially skipped frames
-			skipped ++;
-			skip_next = 0;
 
-			// If we've reached an unacceptable level, reset everything
-			if ( skipped > fps * 2 )
+			// Indicate the rendered image is available.
+			mlt_properties_set_int( MLT_FRAME_PROPERTIES( frame ), "rendered", 1 );
+
+			// Reset consecutively-skipped counter
+			skipped = 0;
+		}
+		else // Skip image processing
+		{
+			// Increment the number of consecutively-skipped frames
+			skipped++;
+
+			// If too many (1 sec) consecutively-skipped frames
+			if ( skipped > drop_max )
 			{
-				skipped = 0;
-				time_frame = 0;
+				// Reset cost tracker
 				time_process = 0;
-				time_wait = 0;
 				count = 1;
+				mlt_log_verbose( self, "too many frames dropped - forcing next frame\n" );
 			}
 		}
 
@@ -747,15 +752,48 @@ static void *consumer_read_ahead_thread( void *arg )
 			mlt_frame_get_audio( frame, &audio, &afmt, &frequency, &channels, &samples );
 		}
 
-		// Increment the time take for self frame
-		time_process += time_difference( &ante );
+		// Get the time to process this frame
+		int64_t time_current = time_difference( &ante );
 
-		// Determine if the next frame should be skipped
-		if ( mlt_deque_count( self->queue ) <= 5 )
+		// If the current time is not suddenly some large amount
+		if ( time_current < time_process / count * 20 || !time_process || count < 5 )
 		{
-			int frame_duration = mlt_properties_get_int( properties, "frame_duration" );
-			if ( ( ( time_wait + time_frame + time_process ) / count ) > frame_duration )
+			// Accumulate the cost for processing this frame
+			time_process += time_current;
+		}
+		else
+		{
+			mlt_log_debug( self, "current %"PRId64" threshold %"PRId64" count %d\n",
+				time_current, (int64_t) (time_process / count * 20), count );
+			// Ignore the cost of this frame's time
+			count--;
+		}
+
+		// Determine if we started, resumed, or seeked
+		if ( pos != last_pos + 1 )
+			start_pos = pos;
+		last_pos = pos;
+
+		// Do not skip the first 20% of buffer at start, resume, or seek
+		if ( pos - start_pos <= buffer / 5 + 1 )
+		{
+			// Reset cost tracker
+			time_process = 0;
+			count = 1;
+		}
+
+		// Reset skip flag
+		skip_next = 0;
+
+		// Only consider skipping if the buffer level is low (or really small)
+		if ( mlt_deque_count( self->queue ) <= buffer / 5 + 1 )
+		{
+			// Skip next frame if average cost exceeds frame duration.
+			if ( time_process / count > frame_duration )
 				skip_next = 1;
+			if ( skip_next )
+				mlt_log_debug( self, "avg usec %"PRId64" (%"PRId64"/%d) duration %d\n",
+					time_process/count, time_process, count, frame_duration);
 		}
 	}
 
@@ -1117,10 +1155,12 @@ static mlt_frame worker_get_frame( mlt_consumer self, mlt_properties properties 
 	// Frame to return
 	mlt_frame frame = NULL;
 
-	int size = abs( self->real_time );
-	int buffer = mlt_properties_get_int( properties, "buffer" );
+	double fps = mlt_properties_get_double( properties, "fps" );
+	int threads = abs( self->real_time );
+	int buffer = mlt_properties_get_int( properties, "_buffer" );
+	buffer = buffer > 0 ? buffer : mlt_properties_get_int( properties, "buffer" );
 	// This is a heuristic to determine a suitable minimum buffer size for the number of threads.
-	int headroom = 2 + size * size;
+	int headroom = 2 + threads * threads;
 	buffer = buffer < headroom ? headroom : buffer;
 
 	// Start worker threads if not already started.
@@ -1152,11 +1192,11 @@ static mlt_frame worker_get_frame( mlt_consumer self, mlt_properties properties 
 			pthread_cond_wait( &self->done_cond, &self->done_mutex );
 			pthread_mutex_unlock( &self->done_mutex );
 		}
-		self->process_head = size;
+		self->process_head = threads;
 	}
 
 //	mlt_log_verbose( MLT_CONSUMER_SERVICE(self), "size %d done count %d work count %d process_head %d\n",
-//		size, first_unprocessed_frame( self ), mlt_deque_count( self->queue ), self->process_head );
+//		threads, first_unprocessed_frame( self ), mlt_deque_count( self->queue ), self->process_head );
 
 	// Feed the work queue
 	while ( self->ahead && mlt_deque_count( self->queue ) < buffer )
@@ -1171,8 +1211,9 @@ static mlt_frame worker_get_frame( mlt_consumer self, mlt_properties properties 
 	}
 
 	// Wait if not realtime.
-	while( self->ahead && self->real_time < 0 &&
-	       ! mlt_properties_get_int( MLT_FRAME_PROPERTIES( MLT_FRAME( mlt_deque_peek_front( self->queue ) ) ), "rendered" ) )
+	mlt_frame head_frame = MLT_FRAME( mlt_deque_peek_front( self->queue ) );
+	while ( self->ahead && self->real_time < 0 &&
+		!( head_frame && mlt_properties_get_int( MLT_FRAME_PROPERTIES( head_frame ), "rendered" ) ) )
 	{
 		pthread_mutex_lock( &self->done_mutex );
 		pthread_cond_wait( &self->done_cond, &self->done_mutex );
@@ -1190,7 +1231,7 @@ static mlt_frame worker_get_frame( mlt_consumer self, mlt_properties properties 
 		if ( frame && mlt_properties_get_int( MLT_FRAME_PROPERTIES( frame ), "rendered" ) )
 		{
 			self->consecutive_dropped = 0;
-			if ( self->process_head > size && self->consecutive_rendered >= self->process_head )
+			if ( self->process_head > threads && self->consecutive_rendered >= self->process_head )
 				self->process_head--;
 			else
 				self->consecutive_rendered++;
@@ -1198,13 +1239,37 @@ static mlt_frame worker_get_frame( mlt_consumer self, mlt_properties properties 
 		else
 		{
 			self->consecutive_rendered = 0;
-			if ( self->process_head < buffer - size && self->consecutive_dropped > size )
+			if ( self->process_head < buffer - threads && self->consecutive_dropped > threads )
 				self->process_head++;
 			else
 				self->consecutive_dropped++;
 		}
 //		mlt_log_verbose( MLT_CONSUMER_SERVICE(self), "dropped %d rendered %d process_head %d\n",
 //			self->consecutive_dropped, self->consecutive_rendered, self->process_head );
+
+		// Check for too many consecutively dropped frames
+		if ( self->consecutive_dropped > mlt_properties_get_int( properties, "drop_max" ) )
+		{
+			int orig_buffer = mlt_properties_get_int( properties, "buffer" );
+			int prefill = mlt_properties_get_int( properties, "prefill" );
+			mlt_log_verbose( self, "too many frames dropped - " );
+
+			// If using a default low-latency buffer level (SDL) and below the limit
+			if ( ( orig_buffer == 1 || prefill == 1 ) && buffer < (threads + 1) * 10 )
+			{
+				// Auto-scale the buffer to compensate
+				mlt_log_verbose( self, "increasing buffer to %d\n", buffer + threads );
+				mlt_properties_set_int( properties, "_buffer", buffer + threads );
+				self->consecutive_dropped = fps / 2;
+			}
+			else
+			{
+				// Tell the consumer to render it
+				mlt_log_verbose( self, "forcing next frame\n" );
+				mlt_properties_set_int( MLT_FRAME_PROPERTIES( frame ), "rendered", 1 );
+				self->consecutive_dropped = 0;
+			}
+		}
 	}
 	
 	return frame;

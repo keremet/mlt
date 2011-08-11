@@ -174,19 +174,21 @@ static void add_parameters( mlt_properties params, void *object, int req_flags, 
 
 		// Add the parameter metadata for this AVOption.
 		mlt_properties_set( p, "identifier", opt->name );
-		if ( subclass )
+		if ( opt->help )
 		{
-			char *s = malloc( strlen( opt->help ) + strlen( subclass ) + 4 );
-			strcpy( s, opt->help );
-			strcat( s, " (" );
-			strcat( s, subclass );
-			strcat( s, ")" );
-			mlt_properties_set( p, "description", s );
-			free( s );
+			if ( subclass )
+			{
+				char *s = malloc( strlen( opt->help ) + strlen( subclass ) + 4 );
+				strcpy( s, opt->help );
+				strcat( s, " (" );
+				strcat( s, subclass );
+				strcat( s, ")" );
+				mlt_properties_set( p, "description", s );
+				free( s );
+			}
+			else
+				mlt_properties_set( p, "description", opt->help );
 		}
-		else
-			mlt_properties_set( p, "description", opt->help );
-
 
         switch ( opt->type )
 		{
@@ -314,10 +316,20 @@ static mlt_properties avformat_metadata( mlt_service_type type, const char *id, 
 		add_parameters( params, avformat, flags, NULL, NULL );
 #if LIBAVFORMAT_VERSION_MAJOR > 52
 		avformat_init();
-		AVOutputFormat *f = NULL;
-		while ( ( f = av_oformat_next( f ) ) )
-			if ( f->priv_class )
-				add_parameters( params, &f->priv_class, flags, NULL, f->name );
+		if ( type == producer_type )
+		{
+			AVInputFormat *f = NULL;
+			while ( ( f = av_iformat_next( f ) ) )
+				if ( f->priv_class )
+					add_parameters( params, &f->priv_class, flags, NULL, f->name );
+		}
+		else
+		{
+			AVOutputFormat *f = NULL;
+			while ( ( f = av_oformat_next( f ) ) )
+				if ( f->priv_class )
+					add_parameters( params, &f->priv_class, flags, NULL, f->name );
+		}
 #endif
 
 		add_parameters( params, avcodec, flags, NULL, NULL );
