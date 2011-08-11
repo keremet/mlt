@@ -23,7 +23,7 @@
 %define lname lib%name
 
 Name: mlt
-Version: 0.7.2
+Version: 0.7.4
 Release: alt1
 Summary: Multimedia framework designed for television broadcasting
 License: GPL
@@ -152,6 +152,9 @@ install -pm 0755 src/swig/python/_%name.so %buildroot%python_sitelibdir/
 %python_sitelibdir/*
 
 %changelog
+* Thu Aug 11 2011 Sergey V Turchin <zerg@altlinux.org> 0.7.4-alt1
+- new version
+
 * Fri Jul 08 2011 Sergey V Turchin <zerg@altlinux.org> 0.7.2-alt1
 - new version
 
