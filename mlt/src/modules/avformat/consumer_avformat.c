@@ -37,6 +37,7 @@
 
 // avformat header files
 #include <libavformat/avformat.h>
+#include <libavformat/avio.h>
 #ifdef SWSCALE
 #include <libswscale/swscale.h>
 #endif
@@ -49,7 +50,7 @@
 #define PIX_FMT_YUYV422 PIX_FMT_YUV422
 #endif
 
-#if LIBAVCODEC_VERSION_MAJOR > 52
+#if LIBAVCODEC_VERSION_MAJOR >= 53
 #include <libavutil/opt.h>
 #define CODEC_TYPE_VIDEO      AVMEDIA_TYPE_VIDEO
 #define CODEC_TYPE_AUDIO      AVMEDIA_TYPE_AUDIO
@@ -408,7 +409,13 @@ static void apply_properties( void *obj, mlt_properties properties, int flags )
 		const char *opt_name = mlt_properties_get_name( properties, i );
 		const AVOption *opt = av_find_opt( obj, opt_name, NULL, flags, flags );
 
-		if ( opt != NULL )
+		// If option not found, see if it was prefixed with a or v (-vb)
+		if ( !opt && (
+			( opt_name[0] == 'v' && ( flags & AV_OPT_FLAG_VIDEO_PARAM ) ) ||
+			( opt_name[0] == 'a' && ( flags & AV_OPT_FLAG_AUDIO_PARAM ) ) ) )
+			opt = av_find_opt( obj, ++opt_name, NULL, flags, flags );
+		// Apply option if found
+		if ( opt )
 #if LIBAVCODEC_VERSION_INT >= ((52<<16)+(7<<8)+0)
 			av_set_string3( obj, opt_name, mlt_properties_get_value( properties, i), alloc, NULL );
 #elif LIBAVCODEC_VERSION_INT >= ((51<<16)+(59<<8)+0)
@@ -422,7 +429,7 @@ static void apply_properties( void *obj, mlt_properties properties, int flags )
 /** Add an audio output stream
 */
 
-static AVStream *add_audio_stream( mlt_consumer consumer, AVFormatContext *oc, int codec_id, int channels )
+static AVStream *add_audio_stream( mlt_consumer consumer, AVFormatContext *oc, AVCodec *codec, int channels )
 {
 	// Get the properties
 	mlt_properties properties = MLT_CONSUMER_PROPERTIES( consumer );
@@ -436,9 +443,13 @@ static AVStream *add_audio_stream( mlt_consumer consumer, AVFormatContext *oc, i
 		AVCodecContext *c = st->codec;
 
 		// Establish defaults from AVOptions
+#if LIBAVCODEC_VERSION_MAJOR >= 53
+		avcodec_get_context_defaults3( c, codec );
+#else
 		avcodec_get_context_defaults2( c, CODEC_TYPE_AUDIO );
+#endif
 
-		c->codec_id = codec_id;
+		c->codec_id = codec->id;
 		c->codec_type = CODEC_TYPE_AUDIO;
 		c->sample_fmt = SAMPLE_FMT_S16;
 
@@ -518,7 +529,7 @@ static int open_audio( mlt_properties properties, AVFormatContext *oc, AVStream 
 	else
 		codec = avcodec_find_encoder( c->codec_id );
 
-#if LIBAVCODEC_VERSION_MAJOR > 52
+#if LIBAVCODEC_VERSION_MAJOR >= 53
 	// Process properties as AVOptions on the AVCodec
 	if ( codec && codec->priv_class )
 	{
@@ -595,7 +606,7 @@ static void close_audio( AVFormatContext *oc, AVStream *st )
 /** Add a video output stream 
 */
 
-static AVStream *add_video_stream( mlt_consumer consumer, AVFormatContext *oc, int codec_id )
+static AVStream *add_video_stream( mlt_consumer consumer, AVFormatContext *oc, AVCodec *codec )
 {
  	// Get the properties
 	mlt_properties properties = MLT_CONSUMER_PROPERTIES( consumer );
@@ -609,9 +620,13 @@ static AVStream *add_video_stream( mlt_consumer consumer, AVFormatContext *oc, i
 		AVCodecContext *c = st->codec;
 
 		// Establish defaults from AVOptions
+#if LIBAVCODEC_VERSION_MAJOR >= 53
+		avcodec_get_context_defaults3( c, codec );
+#else
 		avcodec_get_context_defaults2( c, CODEC_TYPE_VIDEO );
+#endif
 
-		c->codec_id = codec_id;
+		c->codec_id = codec->id;
 		c->codec_type = CODEC_TYPE_VIDEO;
 		
 		// Setup multi-threading
@@ -619,8 +634,12 @@ static AVStream *add_video_stream( mlt_consumer consumer, AVFormatContext *oc, i
 		if ( thread_count == 0 && getenv( "MLT_AVFORMAT_THREADS" ) )
 			thread_count = atoi( getenv( "MLT_AVFORMAT_THREADS" ) );
 		if ( thread_count > 1 )
+#if LIBAVCODEC_VERSION_MAJOR >= 53
 			c->thread_count = thread_count;
-	
+#else
+			avcodec_thread_init( c, thread_count );
+#endif
+
 		// Process properties as AVOptions
 		char *vpre = mlt_properties_get( properties, "vpre" );
 		if ( vpre )
@@ -802,7 +821,7 @@ static AVStream *add_video_stream( mlt_consumer consumer, AVFormatContext *oc, i
 			c->flags |= CODEC_FLAG_PASS1;
 		else if ( i == 2 )
 			c->flags |= CODEC_FLAG_PASS2;
-		if ( codec_id != CODEC_ID_H264 && ( c->flags & ( CODEC_FLAG_PASS1 | CODEC_FLAG_PASS2 ) ) )
+		if ( codec->id != CODEC_ID_H264 && ( c->flags & ( CODEC_FLAG_PASS1 | CODEC_FLAG_PASS2 ) ) )
 		{
 			char logfilename[1024];
 			FILE *f;
@@ -842,7 +861,6 @@ static AVStream *add_video_stream( mlt_consumer consumer, AVFormatContext *oc, i
 						fclose( f );
 						logbuffer[size] = '\0';
 						c->stats_in = logbuffer;
-						mlt_properties_set_data( properties, "_logbuffer", logbuffer, 0, ( mlt_destructor )av_free, NULL );
 					}
 				}
 			}
@@ -883,7 +901,7 @@ static AVFrame *alloc_picture( int pix_fmt, int width, int height )
 
 	return picture;
 }
-	
+
 static int open_video( mlt_properties properties, AVFormatContext *oc, AVStream *st, const char *codec_name )
 {
 	// Get the codec
@@ -896,7 +914,7 @@ static int open_video( mlt_properties properties, AVFormatContext *oc, AVStream 
 	else
 		codec = avcodec_find_encoder( video_enc->codec_id );
 
-#if LIBAVCODEC_VERSION_MAJOR > 52
+#if LIBAVCODEC_VERSION_MAJOR >= 53
 	// Process properties as AVOptions on the AVCodec
 	if ( codec && codec->priv_class )
 	{
@@ -942,6 +960,7 @@ void close_video(AVFormatContext *oc, AVStream *st)
 	if ( st && st->codec )
 	{
 		avformat_lock();
+		av_freep( &st->codec->stats_in );
 		avcodec_close(st->codec);
 		avformat_unlock();
 	}
@@ -953,6 +972,19 @@ static inline long time_difference( struct timeval *time1 )
 	gettimeofday( &time2, NULL );
 	return time2.tv_sec * 1000000 + time2.tv_usec - time1->tv_sec * 1000000 - time1->tv_usec;
 }
+
+static int mlt_write(void *h, uint8_t *buf, int size)
+{
+	mlt_properties properties = (mlt_properties) h;
+	mlt_events_fire( properties, "avformat-write", buf, size, NULL );
+	return 0;
+}
+
+static void write_transmitter( mlt_listener listener, mlt_properties owner, mlt_service service, void **args )
+{
+	listener( owner, service, (uint8_t*) args[0], (int) args[1] );
+}
+
 
 /** The main thread - the argument is simply the consumer.
 */
@@ -1048,6 +1080,8 @@ static void *consumer_thread( void *arg )
 	char *format = mlt_properties_get( properties, "f" );
 	char *vcodec = mlt_properties_get( properties, "vcodec" );
 	char *acodec = mlt_properties_get( properties, "acodec" );
+	AVCodec *audio_codec = NULL;
+	AVCodec *video_codec = NULL;
 	
 	// Used to store and override codec ids
 	int audio_codec_id;
@@ -1099,14 +1133,15 @@ static void *consumer_thread( void *arg )
 		audio_codec_id = CODEC_ID_NONE;
 	else if ( acodec )
 	{
-		AVCodec *p = avcodec_find_encoder_by_name( acodec );
-		if ( p != NULL )
+		audio_codec = avcodec_find_encoder_by_name( acodec );
+		if ( audio_codec )
 		{
-			audio_codec_id = p->id;
+			audio_codec_id = audio_codec->id;
 			if ( audio_codec_id == CODEC_ID_AC3 && avcodec_find_encoder_by_name( "ac3_fixed" ) )
 			{
 				mlt_properties_set( properties, "_acodec", "ac3_fixed" );
 				acodec = mlt_properties_get( properties, "_acodec" );
+				audio_codec = avcodec_find_encoder_by_name( acodec );
 			}
 		}
 		else
@@ -1115,22 +1150,30 @@ static void *consumer_thread( void *arg )
 			mlt_log_warning( MLT_CONSUMER_SERVICE( consumer ), "audio codec %s unrecognised - ignoring\n", acodec );
 		}
 	}
+	else
+	{
+		audio_codec = avcodec_find_encoder( audio_codec_id );
+	}
 
 	// Check for video codec overides
 	if ( ( vcodec && strcmp( vcodec, "none" ) == 0 ) || mlt_properties_get_int( properties, "vn" ) )
 		video_codec_id = CODEC_ID_NONE;
 	else if ( vcodec )
 	{
-		AVCodec *p = avcodec_find_encoder_by_name( vcodec );
-		if ( p != NULL )
+		video_codec = avcodec_find_encoder_by_name( vcodec );
+		if ( video_codec )
 		{
-			video_codec_id = p->id;
+			video_codec_id = video_codec->id;
 		}
 		else
 		{
 			video_codec_id = CODEC_ID_NONE;
 			mlt_log_warning( MLT_CONSUMER_SERVICE( consumer ), "video codec %s unrecognised - ignoring\n", vcodec );
 		}
+	}
+	else
+	{
+		video_codec = avcodec_find_encoder( video_codec_id );
 	}
 
 	// Write metadata
@@ -1184,9 +1227,21 @@ static void *consumer_thread( void *arg )
 	oc->oformat = fmt;
 	snprintf( oc->filename, sizeof(oc->filename), "%s", filename );
 
+	// Get a frame now, so we can set some AVOptions from properties.
+	frame = mlt_consumer_rt_frame( consumer );
+
+	// Set the timecode from the MLT metadata if available.
+	const char *timecode = mlt_properties_get( MLT_FRAME_PROPERTIES(frame), "meta.attr.vitc.markup" );
+	if ( timecode && strcmp( timecode, "" ) )
+	{
+		mlt_properties_set( properties, "timecode", timecode );
+		if ( strchr( timecode, ';' ) )
+			mlt_properties_set_int( properties, "drop_frame_timecode", 1 );
+	}
+
 	// Add audio and video streams
 	if ( video_codec_id != CODEC_ID_NONE )
-		video_st = add_video_stream( consumer, oc, video_codec_id );
+		video_st = add_video_stream( consumer, oc, video_codec );
 	if ( audio_codec_id != CODEC_ID_NONE )
 	{
 		int is_multi = 0;
@@ -1201,16 +1256,17 @@ static void *consumer_thread( void *arg )
 			{
 				is_multi = 1;
 				total_channels += j;
-				audio_st[i] = add_audio_stream( consumer, oc, audio_codec_id, j );
+				audio_st[i] = add_audio_stream( consumer, oc, audio_codec, j );
 			}
 		}
 		// single track
 		if ( !is_multi )
 		{
-			audio_st[0] = add_audio_stream( consumer, oc, audio_codec_id, channels );
+			audio_st[0] = add_audio_stream( consumer, oc, audio_codec, channels );
 			total_channels = channels;
 		}
 	}
+	mlt_properties_set_int( properties, "channels", total_channels );
 
 	// Set the parameters (even though we have none...)
 	if ( av_set_parameters(oc, NULL) >= 0 ) 
@@ -1224,14 +1280,14 @@ static void *consumer_thread( void *arg )
 		{
 			mlt_properties p = mlt_properties_load( fpre );
 			apply_properties( oc, p, AV_OPT_FLAG_ENCODING_PARAM );
-#if LIBAVFORMAT_VERSION_MAJOR > 52
+#if LIBAVFORMAT_VERSION_MAJOR >= 53
 			if ( oc->oformat && oc->oformat->priv_class && oc->priv_data )
 				apply_properties( oc->priv_data, p, AV_OPT_FLAG_ENCODING_PARAM );
 #endif
 			mlt_properties_close( p );
 		}
 		apply_properties( oc, properties, AV_OPT_FLAG_ENCODING_PARAM );
-#if LIBAVFORMAT_VERSION_MAJOR > 52
+#if LIBAVFORMAT_VERSION_MAJOR >= 53
 		if ( oc->oformat && oc->oformat->priv_class && oc->priv_data )
 			apply_properties( oc->priv_data, properties, AV_OPT_FLAG_ENCODING_PARAM );
 #endif
@@ -1246,10 +1302,36 @@ static void *consumer_thread( void *arg )
 				audio_st[i] = NULL;
 		}
 
-		// Open the output file, if needed
-		if ( !( fmt->flags & AVFMT_NOFILE ) ) 
+		// Setup custom I/O if redirecting
+		if ( mlt_properties_get_int( properties, "redirect" ) )
 		{
-#if LIBAVFORMAT_VERSION_MAJOR > 52
+			int buffer_size = 32768;
+			unsigned char *buffer = av_malloc( buffer_size );
+#if LIBAVFORMAT_VERSION_MAJOR >= 53
+			AVIOContext* io = avio_alloc_context( buffer, buffer_size, 1, properties, NULL, mlt_write, NULL );
+#else
+			ByteIOContext* io = av_alloc_put_byte( buffer, buffer_size, 1, properties, NULL, mlt_write, NULL );
+#endif
+			if ( buffer && io )
+			{
+				oc->pb = io;
+#if LIBAVFORMAT_VERSION_MAJOR >= 53
+				oc->flags |= AVFMT_FLAG_CUSTOM_IO;
+#endif
+				mlt_properties_set_data( properties, "avio_buffer", buffer, buffer_size, av_free, NULL );
+				mlt_properties_set_data( properties, "avio_context", io, 0, av_free, NULL );
+				mlt_events_register( properties, "avformat-write", (mlt_transmitter) write_transmitter );
+			}
+			else
+			{
+				av_free( buffer );
+				mlt_log_error( MLT_CONSUMER_SERVICE(consumer), "failed to setup output redirection\n" );
+			}
+		}
+		// Open the output file, if needed
+		else if ( !( fmt->flags & AVFMT_NOFILE ) )
+		{
+#if LIBAVFORMAT_VERSION_MAJOR >= 53
 			if ( avio_open( &oc->pb, filename, AVIO_FLAG_WRITE ) < 0 )
 #else
 			if ( url_fopen( &oc->pb, filename, URL_WRONLY ) < 0 )
@@ -1285,7 +1367,8 @@ static void *consumer_thread( void *arg )
 	while( mlt_properties_get_int( properties, "running" ) &&
 	       ( !terminated || ( video_st && mlt_deque_count( queue ) ) ) )
 	{
-		frame = mlt_consumer_rt_frame( consumer );
+		if ( !frame )
+			frame = mlt_consumer_rt_frame( consumer );
 
 		// Check that we have a frame to work with
 		if ( frame != NULL )
@@ -1303,6 +1386,7 @@ static void *consumer_thread( void *arg )
 			if ( !terminated && audio_st[0] )
 			{
 				samples = mlt_sample_calculator( fps, frequency, count ++ );
+				channels = total_channels;
 				mlt_frame_get_audio( frame, (void**) &pcm, &aud_fmt, &frequency, &channels, &samples );
 
 				// Save the audio channel remap properties for later
@@ -1332,6 +1416,7 @@ static void *consumer_thread( void *arg )
 				mlt_deque_push_back( queue, frame );
 			else
 				mlt_frame_close( frame );
+			frame = NULL;
 		}
 
 		// While we have stuff to process, process...
@@ -1622,6 +1707,7 @@ static void *consumer_thread( void *arg )
 						goto on_fatal_error;
 					}
 					mlt_frame_close( frame );
+					frame = NULL;
 				}
 				else
 				{
@@ -1740,13 +1826,16 @@ on_fatal_error:
 
 	// Close the output file
 	if ( !( fmt->flags & AVFMT_NOFILE ) )
-#if LIBAVFORMAT_VERSION_MAJOR > 52
-		avio_close( oc->pb );
-#elif LIBAVFORMAT_VERSION_INT >= ((52<<16)+(0<<8)+0)
+	{
+#if LIBAVFORMAT_VERSION_MAJOR >= 53
+		if ( !mlt_properties_get_int( properties, "redirect" ) )
+			avio_close( oc->pb );
+#elif LIBAVFORMAT_VERSION_MAJOR >= 52
 		url_fclose( oc->pb );
 #else
 		url_fclose( &oc->pb );
 #endif
+	}
 
 	// Clean up input and output frames
 	if ( output )

@@ -354,8 +354,9 @@ static void transport( mlt_producer producer, mlt_consumer consumer )
 					int current_position = mlt_producer_position( producer );
 					if ( current_position > last_position )
 					{
-						fprintf( stderr, "Current Frame: %10d, percentage: %10d\r",
-							current_position, 100 * current_position / total_length );
+						fprintf( stderr, "Current Frame: %10d, percentage: %10d%c",
+							current_position, 100 * current_position / total_length,
+							progress == 2 ? '\n' : '\r' );
 						last_position = current_position;
 					}
 				}
@@ -437,6 +438,31 @@ static void query_metadata( mlt_repository repo, mlt_service_type type, const ch
 	}
 }
 
+static int is_service_hidden(mlt_repository repo, mlt_service_type type, const char *service_name )
+{
+	mlt_properties metadata = NULL;
+	mlt_properties tags = NULL;
+	metadata = mlt_repository_metadata(repo, type, service_name);
+
+	if( metadata )
+	{
+		tags = mlt_properties_get_data( metadata, "tags", NULL );
+		if( tags )
+		{
+			int k;
+			for ( k = 0; k < mlt_properties_count( tags ); k++ )
+			{
+				const char* value = mlt_properties_get_value(tags, k);
+				if( !strcmp("Hidden", value) )
+				{
+					return 1;
+				}
+			}
+		}
+	}
+	return 0;
+}
+
 static void query_services( mlt_repository repo, mlt_service_type type )
 {
 	mlt_properties services = NULL;
@@ -467,7 +493,11 @@ static void query_services( mlt_repository repo, mlt_service_type type )
 	{
 		int j;
 		for ( j = 0; j < mlt_properties_count( services ); j++ )
-			fprintf( stdout, "  - %s\n", mlt_properties_get_name( services, j ) );
+		{
+			const char* service_name = mlt_properties_get_name( services, j );
+			if( !is_service_hidden(repo, type, service_name ) )
+				fprintf( stdout, "  - %s\n", service_name );
+		}
 	}
 	fprintf( stdout, "...\n" );
 }
@@ -630,6 +660,10 @@ int main( int argc, char **argv )
 		{
 			is_progress = 1;
 		}
+		else if ( !strcmp( argv[ i ], "-progress2" ) )
+		{
+			is_progress = 2;
+		}
 		// Look for the query option
 		else if ( !strcmp( argv[ i ], "-query" ) )
 		{
@@ -751,6 +785,18 @@ query_all:
 		// The producer or auto-profile could have changed the profile.
 		load_consumer( &consumer, profile, argc, argv );
 
+		// See if producer has consumer already attached
+		if ( !store && !consumer )
+		{
+			consumer = MLT_CONSUMER( mlt_service_consumer( MLT_PRODUCER_SERVICE( melt ) ) );
+			if ( consumer )
+			{
+				mlt_properties_inc_ref( MLT_CONSUMER_PROPERTIES(consumer) ); // because we explicitly close it
+				mlt_properties_set_data( MLT_CONSUMER_PROPERTIES(consumer),
+					"transport_callback", transport_action, 0, NULL, NULL );
+			}
+		}
+
 		// If we have no consumer, default to sdl
 		if ( store == NULL && consumer == NULL )
 			consumer = create_consumer( profile, NULL );
@@ -835,6 +881,10 @@ query_all:
 	{
 		show_usage( argv[0] );
 	}
+
+	// Disconnect producer from consumer to prevent ref cycles from closing services
+	if ( consumer )
+		mlt_consumer_connect( consumer, NULL );
 
 	// Close the producer
 	if ( melt != NULL )

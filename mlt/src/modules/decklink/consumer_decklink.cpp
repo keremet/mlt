@@ -17,6 +17,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#define __STDC_FORMAT_MACROS  /* see inttypes.h */
 #include <framework/mlt.h>
 #include <stdlib.h>
 #include <string.h>
@@ -54,6 +55,9 @@ private:
 	int                         m_isKeyer;
 	IDeckLinkKeyer*             m_deckLinkKeyer;
 	bool                        m_terminate_on_pause;
+	uint32_t                    m_preroll;
+	uint32_t                    m_acnt;
+	bool                        m_reprio;
 
 	IDeckLinkDisplayMode* getDisplayMode()
 	{
@@ -199,7 +203,7 @@ public:
 		// Set the keyer
 		if ( m_deckLinkKeyer && ( m_isKeyer = mlt_properties_get_int( properties, "keyer" ) ) )
 		{
-			bool external = (m_isKeyer == 2);
+			bool external = ( m_isKeyer == 2 );
 			double level = mlt_properties_get_double( properties, "keyer_level" );
 
 			if ( m_deckLinkKeyer->Enable( external ) != S_OK )
@@ -213,7 +217,7 @@ public:
 		}
 
 		// Set the video output mode
-		if ( S_OK != m_deckLinkOutput->EnableVideoOutput( m_displayMode->GetDisplayMode(), bmdVideoOutputFlagDefault) )
+		if ( S_OK != m_deckLinkOutput->EnableVideoOutput( m_displayMode->GetDisplayMode(), bmdVideoOutputFlagDefault ) )
 		{
 			mlt_log_error( getConsumer(), "Failed to enable video output\n" );
 			return false;
@@ -232,6 +236,9 @@ public:
 			stop();
 			return false;
 		}
+
+		m_preroll = preroll;
+		m_reprio = false;
 
 		// preroll frames
 		for( i = 0; i < preroll; i++ )
@@ -279,16 +286,26 @@ public:
 
 		if ( !mlt_frame_get_audio( frame, (void**) &pcm, &format, &frequency, &m_channels, &samples ) )
 		{
-			uint32_t written = 0;
-
 #ifdef WIN32
-			m_deckLinkOutput->ScheduleAudioSamples( pcm, samples, m_count * frequency / m_fps, frequency, (unsigned long*) &written );
+			unsigned long written = 0;
 #else
-			m_deckLinkOutput->ScheduleAudioSamples( pcm, samples, m_count * frequency / m_fps, frequency, &written );
+			uint32_t written = 0;
+#endif
+			BMDTimeValue streamTime = m_count * frequency * m_duration / m_timescale;
+			m_deckLinkOutput->GetBufferedAudioSampleFrameCount( &written );
+			if ( written > (m_preroll + 1) * samples )
+			{
+				mlt_log_verbose( getConsumer(), "renderAudio: will flush %lu audiosamples\n", written );
+				m_deckLinkOutput->FlushBufferedAudioSamples();
+			};
+#ifdef WIN32
+			m_deckLinkOutput->ScheduleAudioSamples( pcm, samples, streamTime, frequency, (unsigned long*) &written );
+#else
+			m_deckLinkOutput->ScheduleAudioSamples( pcm, samples, streamTime, frequency, &written );
 #endif
 
 			if ( written != (uint32_t) samples )
-				mlt_log_verbose( getConsumer(), "renderAudio: samples=%d, written=%u\n", samples, written );
+				mlt_log_verbose( getConsumer(), "renderAudio: samples=%d, written=%lu\n", samples, written );
 		}
 	}
 
@@ -428,19 +445,75 @@ public:
 	
 	virtual HRESULT STDMETHODCALLTYPE ScheduledFrameCompleted( IDeckLinkVideoFrame* completedFrame, BMDOutputFrameCompletionResult completed )
 	{
+		if( !m_reprio )
+		{
+			mlt_properties properties = MLT_CONSUMER_PROPERTIES( getConsumer() );
+
+			if ( mlt_properties_get( properties, "priority" ) )
+			{
+				int r;
+				pthread_t thread;
+				pthread_attr_t tattr;
+				struct sched_param param;
+
+				pthread_attr_init(&tattr);
+				pthread_attr_setschedpolicy(&tattr, SCHED_FIFO);
+
+				if ( !strcmp( "max", mlt_properties_get( properties, "priority" ) ) )
+					param.sched_priority = sched_get_priority_max(SCHED_FIFO) - 1;
+				else if ( !strcmp( "min", mlt_properties_get( properties, "priority" ) ) )
+					param.sched_priority = sched_get_priority_min(SCHED_FIFO) + 1;
+				else
+					param.sched_priority = mlt_properties_get_int( properties, "priority" );
+
+				pthread_attr_setschedparam(&tattr, &param);
+
+				thread = pthread_self();
+
+				r = pthread_setschedparam(thread, SCHED_FIFO, &param);
+				if( r )
+					mlt_log_verbose( getConsumer(),
+						"ScheduledFrameCompleted: pthread_setschedparam retured %d\n", r);
+				else
+					mlt_log_verbose( getConsumer(),
+						"ScheduledFrameCompleted: param.sched_priority=%d\n", param.sched_priority);
+			};
+
+			m_reprio = true;
+		};
+
+#ifdef WIN32
+		unsigned long cnt;
+#else
+		uint32_t cnt;
+#endif
+		m_deckLinkOutput->GetBufferedAudioSampleFrameCount( &cnt );
+		if ( cnt != m_acnt )
+		{
+			mlt_log_verbose( getConsumer(),
+				"ScheduledFrameCompleted: GetBufferedAudioSampleFrameCount %u -> %lu, m_count=%"PRIu64"\n",
+				m_acnt, cnt, m_count );
+			m_acnt = cnt;
+		}
+
 		// When a video frame has been released by the API, schedule another video frame to be output
 
 		// ignore handler if frame was flushed
-		if(bmdOutputFrameFlushed == completed)
+		if ( bmdOutputFrameFlushed == completed )
 			return S_OK;
 
 		// schedule next frame
-		ScheduleNextFrame(false);
+		ScheduleNextFrame( false );
 
 		// step forward frames counter if underrun
-		if(bmdOutputFrameDisplayedLate == completed)
+		if ( bmdOutputFrameDisplayedLate == completed )
 		{
-			mlt_log_verbose( getConsumer(), "ScheduledFrameCompleted: bmdOutputFrameDisplayedLate == completed\n");
+			mlt_log_verbose( getConsumer(), "ScheduledFrameCompleted: bmdOutputFrameDisplayedLate == completed\n" );
+			m_count++;
+		}
+		if ( bmdOutputFrameDropped == completed )
+		{
+			mlt_log_verbose( getConsumer(), "ScheduledFrameCompleted: bmdOutputFrameDropped == completed\n" );
 			m_count++;
 		}
 
@@ -453,7 +526,7 @@ public:
 	}
 	
 
-	void ScheduleNextFrame(bool preroll)
+	void ScheduleNextFrame( bool preroll )
 	{
 		// get the consumer
 		mlt_consumer consumer = getConsumer();
@@ -474,8 +547,8 @@ public:
 				mlt_events_fire( properties, "consumer-frame-show", frame, NULL );
 
 				// terminate on pause
-				if (m_terminate_on_pause &&
-					mlt_properties_get_double( MLT_FRAME_PROPERTIES( frame ), "_speed" ) == 0.0)
+				if ( m_terminate_on_pause &&
+					mlt_properties_get_double( MLT_FRAME_PROPERTIES( frame ), "_speed" ) == 0.0 )
 					stop();
 
 				mlt_frame_close( frame );

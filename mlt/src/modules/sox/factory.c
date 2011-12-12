@@ -34,11 +34,11 @@ static mlt_properties metadata( mlt_service_type type, const char *id, void *dat
 	mlt_properties result = NULL;
 
 	// Load the yaml file
-	snprintf( file, PATH_MAX, "%s/sox/filter_%s.yml", mlt_environment( "MLT_DATA" ), "sox" );
+	snprintf( file, PATH_MAX, "%s/sox/filter_%s.yml", mlt_environment( "MLT_DATA" ), strcmp( id, "sox" ) ? "sox_effect" : "sox" );
 	result = mlt_properties_parse_yaml( file );
 
 #ifdef SOX14
-	if ( result && ( type == filter_type ) )
+	if ( result && ( type == filter_type ) && strcmp( id, "sox" ) )
 	{
 		// Annotate the yaml properties with sox effect usage.
 		mlt_properties params = mlt_properties_get_data( result, "parameters", NULL );

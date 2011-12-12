@@ -32,6 +32,8 @@
 
 #include "jack_rack.h"
 
+extern pthread_mutex_t g_activate_mutex;
+
 #define BUFFER_LEN 204800 * 6
 
 static void jack_started_transmitter( mlt_listener listener, mlt_properties owner, mlt_service service, void **args )
@@ -173,7 +175,9 @@ static void initialise_jack_ports( mlt_properties properties )
 		sizeof( float *) * channels, mlt_pool_release, NULL );
 
 	// Start Jack processing - required before registering ports
+	pthread_mutex_lock( &g_activate_mutex );
 	jack_activate( jack_client );
+	pthread_mutex_unlock( &g_activate_mutex  );
 	
 	// Register Jack ports
 	for ( i = 0; i < channels; i++ )
@@ -452,6 +456,12 @@ mlt_filter filter_jackrack_init( mlt_profile profile, mlt_service_type type, con
 			mlt_events_listen( properties, properties, "jack-stop", (mlt_listener) on_jack_stop );
 			mlt_events_listen( properties, this, "jack-seek", (mlt_listener) on_jack_seek );
 			mlt_properties_set_position( properties, "_jack_seek", -1 );
+		}
+		else
+		{
+			mlt_log_error( NULL, "Failed to connect to JACK server\n" );
+			mlt_filter_close( this );
+			this = NULL;
 		}
 	}
 	return this;

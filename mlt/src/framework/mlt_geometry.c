@@ -75,7 +75,7 @@ static inline double linearstep( double start, double end, double position, int 
 	return start + position * o;
 }
 
-static void mlt_geometry_virtual_refresh( mlt_geometry self )
+void mlt_geometry_interpolate( mlt_geometry self )
 {
 	geometry g = self->local;
 
@@ -191,7 +191,8 @@ static int mlt_geometry_drop( mlt_geometry self, geometry_item item )
 static void mlt_geometry_clean( mlt_geometry self )
 {
 	geometry g = self->local;
-	free( g->data );
+	if ( g->data )
+		free( g->data );
 	g->data = NULL;
 	while( g->item )
 		mlt_geometry_drop( self, g->item );
@@ -234,6 +235,10 @@ int mlt_geometry_parse( mlt_geometry self, char *data, int length, int nw, int n
 		struct mlt_geometry_item_s item;
 		char *value = mlt_tokeniser_get_string( tokens, i );
 
+		// If no data in keyframe, drop it (trailing semicolon)
+		if ( value == NULL || !strcmp( value, "" ) )
+			continue;
+
 		// Set item to 0
 		memset( &item, 0, sizeof( struct mlt_geometry_item_s ) );
 
@@ -243,6 +248,7 @@ int mlt_geometry_parse( mlt_geometry self, char *data, int length, int nw, int n
 		// Now insert into place
 		mlt_geometry_insert( self, &item );
 	}
+	mlt_geometry_interpolate( self );
 
 	// Remove the tokeniser
 	mlt_tokeniser_close( tokens );
@@ -504,9 +510,6 @@ int mlt_geometry_insert( mlt_geometry self, mlt_geometry_item item )
 		g->item->data.f[4] = 1;
 	}
 
-	// Refresh all geometries
-	mlt_geometry_virtual_refresh( self );
-
 	// TODO: Error checking
 	return 0;
 }
@@ -527,9 +530,6 @@ int mlt_geometry_remove( mlt_geometry self, int position )
 
 	if ( place != NULL && position == place->data.frame )
 		ret = mlt_geometry_drop( self, place );
-
-	// Refresh all geometries
-	mlt_geometry_virtual_refresh( self );
 
 	return ret;
 }
@@ -635,21 +635,26 @@ char *mlt_geometry_serialise_cut( mlt_geometry self, int in, int out )
 			if ( item.frame - in != 0 )
 				sprintf( temp, "%d=", item.frame - in );
 
-			if ( item.f[0] ) 
-				sprintf( temp + strlen( temp ), "%.0f", item.x );
-			strcat( temp, "/" );
-			if ( item.f[1] ) 
-				sprintf( temp + strlen( temp ), "%.0f", item.y );
-			strcat( temp, ":" );
-			if ( item.f[2] ) 
-				sprintf( temp + strlen( temp ), "%.0f", item.w );
-			strcat( temp, "x" );
-			if ( item.f[3] ) 
-				sprintf( temp + strlen( temp ), "%.0f", item.h );
-			if ( item.f[4] ) 
-				sprintf( temp + strlen( temp ), ":%.0f", item.mix );
+			if ( item.f[0] )
+				sprintf( temp + strlen( temp ), "%g", item.x );
+			if ( item.f[1] ) {
+				strcat( temp, "/" );
+				sprintf( temp + strlen( temp ), "%g", item.y );
+			}
+			if ( item.f[2] ) {
+				strcat( temp, ":" );
+				sprintf( temp + strlen( temp ), "%g", item.w );
+			}
+			if ( item.f[3] ) {
+				strcat( temp, "x" );
+				sprintf( temp + strlen( temp ), "%g", item.h );
+			}
+			if ( item.f[4] ) {
+				strcat( temp, ":" );
+				sprintf( temp + strlen( temp ), "%g", item.mix );
+			}
 
-			if ( used + strlen( temp ) > size )
+			if ( used + strlen( temp ) + 2 > size ) // +2 for ';' and NULL
 			{
 				size += 1000;
 				ret = realloc( ret, size );
@@ -680,7 +685,8 @@ char *mlt_geometry_serialise( mlt_geometry self )
 	char *ret = mlt_geometry_serialise_cut( self, 0, g->length );
 	if ( ret )
 	{
-		free( g->data );
+		if ( g->data )
+			free( g->data );
 		g->data = ret;
 	}
 	return ret;

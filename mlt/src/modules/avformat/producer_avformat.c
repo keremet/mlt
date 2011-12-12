@@ -34,7 +34,7 @@
 #ifdef SWSCALE
 #  include <libswscale/swscale.h>
 #endif
-#if LIBAVCODEC_VERSION_MAJOR > 52
+#if LIBAVCODEC_VERSION_MAJOR >= 53
 #include <libavutil/samplefmt.h>
 #elif (LIBAVCODEC_VERSION_INT >= ((51<<16)+(71<<8)+0))
 const char *avcodec_get_sample_fmt_name(int sample_fmt);
@@ -57,7 +57,7 @@ const char *avcodec_get_sample_fmt_name(int sample_fmt);
 #define PIX_FMT_YUYV422 PIX_FMT_YUV422
 #endif
 
-#if LIBAVCODEC_VERSION_MAJOR > 52
+#if LIBAVCODEC_VERSION_MAJOR >= 53
 #include <libavutil/opt.h>
 #define CODEC_TYPE_VIDEO      AVMEDIA_TYPE_VIDEO
 #define CODEC_TYPE_AUDIO      AVMEDIA_TYPE_AUDIO
@@ -89,7 +89,6 @@ struct producer_avformat_s
 	mlt_position video_expected;
 	int audio_index;
 	int video_index;
-	double start_time;
 	int first_pts;
 	int64_t last_position;
 	int seekable;
@@ -342,7 +341,7 @@ static mlt_properties find_default_streams( producer_avformat self )
 				if ( self->audio_index < 0 )
 					self->audio_index = i;
 				mlt_properties_set( meta_media, key, "audio" );
-#if LIBAVCODEC_VERSION_MAJOR > 52
+#if LIBAVCODEC_VERSION_MAJOR >= 53
 				snprintf( key, sizeof(key), "meta.media.%d.codec.sample_fmt", i );
 				mlt_properties_set( meta_media, key, av_get_sample_fmt_name( codec_context->sample_fmt ) );
 #elif (LIBAVCODEC_VERSION_INT >= ((51<<16)+(71<<8)+0))
@@ -551,7 +550,7 @@ static char* parse_url( mlt_profile profile, const char* URL, AVInputFormat **fo
 	char *url = strchr( protocol, ':' );
 
 	// Only if there is not a protocol specification that avformat can handle
-#if LIBAVFORMAT_VERSION_MAJOR > 52
+#if LIBAVFORMAT_VERSION_MAJOR >= 53
 	if ( url && avio_check( URL, 0 ) < 0 )
 #else
 	if ( url && !url_exist( URL ) )
@@ -661,16 +660,13 @@ static int get_basic_info( producer_avformat self, mlt_profile profile, const ch
 		}
 	}
 
-	if ( format->start_time != AV_NOPTS_VALUE )
-		self->start_time = format->start_time;
-
 	// Check if we're seekable
 	// avdevices are typically AVFMT_NOFILE and not seekable
 	self->seekable = !format->iformat || !( format->iformat->flags & AVFMT_NOFILE );
 	if ( format->pb )
 	{
 		// protocols can indicate if they support seeking
-#if LIBAVFORMAT_VERSION_MAJOR > 52
+#if LIBAVFORMAT_VERSION_MAJOR >= 53
 		self->seekable = format->pb->seekable;
 #else
 		URLContext *uc = url_fileno( format->pb );
@@ -681,7 +677,7 @@ static int get_basic_info( producer_avformat self, mlt_profile profile, const ch
 	if ( self->seekable )
 	{
 		// Do a more rigourous test of seekable on a disposable context
-		self->seekable = av_seek_frame( format, -1, self->start_time, AVSEEK_FLAG_BACKWARD ) >= 0;
+		self->seekable = av_seek_frame( format, -1, format->start_time, AVSEEK_FLAG_BACKWARD ) >= 0;
 		mlt_properties_set_int( properties, "seekable", self->seekable );
 		self->dummy_context = format;
 		av_open_input_file( &self->video_format, filename, NULL, 0, NULL );
@@ -766,7 +762,7 @@ static int producer_open( producer_avformat self, mlt_profile profile, const cha
 	if ( !error && self->video_format )
 	{
 		apply_properties( self->video_format, properties, AV_OPT_FLAG_DECODING_PARAM );
-#if LIBAVFORMAT_VERSION_MAJOR > 52
+#if LIBAVFORMAT_VERSION_MAJOR >= 53
 		if ( self->video_format->iformat && self->video_format->iformat->priv_class && self->video_format->priv_data )
 			apply_properties( self->video_format->priv_data, properties, AV_OPT_FLAG_DECODING_PARAM );
 #endif
@@ -805,7 +801,7 @@ static int producer_open( producer_avformat self, mlt_profile profile, const cha
 						// And open again for our audio context
 						av_open_input_file( &self->audio_format, filename, NULL, 0, NULL );
 						apply_properties( self->audio_format, properties, AV_OPT_FLAG_DECODING_PARAM );
-#if LIBAVFORMAT_VERSION_MAJOR > 52
+#if LIBAVFORMAT_VERSION_MAJOR >= 53
 						if ( self->audio_format->iformat && self->audio_format->iformat->priv_class && self->audio_format->priv_data )
 							apply_properties( self->audio_format->priv_data, properties, AV_OPT_FLAG_DECODING_PARAM );
 #endif
@@ -842,7 +838,9 @@ static int producer_open( producer_avformat self, mlt_profile profile, const cha
 
 	if ( self->dummy_context )
 	{
+		avformat_lock();
 		av_close_input_file( self->dummy_context );
+		avformat_unlock();
 		self->dummy_context = NULL;
 	}
 
@@ -863,12 +861,9 @@ static void reopen_video( producer_avformat self, mlt_producer producer )
 	mlt_service_lock( MLT_PRODUCER_SERVICE( producer ) );
 	pthread_mutex_lock( &self->audio_mutex );
 
+	avformat_lock();
 	if ( self->video_codec )
-	{
-		avformat_lock();
 		avcodec_close( self->video_codec );
-		avformat_unlock();
-	}
 	self->video_codec = NULL;
 	if ( self->dummy_context )
 		av_close_input_file( self->dummy_context );
@@ -876,6 +871,7 @@ static void reopen_video( producer_avformat self, mlt_producer producer )
 	if ( self->video_format )
 		av_close_input_file( self->video_format );
 	self->video_format = NULL;
+	avformat_unlock();
 
 	int audio_index = self->audio_index;
 	int video_index = self->video_index;
@@ -1316,17 +1312,19 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 
 	// Determines if we have to decode all frames in a sequence
 	// Temporary hack to improve intra frame only
-	int must_decode = strcmp( codec_context->codec->name, "dnxhd" ) &&
+	int must_decode = !( codec_context->codec && codec_context->codec->name ) || (
+				  strcmp( codec_context->codec->name, "dnxhd" ) &&
 				  strcmp( codec_context->codec->name, "dvvideo" ) &&
 				  strcmp( codec_context->codec->name, "huffyuv" ) &&
 				  strcmp( codec_context->codec->name, "mjpeg" ) &&
-				  strcmp( codec_context->codec->name, "rawvideo" );
+				  strcmp( codec_context->codec->name, "rawvideo" ) );
 
 	// Turn on usage of new seek API and PTS for seeking
 	int use_new_seek = self->seekable &&
 		codec_context->codec_id == CODEC_ID_H264 && !strcmp( context->iformat->name, "mpegts" );
 	if ( mlt_properties_get( properties, "new_seek" ) )
 		use_new_seek = mlt_properties_get_int( properties, "new_seek" );
+	double delay = mlt_properties_get_double( properties, "video_delay" );
 
 	// Seek if necessary
 	int paused = seek_video( self, position, req_position, must_decode, use_new_seek, &ignore );
@@ -1418,7 +1416,7 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 						pts -= self->first_pts;
 					else if ( context->start_time != AV_NOPTS_VALUE )
 						pts -= context->start_time;
-					int_position = ( int64_t )( av_q2d( stream->time_base ) * pts * source_fps + 0.1 );
+					int_position = ( int64_t )( ( av_q2d( stream->time_base ) * pts + delay ) * source_fps + 0.1 );
 					if ( pkt.pts == AV_NOPTS_VALUE )
 					{
 						self->invalid_pts_counter++;
@@ -1441,7 +1439,6 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 				{
 					if ( pkt.dts != AV_NOPTS_VALUE )
 					{
-						double delay = mlt_properties_get_double( properties, "video_delay" );
 						int_position = ( int64_t )( ( av_q2d( stream->time_base ) * pkt.dts + delay ) * source_fps + 0.5 );
 						if ( context->start_time != AV_NOPTS_VALUE )
 							int_position -= ( int64_t )( context->start_time * source_fps / AV_TIME_BASE + 0.5 );
@@ -1739,7 +1736,7 @@ static int video_codec_init( producer_avformat self, int index, mlt_properties p
 
 		// Process properties as AVOptions
 		apply_properties( codec_context, properties, AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_DECODING_PARAM );
-#if LIBAVCODEC_VERSION_MAJOR > 52
+#if LIBAVCODEC_VERSION_MAJOR >= 53
 		if ( codec->priv_class && codec_context->priv_data )
 			apply_properties( codec_context->priv_data, properties, AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_DECODING_PARAM );
 #endif
@@ -1885,13 +1882,11 @@ static void producer_set_up_video( producer_avformat self, mlt_frame frame )
 	{
 		// Reset the video properties if the index changed
 		self->video_index = index;
+		avformat_lock();
 		if ( self->video_codec )
-		{
-			avformat_lock();
 			avcodec_close( self->video_codec );
-			avformat_unlock();
-		}
 		self->video_codec = NULL;
+		avformat_unlock();
 	}
 
 	// Get the frame properties
@@ -1975,7 +1970,7 @@ static int seek_audio( producer_avformat self, mlt_position position, double tim
 
 static int sample_bytes( AVCodecContext *context )
 {
-#if LIBAVCODEC_VERSION_MAJOR > 52
+#if LIBAVCODEC_VERSION_MAJOR >= 53
 	return av_get_bits_per_sample_fmt( context->sample_fmt ) / 8;
 #else
 	return av_get_bits_per_sample_format( context->sample_fmt ) / 8;
@@ -2066,7 +2061,8 @@ static int decode_audio( producer_avformat self, int *ignore, AVPacket pkt, int 
 	}
 
 	// If we're behind, ignore this packet
-	if ( pkt.pts >= 0 )
+	// Skip this on non-seekable, audio-only inputs.
+	if ( pkt.pts >= 0 && ( self->seekable || self->video_format ) && *ignore == 0 && audio_used > samples / 2 )
 	{
 		double current_pts = av_q2d( context->streams[ index ]->time_base ) * pkt.pts;
 		int64_t req_position = ( int64_t )( timecode * fps + 0.5 );
@@ -2074,16 +2070,12 @@ static int decode_audio( producer_avformat self, int *ignore, AVPacket pkt, int 
 		if ( context->start_time != AV_NOPTS_VALUE )
 			int_position -= ( int64_t )( fps * context->start_time / AV_TIME_BASE + 0.5 );
 
-		if ( *ignore == 0 )
+		if ( int_position > 0 )
 		{
 			if ( int_position < req_position )
 				// We are behind, so skip some
 				*ignore = req_position - int_position;
-
-			// We use nb_streams in this test because the tolerance is dependent
-			// on the interleaving of all streams esp. when there is more than
-			// one audio stream.
-			else if ( int_position > req_position + context->nb_streams )
+			else if ( self->audio_index != INT_MAX && int_position > req_position + 2 )
 				// We are ahead, so seek backwards some more
 				seek_audio( self, req_position, timecode - 1.0, ignore );
 		}
@@ -2387,7 +2379,7 @@ static int audio_codec_init( producer_avformat self, int index, mlt_properties p
 
 		// Process properties as AVOptions
 		apply_properties( codec_context, properties, AV_OPT_FLAG_AUDIO_PARAM | AV_OPT_FLAG_DECODING_PARAM );
-#if LIBAVCODEC_VERSION_MAJOR > 52
+#if LIBAVCODEC_VERSION_MAJOR >= 53
 		if ( codec && codec->priv_class && codec_context->priv_data )
 			apply_properties( codec_context->priv_data, properties, AV_OPT_FLAG_AUDIO_PARAM | AV_OPT_FLAG_DECODING_PARAM );
 #endif
@@ -2446,13 +2438,11 @@ static void producer_set_up_audio( producer_avformat self, mlt_frame frame )
 	// Update the audio properties if the index changed
 	if ( context && index > -1 && index != self->audio_index )
 	{
+		avformat_lock();
 		if ( self->audio_codec[ self->audio_index ] )
-		{
-			avformat_lock();
 			avcodec_close( self->audio_codec[ self->audio_index ] );
-			avformat_unlock();
-		}
 		self->audio_codec[ self->audio_index ] = NULL;
+		avformat_unlock();
 	}
 	if ( self->audio_index != -1 )
 		self->audio_index = index;
@@ -2555,9 +2545,11 @@ static void producer_avformat_close( producer_avformat self )
 		av_free( self->decode_buffer[i] );
 		if ( self->audio_codec[i] )
 			avcodec_close( self->audio_codec[i] );
+		self->audio_codec[i] = NULL;
 	}
 	if ( self->video_codec )
 		avcodec_close( self->video_codec );
+	self->video_codec = NULL;
 	// Close the file
 	if ( self->dummy_context )
 		av_close_input_file( self->dummy_context );
@@ -2579,15 +2571,25 @@ static void producer_avformat_close( producer_avformat self )
 
 	// Cleanup the packet queues
 	AVPacket *pkt;
-	while ( ( pkt = mlt_deque_pop_back( self->apackets ) ) )
+	if ( self->apackets )
 	{
-		av_free_packet( pkt );
-		free( pkt );
+		while ( ( pkt = mlt_deque_pop_back( self->apackets ) ) )
+		{
+			av_free_packet( pkt );
+			free( pkt );
+		}
+		mlt_deque_close( self->apackets );
+		self->apackets = NULL;
 	}
-	while ( ( pkt = mlt_deque_pop_back( self->vpackets ) ) )
+	if ( self->vpackets )
 	{
-		av_free_packet( pkt );
-		free( pkt );
+		while ( ( pkt = mlt_deque_pop_back( self->vpackets ) ) )
+		{
+			av_free_packet( pkt );
+			free( pkt );
+		}
+		mlt_deque_close( self->vpackets );
+		self->vpackets = NULL;
 	}
 
 	free( self );

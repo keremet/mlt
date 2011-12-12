@@ -156,6 +156,7 @@ static mlt_geometry transition_parse_keys( mlt_transition this, int normalised_w
 		item.frame = -1;
 		if ( mlt_geometry_parse_item( geometry, &item, mlt_properties_get( properties, "end" ) ) == 0 )
 			mlt_geometry_insert( geometry, &item );
+		mlt_geometry_interpolate( geometry );
 	}
 	
 	return geometry;
@@ -918,7 +919,7 @@ static mlt_geometry composite_calculate( mlt_transition this, struct geometry_s 
 	sprintf( key, "%s.in", name );
 	if ( mlt_properties_get( a_props, key ) )
 	{
-		sscanf( mlt_properties_get( a_props, key ), "%f,%f,%f,%f,%f,%d,%d", &result->item.x, &result->item.y, &result->item.w, &result->item.h, &result->item.mix, &result->nw, &result->nh );
+		sscanf( mlt_properties_get( a_props, key ), "%f %f %f %f %f %d %d", &result->item.x, &result->item.y, &result->item.w, &result->item.h, &result->item.mix, &result->nw, &result->nh );
 	}
 	else
 	{
@@ -1021,9 +1022,9 @@ mlt_frame composite_copy_region( mlt_transition this, mlt_frame a_frame, mlt_pos
 	}
 
 	// Store the key
-	sprintf( key, "%s.in=%d,%d,%d,%d,%f,%d,%d", name, x, y, w, h, result.item.mix, width, height );
+	sprintf( key, "%s.in=%d %d %d %d %f %d %d", name, x, y, w, h, result.item.mix, width, height );
 	mlt_properties_parse( a_props, key );
-	sprintf( key, "%s.out=%d,%d,%d,%d,%f,%d,%d", name, x, y, w, h, result.item.mix, width, height );
+	sprintf( key, "%s.out=%d %d %d %d %f %d %d", name, x, y, w, h, result.item.mix, width, height );
 	mlt_properties_parse( a_props, key );
 
 	ds = w * 2;

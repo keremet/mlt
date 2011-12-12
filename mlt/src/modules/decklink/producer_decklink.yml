@@ -32,11 +32,6 @@ parameters:
     minimum: 0
     widget: spinner
 
-  - identifier: resource
-    title: Card
-    type: integer
-    readonly: yes
-
   - identifier: channels
     title: Audio channels
     type: integer
@@ -66,4 +61,17 @@ parameters:
     default: 25
     minimum: 0
     unit: frames
+    widget: spinner
+
+  - identifier: vanc
+    title: Vertical ancillary capture
+    description: >
+      Captures vertical ancillary data as image data and places it at the top
+      of the visible/active image.
+      You can either set the number of lines to capture or use -1 for automatic
+      (32 lines) mode.
+    type: integer
+    minimum: -1
+    default: 0
+    unit: lines
     widget: spinner

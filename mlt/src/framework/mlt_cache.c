@@ -30,7 +30,10 @@
 #include <pthread.h>
 
 /** the maximum number of data objects to cache per line */
-#define MAX_CACHE_SIZE (10)
+#define MAX_CACHE_SIZE (200)
+
+/** the default number of data objects to cache per line */
+#define DEFAULT_CACHE_SIZE (10)
 
 /** \brief Cache item class
  *
@@ -178,7 +181,7 @@ void mlt_cache_item_close( mlt_cache_item item )
 
 /** Create a new cache.
  *
- * The default size is \p MAX_CACHE_SIZE.
+ * The default size is \p DEFAULT_CACHE_SIZE.
  * \public \memberof mlt_cache_s
  * \return a new cache or NULL if there was an error
  */
@@ -188,7 +191,7 @@ mlt_cache mlt_cache_init()
 	mlt_cache result = calloc( 1, sizeof( struct mlt_cache_s ) );
 	if ( result )
 	{
-		result->size = MAX_CACHE_SIZE;
+		result->size = DEFAULT_CACHE_SIZE;
 		result->current = result->A;
 		pthread_mutex_init( &result->mutex, NULL );
 		result->active = mlt_properties_new();
@@ -210,6 +213,18 @@ void mlt_cache_set_size( mlt_cache cache, int size )
 {
 	if ( size <= MAX_CACHE_SIZE )
 		cache->size = size;
+}
+
+/** Get the numer of possible cache items.
+ *
+ * \public \memberof mlt_cache_s
+ * \param cache the cache to check
+ * \return the current maximum size of the cache
+ */
+
+int mlt_cache_get_size( mlt_cache cache )
+{
+    return cache->size;
 }
 
 /** Destroy a cache.

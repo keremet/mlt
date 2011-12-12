@@ -202,6 +202,7 @@ static int filter_get_audio( mlt_frame frame, void **buffer, mlt_audio_format *f
 	st_sample_t *output_buffer = mlt_properties_get_data( filter_properties, "output_buffer", NULL );
 	int i; // channel
 	int count = mlt_properties_get_int( filter_properties, "_effect_count" );
+	int analysis = mlt_properties_get( filter_properties, "effect" ) && !strcmp( mlt_properties_get( filter_properties, "effect" ), "analysis" );
 
 	// Get the producer's audio
 	*format = mlt_audio_s32;
@@ -257,38 +258,93 @@ static int filter_get_audio( mlt_frame frame, void **buffer, mlt_audio_format *f
 			mlt_properties_set_int( filter_properties, "_effect_count", count );
 			
 		}
-		if ( *samples > 0 && count > 0 )
+		if ( *samples > 0 && ( count > 0 || analysis ) )
 		{
 			input_buffer = (st_sample_t*) *buffer + i * *samples;
 			st_sample_t *p = input_buffer;
 			st_size_t isamp = *samples;
 			st_size_t osamp = *samples;
-			double rms = 0;
 			int j = *samples + 1;
 			char *normalise = mlt_properties_get( filter_properties, "normalise" );
 			double normalised_gain = 1.0;
 			
-			// Convert from interleaved
-			while( --j )
+			if ( analysis )
 			{
-				// Compute rms amplitude while we are accessing each sample
-				rms += ( double )*p * ( double )*p;
-				p ++;
+				// Run analysis to compute a gain level to normalize the audio across entire filter duration
+				double max_power = mlt_properties_get_double( filter_properties, "_max_power" );
+				double peak = mlt_properties_get_double( filter_properties, "_max_peak" );
+				double use_peak = mlt_properties_get_int( filter_properties, "use_peak" );
+				double power = 0;
+				int n = *samples + 1;
+
+				// Compute power level of samples in this channel of this frame
+				while ( --n )
+				{
+					double s = fabs( *p++ );
+					// Track peak
+					if ( s > peak )
+					{
+						peak = s;
+						mlt_properties_set_double( filter_properties, "_max_peak", peak );
+					}
+					power += s * s;
+				}
+				power /= *samples;
+				// Track maximum power
+				if ( power > max_power )
+				{
+					max_power = power;
+					mlt_properties_set_double( filter_properties, "_max_power", max_power );
+				}
+
+				// Complete analysis the last channel of the last frame.
+				if ( i + 1 == *channels && mlt_filter_get_position( filter, frame ) + 1
+					 == mlt_filter_get_length2( filter, frame ) )
+				{
+					double rms = sqrt( max_power / ST_SSIZE_MIN / ST_SSIZE_MIN );
+					char effect[32];
+
+					// Convert RMS or peak to gain
+					if ( use_peak )
+						normalised_gain = ST_SSIZE_MIN / -peak;
+					else
+						normalised_gain = AMPLITUDE_NORM / rms;
+
+					// Set properties for serialization
+					snprintf( effect, sizeof(effect), "vol %f", normalised_gain );
+					effect[31] = 0;
+					mlt_properties_set( filter_properties, "effect", effect );
+					mlt_properties_set( filter_properties, "analyze", NULL );
+
+					// Show output comparable to normalize --no-adjust --fractions
+					mlt_properties_set_double( filter_properties, "level", rms );
+					mlt_properties_set_double( filter_properties, "gain", normalised_gain );
+					mlt_properties_set_double( filter_properties, "peak", -peak / ST_SSIZE_MIN );
+				}
+
+				// restore some variables
+				p = input_buffer;
 			}
-			
-			// Compute final rms amplitude
-			rms = sqrt( rms / *samples / ST_SSIZE_MIN / ST_SSIZE_MIN );
-			
+
 			if ( normalise )
 			{
 				int window = mlt_properties_get_int( filter_properties, "window" );
 				double *smooth_buffer = mlt_properties_get_data( filter_properties, "smooth_buffer", NULL );
 				double max_gain = mlt_properties_get_double( filter_properties, "max_gain" );
-				
+				double rms = 0;
+
 				// Default the maximum gain factor to 20dBFS
 				if ( max_gain == 0 )
 					max_gain = 10.0;
 				
+				// Compute rms amplitude
+				while( --j )
+				{
+					rms += ( double )*p * ( double )*p;
+					p ++;
+				}
+				rms = sqrt( rms / *samples / ST_SSIZE_MIN / ST_SSIZE_MIN );
+
 				// The smoothing buffer prevents radical shifts in the gain level
 				if ( window > 0 && smooth_buffer != NULL )
 				{
@@ -430,26 +486,10 @@ mlt_filter filter_sox_init( mlt_profile profile, mlt_service_type type, const ch
 		mlt_properties_set_data( properties, "input_buffer", input_buffer, BUFFER_LEN, mlt_pool_release, NULL );
 		mlt_properties_set_data( properties, "output_buffer", output_buffer, BUFFER_LEN, mlt_pool_release, NULL );
 		mlt_properties_set_int( properties, "window", 75 );
+		mlt_properties_set( properties, "version", sox_version() );
 	}
 	return this;
 }
 
 // What to do when a libst internal failure occurs
 void cleanup(void){}
-
-// Is there a build problem with my sox-devel package?
-#ifndef gsm_create
-void gsm_create(void){}
-#endif
-#ifndef gsm_decode
-void gsm_decode(void){}
-#endif
-#ifndef gdm_encode
-void gsm_encode(void){}
-#endif
-#ifndef gsm_destroy
-void gsm_destroy(void){}
-#endif
-#ifndef gsm_option
-void gsm_option(void){}
-#endif

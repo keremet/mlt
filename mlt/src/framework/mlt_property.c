@@ -143,9 +143,11 @@ static inline void mlt_property_clear( mlt_property self )
 
 int mlt_property_set_int( mlt_property self, int value )
 {
+	pthread_mutex_lock( &self->mutex );
 	mlt_property_clear( self );
 	self->types = mlt_prop_int;
 	self->prop_int = value;
+	pthread_mutex_unlock( &self->mutex );
 	return 0;
 }
 
@@ -159,9 +161,11 @@ int mlt_property_set_int( mlt_property self, int value )
 
 int mlt_property_set_double( mlt_property self, double value )
 {
+	pthread_mutex_lock( &self->mutex );
 	mlt_property_clear( self );
 	self->types = mlt_prop_double;
 	self->prop_double = value;
+	pthread_mutex_unlock( &self->mutex );
 	return 0;
 }
 
@@ -176,9 +180,11 @@ int mlt_property_set_double( mlt_property self, double value )
 
 int mlt_property_set_position( mlt_property self, mlt_position value )
 {
+	pthread_mutex_lock( &self->mutex );
 	mlt_property_clear( self );
 	self->types = mlt_prop_position;
 	self->prop_position = value;
+	pthread_mutex_unlock( &self->mutex );
 	return 0;
 }
 
@@ -194,6 +200,7 @@ int mlt_property_set_position( mlt_property self, mlt_position value )
 
 int mlt_property_set_string( mlt_property self, const char *value )
 {
+	pthread_mutex_lock( &self->mutex );
 	if ( value != self->prop_string )
 	{
 		mlt_property_clear( self );
@@ -205,6 +212,7 @@ int mlt_property_set_string( mlt_property self, const char *value )
 	{
 		self->types = mlt_prop_string;
 	}
+	pthread_mutex_unlock( &self->mutex );
 	return self->prop_string == NULL;
 }
 
@@ -218,9 +226,11 @@ int mlt_property_set_string( mlt_property self, const char *value )
 
 int mlt_property_set_int64( mlt_property self, int64_t value )
 {
+	pthread_mutex_lock( &self->mutex );
 	mlt_property_clear( self );
 	self->types = mlt_prop_int64;
 	self->prop_int64 = value;
+	pthread_mutex_unlock( &self->mutex );
 	return 0;
 }
 
@@ -241,6 +251,7 @@ int mlt_property_set_int64( mlt_property self, int64_t value )
 
 int mlt_property_set_data( mlt_property self, void *value, int length, mlt_destructor destructor, mlt_serialiser serialiser )
 {
+	pthread_mutex_lock( &self->mutex );
 	if ( self->data == value )
 		self->destructor = NULL;
 	mlt_property_clear( self );
@@ -249,6 +260,7 @@ int mlt_property_set_data( mlt_property self, void *value, int length, mlt_destr
 	self->length = length;
 	self->destructor = destructor;
 	self->serialiser = serialiser;
+	pthread_mutex_unlock( &self->mutex );
 	return 0;
 }
 
@@ -354,7 +366,7 @@ double mlt_property_get_double_l( mlt_property self, locale_t locale )
 		return ( double )self->prop_position;
 	else if ( self->types & mlt_prop_int64 )
 		return ( double )self->prop_int64;
-#if defined(__linux__) || defined(__DARWIN__)
+#if defined(__GLIBC__) || defined(__DARWIN__)
 	else if ( locale && ( self->types & mlt_prop_string ) && self->prop_string )
 		return strtod_l( self->prop_string, NULL, locale );
 #endif
@@ -442,6 +454,7 @@ char *mlt_property_get_string( mlt_property self )
 	// Construct a string if need be
 	if ( ! ( self->types & mlt_prop_string ) )
 	{
+		pthread_mutex_lock( &self->mutex );
 		if ( self->types & mlt_prop_int )
 		{
 			self->types |= mlt_prop_string;
@@ -471,6 +484,7 @@ char *mlt_property_get_string( mlt_property self )
 			self->types |= mlt_prop_string;
 			self->prop_string = self->serialiser( self->data, self->length );
 		}
+		pthread_mutex_unlock( &self->mutex );
 	}
 
 	// Return the string (may be NULL)
@@ -502,7 +516,7 @@ char *mlt_property_get_string_l( mlt_property self, locale_t locale )
 		// Save the current locale
 #if defined(__DARWIN__)
 		const char *localename = querylocale( LC_NUMERIC, locale );
-#elif defined(__linux__)
+#elif defined(__GLIBC__)
 		const char *localename = locale->__names[ LC_NUMERIC ];
 #else
 		// TODO: not yet sure what to do on other platforms
@@ -512,7 +526,7 @@ char *mlt_property_get_string_l( mlt_property self, locale_t locale )
 		pthread_mutex_lock( &self->mutex );
 
 		// Get the current locale
-		const char *orig_localename = setlocale( LC_NUMERIC, NULL );
+		char *orig_localename = strdup( setlocale( LC_NUMERIC, NULL ) );
 
 		// Set the new locale
 		setlocale( LC_NUMERIC, localename );
@@ -548,6 +562,7 @@ char *mlt_property_get_string_l( mlt_property self, locale_t locale )
 		}
 		// Restore the current locale
 		setlocale( LC_NUMERIC, orig_localename );
+		free( orig_localename );
 		pthread_mutex_unlock( &self->mutex );
 	}
 
@@ -603,6 +618,7 @@ void mlt_property_close( mlt_property self )
  */
 void mlt_property_pass( mlt_property self, mlt_property that )
 {
+	pthread_mutex_lock( &self->mutex );
 	mlt_property_clear( self );
 
 	self->types = that->types;
@@ -625,4 +641,5 @@ void mlt_property_pass( mlt_property self, mlt_property that )
 		self->types = mlt_prop_string;
 		self->prop_string = self->serialiser( self->data, self->length );
 	}
+	pthread_mutex_unlock( &self->mutex );
 }

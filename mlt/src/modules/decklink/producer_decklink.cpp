@@ -35,7 +35,7 @@ class DeckLinkProducer
 	: public IDeckLinkInputCallback
 {
 private:
-	mlt_producer_s   m_producer;
+	mlt_producer     m_producer;
 	IDeckLink*       m_decklink;
 	IDeckLinkInput*  m_decklinkInput;
 	mlt_deque        m_queue;
@@ -46,8 +46,9 @@ private:
 	bool             m_isBuffering;
 	int              m_topFieldFirst;
 	int              m_colorspace;
+	int              m_vancLines;
 
-	BMDDisplayMode getDisplayMode( mlt_profile profile )
+	BMDDisplayMode getDisplayMode( mlt_profile profile, int vancLines )
 	{
 		IDeckLinkDisplayModeIterator* iter;
 		IDeckLinkDisplayMode* mode;
@@ -69,7 +70,7 @@ private:
 				mlt_log_verbose( getProducer(), "BMD mode %dx%d %.3f fps prog %d tff %d\n", width, height, fps, p, m_topFieldFirst );
 
 				if ( width == profile->width && p == profile->progressive
-					 && ( height == profile->height || ( height == 486 && profile->height == 480 ) )
+					 && ( height + vancLines == profile->height || ( height == 486 && profile->height == 480 + vancLines ) )
 					 && fps == mlt_profile_fps( profile ) )
 					result = mode->GetDisplayMode();
 			}
@@ -80,8 +81,11 @@ private:
 
 public:
 
-	mlt_producer getProducer()
-		{ return &m_producer; }
+	void setProducer( mlt_producer producer )
+		{ m_producer = producer; }
+
+	mlt_producer getProducer() const
+		{ return m_producer; }
 
 	~DeckLinkProducer()
 	{
@@ -98,7 +102,7 @@ public:
 		}
 	}
 
-	bool open( mlt_profile profile, unsigned card =  0 )
+	bool open( unsigned card =  0 )
 	{
 		IDeckLinkIterator* decklinkIterator = NULL;
 		try
@@ -155,13 +159,22 @@ public:
 			return false;
 		try
 		{
+			// Initialize some members
+			m_vancLines = mlt_properties_get_int( MLT_PRODUCER_PROPERTIES( getProducer() ), "vanc" );
+			if ( m_vancLines == -1 )
+				m_vancLines = profile->height <= 512 ? 26 : 32;
+
 			if ( !profile )
 				profile = mlt_service_profile( MLT_PRODUCER_SERVICE( getProducer() ) );
 
 			// Get the display mode
-			BMDDisplayMode displayMode = getDisplayMode( profile );
+			BMDDisplayMode displayMode = getDisplayMode( profile, m_vancLines );
 			if ( displayMode == (BMDDisplayMode) bmdDisplayModeNotSupported )
+			{
+				mlt_log_info( getProducer(), "profile = %dx%d %f fps %s\n", profile->width, profile->height,
+							  mlt_profile_fps( profile ), profile->progressive? "progressive" : "interlace" );
 				throw "Profile is not compatible with decklink.";
+			}
 
 			// Determine if supports input format detection
 #ifdef WIN32
@@ -209,8 +222,9 @@ public:
 
 	void stop()
 	{
-		if ( m_started )
+		if ( !m_started )
 			return;
+		m_started = false;
 
 		// Release the wait in getFrame
 		pthread_mutex_lock( &m_mutex );
@@ -224,8 +238,6 @@ public:
 		while ( mlt_frame frame = (mlt_frame) mlt_deque_pop_back( m_queue ) )
 			mlt_frame_close( frame );
 		pthread_mutex_unlock( &m_mutex );
-
-		m_started = false;
 	}
 
 	mlt_frame getFrame()
@@ -330,14 +342,42 @@ public:
 		{
 			if ( !( video->GetFlags() & bmdFrameHasNoInputSource ) )
 			{
-				int size = video->GetRowBytes() * video->GetHeight();
+				int size = video->GetRowBytes() * ( video->GetHeight() + m_vancLines );
 				void* image = mlt_pool_alloc( size );
 				void* buffer = 0;
+				unsigned char* p = (unsigned char*) image;
+				int n = size / 2;
+\
+				// Initialize VANC lines to nominal black
+				while ( --n )
+				{
+					*p ++ = 16;
+					*p ++ = 128;
+				}
 
+				// Capture VANC
+				if ( m_vancLines > 0 )
+				{
+					IDeckLinkVideoFrameAncillary* vanc = 0;
+					if ( video->GetAncillaryData( &vanc ) == S_OK && vanc )
+					{
+						for ( int i = 1; i < m_vancLines + 1; i++ )
+						{
+							if ( vanc->GetBufferForVerticalBlankingLine( i, &buffer ) == S_OK )
+								swab( (char*) buffer, (char*) image + ( i - 1 ) * video->GetRowBytes(), video->GetRowBytes() );
+							else
+								mlt_log_debug( getProducer(), "failed capture vanc line %d\n", i );
+						}
+						vanc->Release();
+					}
+				}
+
+				// Capture image
 				video->GetBytes( &buffer );
 				if ( image && buffer )
 				{
-					swab( (char*) buffer, (char*) image, size );
+					size =  video->GetRowBytes() * video->GetHeight();
+					swab( (char*) buffer, (char*) image + m_vancLines * video->GetRowBytes(), size );
 					mlt_frame_set_image( frame, (uint8_t*) image, size, mlt_pool_release );
 				}
 				else if ( image )
@@ -351,6 +391,26 @@ public:
 				mlt_log_verbose( getProducer(), "no signal\n" );
 				mlt_frame_close( frame );
 				frame = 0;
+			}
+
+			// Get timecode
+			IDeckLinkTimecode* timecode = 0;
+			if ( video->GetTimecode( bmdTimecodeVITC, &timecode ) == S_OK && timecode )
+			{
+				const char* timecodeString = 0;
+
+#ifdef WIN32
+				if ( timecode->GetString( (BSTR*) &timecodeString ) == S_OK )
+#else
+				if ( timecode->GetString( &timecodeString ) == S_OK )
+#endif
+				{
+					mlt_properties_set( MLT_FRAME_PROPERTIES( frame ), "meta.attr.vitc.markup", timecodeString );
+					mlt_log_debug( getProducer(), "timecode %s\n", timecodeString );
+				}
+				if ( timecodeString )
+					free( (void*) timecodeString );
+				timecode->Release();
 			}
 		}
 		else
@@ -421,8 +481,7 @@ public:
 			BMDTimeScale timescale;
 			mode->GetFrameRate( &duration, &timescale );
 			profile->width = mode->GetWidth();
-			profile->height = mode->GetHeight();
-			profile->height = profile->height == 486 ? 480 : profile->height;
+			profile->height = mode->GetHeight() + m_vancLines;
 			profile->frame_rate_num = timescale;
 			profile->frame_rate_den = duration;
 			if ( profile->width == 720 )
@@ -482,28 +541,54 @@ static int get_image( mlt_frame frame, uint8_t **buffer, mlt_image_format *forma
 static int get_frame( mlt_producer producer, mlt_frame_ptr frame, int index )
 {
 	DeckLinkProducer* decklink = (DeckLinkProducer*) producer->child;
+	mlt_position pos = mlt_producer_position( producer );
+	mlt_position end = mlt_producer_get_playtime( producer );
+	end = ( mlt_producer_get_length( producer ) < end ? mlt_producer_get_length( producer ) : end ) - 1;
 
-	// Get the next frame from the decklink object
-	*frame = decklink->getFrame();
+	// Re-open if needed
+	if ( !decklink && pos < end )
+	{
+		producer->child = decklink = new DeckLinkProducer();
+		decklink->setProducer( producer );
+		decklink->open(	mlt_properties_get_int( MLT_PRODUCER_PROPERTIES(producer), "resource" ) );
+	}
+
+	// Start if needed
+	if ( decklink )
+	{
+		decklink->start( mlt_service_profile( MLT_PRODUCER_SERVICE( producer ) ) );
+
+		// Get the next frame from the decklink object
+		if ( ( *frame = decklink->getFrame() ))
+		{
+			// Add audio and video getters
+			mlt_frame_push_audio( *frame, (void*) get_audio );
+			mlt_frame_push_get_image( *frame, get_image );
+		}
+	}
 	if ( !*frame )
-		*frame = mlt_frame_init( MLT_PRODUCER_SERVICE( producer ) );
+		*frame = mlt_frame_init( MLT_PRODUCER_SERVICE(producer) );
 
 	// Calculate the next timecode
 	mlt_frame_set_position( *frame, mlt_producer_position( producer ) );
 	mlt_producer_prepare_next( producer );
 
-	// Add audio and video getters
-	mlt_frame_push_audio( *frame, (void*) get_audio );
-	mlt_frame_push_get_image( *frame, get_image );
+	// Close DeckLink if at end
+	if ( pos >= end && decklink )
+	{
+		decklink->stop();
+		delete decklink;
+		producer->child = NULL;
+	}
 
 	return 0;
 }
 
 static void producer_close( mlt_producer producer )
 {
+	delete (DeckLinkProducer*) producer->child;
 	producer->close = NULL;
 	mlt_producer_close( producer );
-	delete (DeckLinkProducer*) producer->child;
 }
 
 extern "C" {
@@ -515,22 +600,25 @@ mlt_producer producer_decklink_init( mlt_profile profile, mlt_service_type type,
 {
 	// Allocate the producer
 	DeckLinkProducer* decklink = new DeckLinkProducer();
-	mlt_producer producer = NULL;
+	mlt_producer producer = (mlt_producer) calloc( 1, sizeof( *producer ) );
 
 	// If allocated and initializes
-	if ( decklink && !mlt_producer_init( decklink->getProducer(), decklink ) )
+	if ( decklink && !mlt_producer_init( producer, decklink ) )
 	{
-		if ( decklink->open( profile, arg? atoi( arg ) : 0 ) )
+		if ( decklink->open( arg? atoi( arg ) : 0 ) )
 		{
-			producer = decklink->getProducer();
 			mlt_properties properties = MLT_PRODUCER_PROPERTIES( producer );
+
+			// Close DeckLink and defer re-open to get_frame
+			delete decklink;
+			producer->child = NULL;
 
 			// Set callbacks
 			producer->close = (mlt_destructor) producer_close;
 			producer->get_frame = get_frame;
 
 			// Set properties
-			mlt_properties_set( properties, "resource", arg? arg : "0" );
+			mlt_properties_set( properties, "resource", (arg && strcmp( arg, ""))? arg : "0" );
 			mlt_properties_set_int( properties, "channels", 2 );
 			mlt_properties_set_int( properties, "buffer", 25 );
 			mlt_properties_set_int( properties, "prefill", 25 );
@@ -539,13 +627,6 @@ mlt_producer producer_decklink_init( mlt_profile profile, mlt_service_type type,
 			mlt_properties_set_int( properties, "length", INT_MAX );
 			mlt_properties_set_int( properties, "out", INT_MAX - 1 );
 			mlt_properties_set( properties, "eof", "loop" );
-
-			// Start immediately
-			if ( !decklink->start( profile ) )
-			{
-				producer_close( producer );
-				producer = NULL;
-			}
 		}
 	}
 

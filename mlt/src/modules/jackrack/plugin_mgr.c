@@ -83,7 +83,7 @@ plugin_mgr_get_object_file_plugins (plugin_mgr_t * plugin_mgr, const char * file
   dl_handle = dlopen (filename, RTLD_NOW|RTLD_GLOBAL);
   if (!dl_handle)
     {
-      mlt_log_warning( NULL, "%s: error opening shared object file '%s': %s\n",
+      mlt_log_info( NULL, "%s: error opening shared object file '%s': %s\n",
                __FUNCTION__, filename, dlerror());
       return;
     }
@@ -97,7 +97,7 @@ plugin_mgr_get_object_file_plugins (plugin_mgr_t * plugin_mgr, const char * file
   
   dlerr = dlerror();
   if (dlerr) {
-    mlt_log_warning( NULL, "%s: error finding ladspa_descriptor symbol in object file '%s': %s\n",
+    mlt_log_info( NULL, "%s: error finding ladspa_descriptor symbol in object file '%s': %s\n",
              __FUNCTION__, filename, dlerr);
     dlclose (dl_handle);
     return;
@@ -214,9 +214,14 @@ plugin_mgr_get_path_plugins (plugin_mgr_t * plugin_mgr)
   ladspa_path = g_strdup (getenv ("LADSPA_PATH"));
   if (!ladspa_path)
 #ifdef WIN32
-    ladspa_path = g_strdup ("lib\\ladspa");
+  {
+    ladspa_path = malloc (strlen (mlt_environment("MLT_DATA")) + strlen ("\\..\\..\\lib\\ladspa") + 1);
+    strcpy (ladspa_path, mlt_environment("MLT_DATA"));
+    strcat (ladspa_path, "\\..\\..\\lib\\ladspa");
+    printf("LADSPA_PATH=%s\n", ladspa_path);
+  }
 #else
-    ladspa_path = g_strdup ("/usr/local/lib/ladspa:/usr/lib/ladspa:/usr/lib64/ladspa");
+    ladspa_path = g_strdup ("lib/ladspa:/usr/local/lib/ladspa:/usr/lib/ladspa:/usr/lib64/ladspa");
 #endif
   
   dir = strtok (ladspa_path, ":");

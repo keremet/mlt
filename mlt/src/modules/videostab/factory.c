@@ -1,7 +1,6 @@
 /*
  * factory.c -- the factory method interfaces
- * Copyright (C) 2003-2004 Ushodaya Enterprises Limited
- * Author: Charles Yates <charles.yates@pandora.be>
+ * Copyright (c) 2011 Marco Gittler <g.marco@freenet.de>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -19,24 +18,27 @@
  */
 
 #include <string.h>
-#include <limits.h>
 #include <framework/mlt.h>
+#include <limits.h>
 
-extern mlt_producer producer_melt_file_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
-extern mlt_producer producer_melt_init( mlt_profile profile, mlt_service_type type, const char *id, char **argv );
+extern mlt_filter filter_videostab_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
+extern mlt_filter filter_videostab2_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
 
-static mlt_properties metadata( mlt_service_type type, const char *id, void *data )
+static mlt_properties videostab_metadata( mlt_service_type type, const char *id, void *data )
 {
 	char file[ PATH_MAX ];
-	snprintf( file, PATH_MAX, "%s/melt/%s", mlt_environment( "MLT_DATA" ), (char*) data );
+	snprintf( file, PATH_MAX, "%s/videostab/filter_%s.yml", mlt_environment( "MLT_DATA" ), id );
 	return mlt_properties_parse_yaml( file );
 }
 
 MLT_REPOSITORY
 {
-	MLT_REGISTER( producer_type, "melt", producer_melt_init );
-	MLT_REGISTER( producer_type, "melt_file", producer_melt_file_init );
-
-	MLT_REGISTER_METADATA( producer_type, "melt", metadata, "producer_melt.yml" );
-	MLT_REGISTER_METADATA( producer_type, "melt_file", metadata, "producer_melt_file.yml" );
+	MLT_REGISTER( filter_type, "videostab", filter_videostab_init );
+	MLT_REGISTER_METADATA( filter_type, "videostab", videostab_metadata, NULL );
+	MLT_REGISTER( filter_type, "videostab2", filter_videostab2_init );
+	MLT_REGISTER_METADATA( filter_type, "videostab2", videostab_metadata, NULL );
+	
 }
+
+
+

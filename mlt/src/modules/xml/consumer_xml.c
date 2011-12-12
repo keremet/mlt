@@ -25,6 +25,7 @@
 #include <unistd.h>
 #include <locale.h>
 #include <libxml/tree.h>
+#include <pthread.h>
 
 #define ID_SIZE 128
 
@@ -45,6 +46,7 @@ struct serialise_context_s
 	mlt_properties hide_map;
 	char *root;
 	char *store;
+	int no_meta;
 };
 typedef struct serialise_context_s* serialise_context;
 
@@ -52,7 +54,9 @@ typedef struct serialise_context_s* serialise_context;
 */
 
 static int consumer_start( mlt_consumer parent );
+static int consumer_stop( mlt_consumer parent );
 static int consumer_is_stopped( mlt_consumer this );
+static void *consumer_thread( void *arg );
 static void serialise_service( serialise_context context, mlt_service service, xmlNode *node );
 
 typedef enum 
@@ -155,9 +159,13 @@ mlt_consumer consumer_xml_init( mlt_profile profile, mlt_service_type type, cons
 	{
 		// Allow thread to be started/stopped
 		this->start = consumer_start;
+		this->stop = consumer_stop;
 		this->is_stopped = consumer_is_stopped;
 
 		mlt_properties_set( MLT_CONSUMER_PROPERTIES( this ), "resource", arg );
+		mlt_properties_set_int( MLT_CONSUMER_PROPERTIES( this ), "real_time", -1 );
+		mlt_properties_set_int( MLT_CONSUMER_PROPERTIES( this ), "prefill", 1 );
+		mlt_properties_set_int( MLT_CONSUMER_PROPERTIES( this ), "terminate_on_pause", 1 );
 
 		// Return the consumer produced
 		return this;
@@ -182,14 +190,15 @@ static void serialise_properties( serialise_context context, mlt_properties prop
 		if ( name != NULL &&
 			 name[ 0 ] != '_' &&
 			 mlt_properties_get_value( properties, i ) != NULL &&
-			 strcmp( name, "mlt" ) != 0 &&
-			 strcmp( name, "in" ) != 0 &&
-			 strcmp( name, "out" ) != 0 && 
-			 strcmp( name, "id" ) != 0 && 
-			 strcmp( name, "title" ) != 0 && 
-			 strcmp( name, "root" ) != 0 && 
-			 strcmp( name, "width" ) != 0 &&
-			 strcmp( name, "height" ) != 0 )
+			 ( !context->no_meta || strncmp( name, "meta.", 5 ) ) &&
+			 strcmp( name, "mlt" ) &&
+			 strcmp( name, "in" ) &&
+			 strcmp( name, "out" ) &&
+			 strcmp( name, "id" ) &&
+			 strcmp( name, "title" ) &&
+			 strcmp( name, "root" ) &&
+			 strcmp( name, "width" ) &&
+			 strcmp( name, "height" ) )
 		{
 			char *value = mlt_properties_get_value( properties, i );
 			int rootlen = strlen( context->root );
@@ -338,7 +347,8 @@ static void serialise_multitrack( serialise_context context, mlt_service service
 				xmlNewProp( track, _x("in"), _x(mlt_properties_get( properties, "in" )) );
 				xmlNewProp( track, _x("out"), _x(mlt_properties_get( properties, "out" )) );
 				serialise_store_properties( context, MLT_PRODUCER_PROPERTIES( producer ), track, context->store );
-				serialise_store_properties( context, MLT_PRODUCER_PROPERTIES( producer ), track, "meta." );
+				if ( !context->no_meta )
+					serialise_store_properties( context, MLT_PRODUCER_PROPERTIES( producer ), track, "meta." );
 				serialise_service_filters( context, MLT_PRODUCER_SERVICE( producer ), track );
 			}
 			
@@ -391,7 +401,8 @@ static void serialise_playlist( serialise_context context, mlt_service service, 
 
 		// Store application specific properties
 		serialise_store_properties( context, properties, child, context->store );
-		serialise_store_properties( context, properties, child, "meta." );
+		if ( !context->no_meta )
+			serialise_store_properties( context, properties, child, "meta." );
 
 		// Add producer to the map
 		mlt_properties_set_int( context->hide_map, id, mlt_properties_get_int( properties, "hide" ) );
@@ -429,7 +440,8 @@ static void serialise_playlist( serialise_context context, mlt_service service, 
 					if ( mlt_producer_is_cut( info.cut ) )
 					{
 						serialise_store_properties( context, MLT_PRODUCER_PROPERTIES( info.cut ), entry, context->store );
-						serialise_store_properties( context, MLT_PRODUCER_PROPERTIES( info.cut ), entry, "meta." );
+						if ( !context->no_meta )
+							serialise_store_properties( context, MLT_PRODUCER_PROPERTIES( info.cut ), entry, "meta." );
 						serialise_service_filters( context, MLT_PRODUCER_SERVICE( info.cut ), entry );
 					}
 				}
@@ -475,7 +487,8 @@ static void serialise_tractor( serialise_context context, mlt_service service, x
 
 		// Store application specific properties
 		serialise_store_properties( context, MLT_SERVICE_PROPERTIES( service ), child, context->store );
-		serialise_store_properties( context, MLT_SERVICE_PROPERTIES( service ), child, "meta." );
+		if ( !context->no_meta )
+			serialise_store_properties( context, MLT_SERVICE_PROPERTIES( service ), child, "meta." );
 
 		// Recurse on connected producer
 		serialise_service( context, mlt_service_producer( service ), child );
@@ -576,20 +589,20 @@ static void serialise_service( serialise_context context, mlt_service service, x
 			char *resource = mlt_properties_get( properties, "resource" );
 			
 			// Recurse on multitrack's tracks
-			if ( strcmp( resource, "<multitrack>" ) == 0 )
+			if ( resource && strcmp( resource, "<multitrack>" ) == 0 )
 			{
 				serialise_multitrack( context, service, node );
 				break;
 			}
 			
 			// Recurse on playlist's clips
-			else if ( strcmp( resource, "<playlist>" ) == 0 )
+			else if ( resource && strcmp( resource, "<playlist>" ) == 0 )
 			{
 				serialise_playlist( context, service, node );
 			}
 			
 			// Recurse on tractor's producer
-			else if ( strcmp( resource, "<tractor>" ) == 0 )
+			else if ( resource && strcmp( resource, "<tractor>" ) == 0 )
 			{
 				context->pass = 0;
 				serialise_tractor( context, service, node );
@@ -639,6 +652,9 @@ xmlDocPtr xml_make_doc( mlt_consumer consumer, mlt_service service )
 	// Indicate the numeric locale
 	xmlNewProp( root, _x("LC_NUMERIC"), _x( setlocale( LC_NUMERIC, NULL ) ) );
 
+	// Indicate the version
+	xmlNewProp( root, _x("version"), _x( mlt_version_get_string() ) );
+
 	// If we have root, then deal with it now
 	if ( mlt_properties_get( properties, "root" ) != NULL )
 	{
@@ -652,6 +668,7 @@ xmlDocPtr xml_make_doc( mlt_consumer consumer, mlt_service service )
 
 	// Assign the additional 'storage' pattern for properties
 	context->store = mlt_properties_get( MLT_CONSUMER_PROPERTIES( consumer ), "store" );
+	context->no_meta = mlt_properties_get_int( MLT_CONSUMER_PROPERTIES( consumer ), "no_meta" );
 
 	// Assign a title property
 	if ( mlt_properties_get( properties, "title" ) != NULL )
@@ -711,73 +728,174 @@ xmlDocPtr xml_make_doc( mlt_consumer consumer, mlt_service service )
 	return doc;
 }
 
-static int consumer_start( mlt_consumer this )
+
+static void output_xml( mlt_consumer this )
 {
-	xmlDocPtr doc = NULL;
-	
 	// Get the producer service
 	mlt_service service = mlt_service_producer( MLT_CONSUMER_SERVICE( this ) );
-	if ( service != NULL )
+	mlt_properties properties = MLT_CONSUMER_PROPERTIES( this );
+	char *resource =  mlt_properties_get( properties, "resource" );
+	xmlDocPtr doc = NULL;
+
+	if ( !service ) return;
+
+	// Set the title if provided
+	if ( mlt_properties_get( properties, "title" ) )
+		mlt_properties_set( MLT_SERVICE_PROPERTIES( service ), "title", mlt_properties_get( properties, "title" ) );
+	else if ( mlt_properties_get( MLT_SERVICE_PROPERTIES( service ), "title" ) == NULL )
+		mlt_properties_set( MLT_SERVICE_PROPERTIES( service ), "title", "Anonymous Submission" );
+
+	// Check for a root on the consumer properties and pass to service
+	if ( mlt_properties_get( properties, "root" ) )
+		mlt_properties_set( MLT_SERVICE_PROPERTIES( service ), "root", mlt_properties_get( properties, "root" ) );
+
+	// Specify roots in other cases...
+	if ( resource != NULL && mlt_properties_get( properties, "root" ) == NULL )
 	{
-		mlt_properties properties = MLT_CONSUMER_PROPERTIES( this );
-		char *resource =  mlt_properties_get( properties, "resource" );
-
-		// Set the title if provided
-		if ( mlt_properties_get( properties, "title" ) )
-			mlt_properties_set( MLT_SERVICE_PROPERTIES( service ), "title", mlt_properties_get( properties, "title" ) );
-		else if ( mlt_properties_get( MLT_SERVICE_PROPERTIES( service ), "title" ) == NULL )
-			mlt_properties_set( MLT_SERVICE_PROPERTIES( service ), "title", "Anonymous Submission" );
-
-		// Check for a root on the consumer properties and pass to service
-		if ( mlt_properties_get( properties, "root" ) )
-			mlt_properties_set( MLT_SERVICE_PROPERTIES( service ), "root", mlt_properties_get( properties, "root" ) );
-
-		// Specify roots in other cases...
-		if ( resource != NULL && mlt_properties_get( properties, "root" ) == NULL )
-		{
-			// Get the current working directory
-			char *cwd = getcwd( NULL, 0 );
-			mlt_properties_set( MLT_SERVICE_PROPERTIES( service ), "root", cwd );
-			free( cwd );
-		}
-
-		// Make the document
-		doc = xml_make_doc( this, service );
-
-		// Handle the output
-		if ( resource == NULL || !strcmp( resource, "" ) )
-		{
-			xmlDocFormatDump( stdout, doc, 1 );
-		}
-		else if ( strchr( resource, '.' ) == NULL )
-		{
-			xmlChar *buffer = NULL;
-			int length = 0;
-			xmlDocDumpMemoryEnc( doc, &buffer, &length, "utf-8" );
-			mlt_properties_set( properties, resource, _s(buffer) );
-#ifdef WIN32
-			xmlFreeFunc xmlFree = NULL;
-			xmlMemGet( &xmlFree, NULL, NULL, NULL);
-#endif
-			xmlFree( buffer );
-		}
-		else
-		{
-			xmlSaveFormatFileEnc( resource, doc, "utf-8", 1 );
-		}
-		
-		// Close the document
-		xmlFreeDoc( doc );
+		// Get the current working directory
+		char *cwd = getcwd( NULL, 0 );
+		mlt_properties_set( MLT_SERVICE_PROPERTIES( service ), "root", cwd );
+		free( cwd );
 	}
-	
-	mlt_consumer_stop( this );
 
-	mlt_consumer_stopped( this );
+	// Make the document
+	doc = xml_make_doc( this, service );
 
+	// Handle the output
+	if ( resource == NULL || !strcmp( resource, "" ) )
+	{
+		xmlDocFormatDump( stdout, doc, 1 );
+	}
+	else if ( strchr( resource, '.' ) == NULL )
+	{
+		xmlChar *buffer = NULL;
+		int length = 0;
+		xmlDocDumpMemoryEnc( doc, &buffer, &length, "utf-8" );
+		mlt_properties_set( properties, resource, _s(buffer) );
+#ifdef WIN32
+		xmlFreeFunc xmlFree = NULL;
+		xmlMemGet( &xmlFree, NULL, NULL, NULL);
+#endif
+		xmlFree( buffer );
+	}
+	else
+	{
+		xmlSaveFormatFileEnc( resource, doc, "utf-8", 1 );
+	}
+
+	// Close the document
+	xmlFreeDoc( doc );
+}
+static int consumer_start( mlt_consumer this )
+{
+	mlt_properties properties = MLT_CONSUMER_PROPERTIES( this );
+
+	if ( mlt_properties_get_int( properties, "all" ) )
+	{
+		// Check that we're not already running
+		if ( !mlt_properties_get_int( properties, "running" ) )
+		{
+			// Allocate a thread
+			pthread_t *thread = calloc( 1, sizeof( pthread_t ) );
+
+			// Assign the thread to properties
+			mlt_properties_set_data( properties, "thread", thread, sizeof( pthread_t ), free, NULL );
+
+			// Set the running state
+			mlt_properties_set_int( properties, "running", 1 );
+			mlt_properties_set_int( properties, "joined", 0 );
+
+			// Create the thread
+			pthread_create( thread, NULL, consumer_thread, this );
+		}
+	}
+	else
+	{
+		output_xml( this );
+		mlt_consumer_stop( this );
+		mlt_consumer_stopped( this );
+	}
 	return 0;
 }
 
 static int consumer_is_stopped( mlt_consumer this )
 {
-	return 1;
+	mlt_properties properties = MLT_CONSUMER_PROPERTIES( this );
+	return !mlt_properties_get_int( properties, "running" );
+}
+
+static int consumer_stop( mlt_consumer this )
+{
+	// Get the properties
+	mlt_properties properties = MLT_CONSUMER_PROPERTIES( this );
+
+	// Check that we're running
+	if ( !mlt_properties_get_int( properties, "joined" ) )
+	{
+		// Get the thread
+		pthread_t *thread = mlt_properties_get_data( properties, "thread", NULL );
+
+		// Stop the thread
+		mlt_properties_set_int( properties, "running", 0 );
+		mlt_properties_set_int( properties, "joined", 1 );
+
+		// Wait for termination
+		if ( thread )
+			pthread_join( *thread, NULL );
+	}
+
+	return 0;
+}
+
+static void *consumer_thread( void *arg )
+{
+	// Map the argument to the object
+	mlt_consumer this = arg;
+
+	// Get the properties
+	mlt_properties properties = MLT_CONSUMER_PROPERTIES( this );
+
+	// Convenience functionality
+	int terminate_on_pause = mlt_properties_get_int( properties, "terminate_on_pause" );
+	int terminated = 0;
+
+	// Frame and size
+	mlt_frame frame = NULL;
+
+	// Loop while running
+	while( !terminated && mlt_properties_get_int( properties, "running" ) )
+	{
+		// Get the frame
+		frame = mlt_consumer_rt_frame( this );
+
+		// Check for termination
+		if ( terminate_on_pause && frame != NULL )
+			terminated = mlt_properties_get_double( MLT_FRAME_PROPERTIES( frame ), "_speed" ) == 0.0;
+
+		// Check that we have a frame to work with
+		if ( frame )
+		{
+			int width = 0, height = 0;
+			int frequency = mlt_properties_get_int( properties, "frequency" );
+			int channels = mlt_properties_get_int( properties, "channels" );
+			int samples = 0;
+			mlt_image_format iformat = mlt_image_yuv422;
+			mlt_audio_format aformat = mlt_audio_s16;
+			uint8_t *buffer;
+
+			mlt_frame_get_image( frame, &buffer, &iformat, &width, &height, 0 );
+			mlt_frame_get_audio( frame, (void**) &buffer, &aformat, &frequency, &channels, &samples );
+
+			// Close the frame
+			mlt_events_fire( properties, "consumer-frame-show", frame, NULL );
+			mlt_frame_close( frame );
+		}
+	}
+	output_xml( this );
+
+	// Indicate that the consumer is stopped
+	mlt_properties_set_int( properties, "running", 0 );
+	mlt_consumer_stopped( this );
+
+	return NULL;
 }
