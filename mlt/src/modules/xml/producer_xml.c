@@ -22,9 +22,9 @@
 //       when the returned producer is closed).
 
 #include <framework/mlt.h>
+#include <framework/mlt_log.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
 #include <ctype.h>
 #include <unistd.h>
 
@@ -86,20 +86,40 @@ struct deserialise_context_s
 	int pass;
 	char *lc_numeric;
 	mlt_consumer consumer;
+	int multi_consumer;
+	int consumer_count;
 };
 typedef struct deserialise_context_s *deserialise_context;
 
+/** Trim the leading and trailing whitespace from a string in-place.
+*/
+static char* trim( char *s )
+{
+	int n;
+	if ( s && ( n = strlen( s ) ) )
+	{
+		int i = 0;
+		while ( i < n && isspace( s[i] ) ) i++;
+		while ( --n && isspace( s[n] ) );
+		n = n - i + 1;
+		if ( n > 0 )
+			memmove( s, s + i, n );
+		s[ n ] = 0;
+	}
+	return s;
+}
+
 /** Convert the numerical current branch address to a dot-delimited string.
 */
-static char *serialise_branch( deserialise_context this, char *s )
+static char *serialise_branch( deserialise_context context, char *s )
 {
 	int i;
 	
 	s[0] = 0;
-	for ( i = 0; i < this->depth; i++ )
+	for ( i = 0; i < context->depth; i++ )
 	{
 		int len = strlen( s );
-		snprintf( s + len, BRANCH_SIG_LEN - len, "%d.", this->branch[ i ] );
+		snprintf( s + len, BRANCH_SIG_LEN - len, "%d.", context->branch[ i ] );
 	}
 	return s;
 }
@@ -107,19 +127,19 @@ static char *serialise_branch( deserialise_context this, char *s )
 /** Push a service.
 */
 
-static int context_push_service( deserialise_context this, mlt_service that, enum service_type type )
+static int context_push_service( deserialise_context context, mlt_service that, enum service_type type )
 {
-	int ret = this->stack_service_size >= STACK_SIZE - 1;
+	int ret = context->stack_service_size >= STACK_SIZE - 1;
 	if ( ret == 0 )
 	{
-		this->stack_service[ this->stack_service_size ] = that;
-		this->stack_types[ this->stack_service_size++ ] = type;
+		context->stack_service[ context->stack_service_size ] = that;
+		context->stack_types[ context->stack_service_size++ ] = type;
 		
 		// Record the tree branch on which this service lives
 		if ( that != NULL && mlt_properties_get( MLT_SERVICE_PROPERTIES( that ), "_xml_branch" ) == NULL )
 		{
 			char s[ BRANCH_SIG_LEN ];
-			mlt_properties_set( MLT_SERVICE_PROPERTIES( that ), "_xml_branch", serialise_branch( this, s ) );
+			mlt_properties_set( MLT_SERVICE_PROPERTIES( that ), "_xml_branch", serialise_branch( context, s ) );
 		}
 	}
 	return ret;
@@ -128,16 +148,16 @@ static int context_push_service( deserialise_context this, mlt_service that, enu
 /** Pop a service.
 */
 
-static mlt_service context_pop_service( deserialise_context this, enum service_type *type )
+static mlt_service context_pop_service( deserialise_context context, enum service_type *type )
 {
 	mlt_service result = NULL;
 	
 	*type = invalid_type;
-	if ( this->stack_service_size > 0 )
+	if ( context->stack_service_size > 0 )
 	{
-		result = this->stack_service[ -- this->stack_service_size ];
+		result = context->stack_service[ -- context->stack_service_size ];
 		if ( type != NULL )
-			*type = this->stack_types[ this->stack_service_size ];
+			*type = context->stack_types[ context->stack_service_size ];
 	}
 	return result;
 }
@@ -145,22 +165,22 @@ static mlt_service context_pop_service( deserialise_context this, enum service_t
 /** Push a node.
 */
 
-static int context_push_node( deserialise_context this, xmlNodePtr node )
+static int context_push_node( deserialise_context context, xmlNodePtr node )
 {
-	int ret = this->stack_node_size >= STACK_SIZE - 1;
+	int ret = context->stack_node_size >= STACK_SIZE - 1;
 	if ( ret == 0 )
-		this->stack_node[ this->stack_node_size ++ ] = node;
+		context->stack_node[ context->stack_node_size ++ ] = node;
 	return ret;
 }
 
 /** Pop a node.
 */
 
-static xmlNodePtr context_pop_node( deserialise_context this )
+static xmlNodePtr context_pop_node( deserialise_context context )
 {
 	xmlNodePtr result = NULL;
-	if ( this->stack_node_size > 0 )
-		result = this->stack_node[ -- this->stack_node_size ];
+	if ( context->stack_node_size > 0 )
+		result = context->stack_node[ -- context->stack_node_size ];
 	return result;
 }
 
@@ -254,7 +274,7 @@ static int add_producer( deserialise_context context, mlt_service service, mlt_p
 				break;
 			default:
 				result = 0;
-				fprintf( stderr, "Producer defined inside something that isn't a container\n" );
+				mlt_log_warning( NULL, "[producer_xml] Producer defined inside something that isn't a container\n" );
 				break;
 		};
 
@@ -280,7 +300,7 @@ static int add_producer( deserialise_context context, mlt_service service, mlt_p
 /** Attach filters defined on that to this.
 */
 
-static void attach_filters( mlt_service this, mlt_service that )
+static void attach_filters( mlt_service service, mlt_service that )
 {
 	if ( that != NULL )
 	{
@@ -288,7 +308,7 @@ static void attach_filters( mlt_service this, mlt_service that )
 		mlt_filter filter = NULL;
 		for ( i = 0; ( filter = mlt_service_filter( that, i ) ) != NULL; i ++ )
 		{
-			mlt_service_attach( this, filter );
+			mlt_service_attach( service, filter );
 			attach_filters( MLT_FILTER_SERVICE( filter ), MLT_FILTER_SERVICE( filter ) );
 		}
 	}
@@ -383,7 +403,7 @@ static void on_end_tractor( deserialise_context context, const xmlChar *name )
 	}
 	else
 	{
-		fprintf( stderr, "Invalid state for tractor\n" );
+		mlt_log_error( NULL, "[producer_xml] Invalid state for tractor\n" );
 	}
 }
 
@@ -426,7 +446,7 @@ static void on_start_multitrack( deserialise_context context, const xmlChar *nam
 	}
 	else
 	{
-		fprintf( stderr, "Invalid multitrack position\n" );
+		mlt_log_error( NULL, "[producer_xml] Invalid multitrack position\n" );
 	}
 }
 
@@ -437,7 +457,7 @@ static void on_end_multitrack( deserialise_context context, const xmlChar *name 
 	mlt_service service = context_pop_service( context, &type );
 
 	if ( service == NULL || type != mlt_multitrack_type )
-		fprintf( stderr, "End multitrack in the wrong state...\n" );
+		mlt_log_error( NULL, "[producer_xml] End multitrack in the wrong state...\n" );
 }
 
 static void on_start_playlist( deserialise_context context, const xmlChar *name, const xmlChar **atts)
@@ -486,7 +506,7 @@ static void on_end_playlist( deserialise_context context, const xmlChar *name )
 	}
 	else
 	{
-		fprintf( stderr, "Invalid state of playlist end %d\n", type );
+		mlt_log_error( NULL, "[producer_xml] Invalid state of playlist end %d\n", type );
 	}
 }
 
@@ -553,19 +573,19 @@ static void on_end_producer( deserialise_context context, const xmlChar *name )
 		mlt_service producer = NULL;
 
 		qualify_property( context, properties, "resource" );
-		char *resource = mlt_properties_get( properties, "resource" );
+		char *resource = trim( mlt_properties_get( properties, "resource" ) );
 
 		// Let Kino-SMIL src be a synonym for resource
 		if ( resource == NULL )
 		{
 			qualify_property( context, properties, "src" );
-			resource = mlt_properties_get( properties, "src" );
+			resource = trim( mlt_properties_get( properties, "src" ) );
 		}
 
 		// Instantiate the producer
 		if ( mlt_properties_get( properties, "mlt_service" ) != NULL )
 		{
-			char *service_name = mlt_properties_get( properties, "mlt_service" );
+			char *service_name = trim( mlt_properties_get( properties, "mlt_service" ) );
 			if ( resource )
 			{
 				char *temp = calloc( 1, strlen( service_name ) + strlen( resource ) + 2 );
@@ -582,20 +602,25 @@ static void on_end_producer( deserialise_context context, const xmlChar *name )
 		}
 
 		// Just in case the plugin requested doesn't exist...
-		if ( producer == NULL && resource != NULL )
+		if ( !producer && resource )
 			producer = MLT_SERVICE( mlt_factory_producer( context->profile, NULL, resource ) );
-	
-		if ( producer == NULL )
+		if ( !producer )
+			mlt_log_error( NULL, "[producer_xml] failed to load producer \"%s\"\n", resource );
+		if ( !producer )
 			producer = MLT_SERVICE( mlt_factory_producer( context->profile, NULL, "+INVALID.txt" ) );
-
-		if ( producer == NULL )
+		if ( !producer )
 			producer = MLT_SERVICE( mlt_factory_producer( context->profile, NULL, "colour:red" ) );
+		if ( !producer )
+		{
+			mlt_service_close( service );
+			return;
+		}
 
 		// Track this producer
 		track_service( context->destructors, producer, (mlt_destructor) mlt_producer_close );
 		mlt_properties_set_lcnumeric( MLT_SERVICE_PROPERTIES( producer ), context->lc_numeric );
 
-		// Propogate the properties
+		// Propagate the properties
 		qualify_property( context, properties, "resource" );
 		qualify_property( context, properties, "luma" );
 		qualify_property( context, properties, "luma.resource" );
@@ -662,7 +687,7 @@ static void on_end_producer( deserialise_context context, const xmlChar *name )
 					// Get the parent properties
 					properties = MLT_SERVICE_PROPERTIES( parent );
 				
-					char *resource = mlt_properties_get( properties, "resource" );
+					char *resource = trim( mlt_properties_get( properties, "resource" ) );
 				
 					// Put the parent producer back
 					context_push_service( context, parent, type );
@@ -721,7 +746,7 @@ static void on_start_blank( deserialise_context context, const xmlChar *name, co
 	}
 	else
 	{
-		fprintf( stderr, "blank without a playlist - a definite no no\n" );
+		mlt_log_error( NULL, "[producer_xml] blank without a playlist - a definite no no\n" );
 	}
 }
 
@@ -775,7 +800,7 @@ static void on_start_entry( deserialise_context context, const xmlChar *name, co
 		}
 		else
 		{
-			fprintf( stderr, "Entry not part of a playlist...\n" );
+			mlt_log_error( NULL, "[producer_xml] Entry not part of a playlist...\n" );
 		}
 
 		context_push_service( context, parent, parent_type );
@@ -795,7 +820,7 @@ static void on_end_entry( deserialise_context context, const xmlChar *name )
 
 	if ( entry == NULL && entry_type != mlt_entry_type )
 	{
-		fprintf( stderr, "Invalid state at end of entry\n" );
+		mlt_log_error( NULL, "[producer_xml] Invalid state at end of entry\n" );
 	}
 }
 
@@ -845,7 +870,7 @@ static void on_end_track( deserialise_context context, const xmlChar *name )
 		else if ( parent_type == mlt_multitrack_type )
 			multitrack = MLT_MULTITRACK( parent );
 		else
-			fprintf( stderr, "track contained in an invalid container\n" );
+			mlt_log_error( NULL, "[producer_xml] track contained in an invalid container\n" );
 
 		if ( multitrack != NULL )
 		{
@@ -890,7 +915,7 @@ static void on_end_track( deserialise_context context, const xmlChar *name )
 	}
 	else
 	{
-		fprintf( stderr, "Invalid state at end of track\n" );
+		mlt_log_error( NULL, "[producer_xml] Invalid state at end of track\n" );
 	}
 }
 
@@ -920,8 +945,18 @@ static void on_end_filter( deserialise_context context, const xmlChar *name )
 
 	if ( service != NULL && type == mlt_dummy_filter_type )
 	{
-		mlt_service filter = MLT_SERVICE( mlt_factory_filter( context->profile, mlt_properties_get( properties, "mlt_service" ), NULL ) );
+		char *id = trim( mlt_properties_get( properties, "mlt_service" ) );
+		mlt_service filter = MLT_SERVICE( mlt_factory_filter( context->profile, id, NULL ) );
 		mlt_properties filter_props = MLT_SERVICE_PROPERTIES( filter );
+
+		if ( !filter )
+		{
+			mlt_log_error( NULL, "[producer_xml] failed to load filter \"%s\"\n", id );
+			if ( parent )
+				context_push_service( context, parent, parent_type );
+			mlt_service_close( service );
+			return;
+		}
 
 		track_service( context->destructors, filter, (mlt_destructor) mlt_filter_close );
 		mlt_properties_set_lcnumeric( MLT_SERVICE_PROPERTIES( filter ), context->lc_numeric );
@@ -958,7 +993,7 @@ static void on_end_filter( deserialise_context context, const xmlChar *name )
 		}
 		else
 		{
-			fprintf( stderr, "filter closed with invalid parent...\n" );
+			mlt_log_error( NULL, "[producer_xml] filter closed with invalid parent...\n" );
 		}
 
 		// Close the dummy filter service
@@ -966,7 +1001,7 @@ static void on_end_filter( deserialise_context context, const xmlChar *name )
 	}
 	else
 	{
-		fprintf( stderr, "Invalid top of stack on filter close\n" );
+		mlt_log_error( NULL, "[producer_xml] Invalid top of stack on filter close\n" );
 	}
 }
 
@@ -996,10 +1031,18 @@ static void on_end_transition( deserialise_context context, const xmlChar *name 
 
 	if ( service != NULL && type == mlt_dummy_transition_type )
 	{
-		char *id = mlt_properties_get( properties, "mlt_service" );
+		char *id = trim( mlt_properties_get( properties, "mlt_service" ) );
 		mlt_service effect = MLT_SERVICE( mlt_factory_transition( context->profile, id, NULL ) );
 		mlt_properties effect_props = MLT_SERVICE_PROPERTIES( effect );
 
+		if ( !effect )
+		{
+			mlt_log_error( NULL, "[producer_xml] failed to load transition \"%s\"\n", id );
+			if ( parent )
+				context_push_service( context, parent, parent_type );
+			mlt_service_close( service );
+			return;
+		}
 		track_service( context->destructors, effect, (mlt_destructor) mlt_transition_close );
 		mlt_properties_set_lcnumeric( MLT_SERVICE_PROPERTIES( effect ), context->lc_numeric );
 
@@ -1022,16 +1065,16 @@ static void on_end_transition( deserialise_context context, const xmlChar *name 
 				mlt_field field = mlt_tractor_field( MLT_TRACTOR( parent ) );
 				if ( mlt_properties_get_int( properties, "a_track" ) == mlt_properties_get_int( properties, "b_track" ) )
 					mlt_properties_set_int( properties, "b_track", mlt_properties_get_int( properties, "a_track" ) + 1 );
-				mlt_field_plant_transition( field, MLT_TRANSITION( effect ), 
+				mlt_field_plant_transition( field, MLT_TRANSITION( effect ),
 											mlt_properties_get_int( properties, "a_track" ),
 											mlt_properties_get_int( properties, "b_track" ) );
-				mlt_transition_set_in_and_out( MLT_TRANSITION( effect ), 
+				mlt_transition_set_in_and_out( MLT_TRANSITION( effect ),
 										   mlt_properties_get_int( properties, "in" ),
 										   mlt_properties_get_int( properties, "out" ) );
 			}
 			else
 			{
-				fprintf( stderr, "Misplaced transition - ignoring\n" );
+				mlt_log_warning( NULL, "[producer_xml] Misplaced transition - ignoring\n" );
 			}
 
 			// Put the parent back on the stack
@@ -1039,7 +1082,7 @@ static void on_end_transition( deserialise_context context, const xmlChar *name 
 		}
 		else
 		{
-			fprintf( stderr, "transition closed with invalid parent...\n" );
+			mlt_log_error( NULL, "[producer_xml] transition closed with invalid parent...\n" );
 		}
 
 		// Close the dummy filter service
@@ -1047,7 +1090,7 @@ static void on_end_transition( deserialise_context context, const xmlChar *name 
 	}
 	else
 	{
-		fprintf( stderr, "Invalid top of stack on transition close\n" );
+		mlt_log_error( NULL, "[producer_xml] Invalid top of stack on transition close\n" );
 	}
 }
 
@@ -1079,24 +1122,48 @@ static void on_end_consumer( deserialise_context context, const xmlChar *name )
 		{
 			mlt_properties properties = MLT_SERVICE_PROPERTIES( service );
 			qualify_property( context, properties, "resource" );
-			char *resource = mlt_properties_get( properties, "resource" );
+			qualify_property( context, properties, "target" );
+			char *resource = trim( mlt_properties_get( properties, "resource" ) );
 
-			// Instantiate the consumer
-			context->consumer = mlt_factory_consumer( context->profile, mlt_properties_get( properties, "mlt_service" ), resource );
-			if ( context->consumer )
+			if ( context->multi_consumer > 1 )
 			{
-				// Track this consumer
-				track_service( context->destructors, MLT_CONSUMER_SERVICE(context->consumer), (mlt_destructor) mlt_consumer_close );
-				mlt_properties_set_lcnumeric( MLT_CONSUMER_PROPERTIES(context->consumer), context->lc_numeric );
-
-				// Propogate the properties
-				qualify_property( context, properties, "target" );
-
-				// Inherit the properties
-				mlt_properties_inherit( MLT_CONSUMER_PROPERTIES(context->consumer), properties );
+				// Instantiate the multi consumer
+				if ( !context->consumer )
+				{
+					context->consumer = mlt_factory_consumer( context->profile, "multi", NULL );
+					if ( context->consumer )
+					{
+						// Track this consumer
+						track_service( context->destructors, MLT_CONSUMER_SERVICE(context->consumer), (mlt_destructor) mlt_consumer_close );
+						mlt_properties_set_lcnumeric( MLT_CONSUMER_PROPERTIES(context->consumer), context->lc_numeric );
+					}
+				}
+				if ( context->consumer )
+				{
+					// Set this service instance on multi consumer
+					char key[20];
+					snprintf( key, sizeof(key), "%d", context->consumer_count++ );
+					mlt_properties_set_data( MLT_CONSUMER_PROPERTIES(context->consumer), key, service, 0,
+						(mlt_destructor) mlt_service_close, NULL );
+				}
 			}
-			// Close the dummy
-			mlt_service_close( service );
+			else
+			{
+				// Instantiate the consumer
+				char *id = trim( mlt_properties_get( properties, "mlt_service" ) );
+				context->consumer = mlt_factory_consumer( context->profile, id, resource );
+				if ( context->consumer )
+				{
+					// Track this consumer
+					track_service( context->destructors, MLT_CONSUMER_SERVICE(context->consumer), (mlt_destructor) mlt_consumer_close );
+					mlt_properties_set_lcnumeric( MLT_CONSUMER_PROPERTIES(context->consumer), context->lc_numeric );
+
+					// Inherit the properties
+					mlt_properties_inherit( MLT_CONSUMER_PROPERTIES(context->consumer), properties );
+				}
+				// Close the dummy
+				mlt_service_close( service );
+			}
 		}
 	}
 }
@@ -1129,7 +1196,7 @@ static void on_start_property( deserialise_context context, const xmlChar *name,
 	}
 	else
 	{
-		fprintf( stderr, "Property without a service '%s'?\n", ( const char * )name );
+		mlt_log_error( NULL, "[producer_xml] Property without a service '%s'?\n", ( const char * )name );
 	}
 }
 
@@ -1170,7 +1237,7 @@ static void on_end_property( deserialise_context context, const xmlChar *name )
 	}
 	else
 	{
-		fprintf( stderr, "Property without a service '%s'??\n", (const char *)name );
+		mlt_log_error( NULL, "[producer_xml] Property without a service '%s'??\n", (const char *)name );
 	}
 }
 
@@ -1179,13 +1246,14 @@ static void on_start_element( void *ctx, const xmlChar *name, const xmlChar **at
 	struct _xmlParserCtxt *xmlcontext = ( struct _xmlParserCtxt* )ctx;
 	deserialise_context context = ( deserialise_context )( xmlcontext->_private );
 	
-//printf("on_start_element: %s\n", name );
 	if ( context->pass == 0 )
 	{
 		if ( xmlStrcmp( name, _x("mlt") ) == 0 ||
 		     xmlStrcmp( name, _x("profile") ) == 0 ||
 		     xmlStrcmp( name, _x("profileinfo") ) == 0 )
 			on_start_profile( context, name, atts );
+		if ( xmlStrcmp( name, _x("consumer") ) == 0 )
+			context->multi_consumer++;
 		return;
 	}
 	context->branch[ context->depth ] ++;
@@ -1252,7 +1320,6 @@ static void on_end_element( void *ctx, const xmlChar *name )
 	struct _xmlParserCtxt *xmlcontext = ( struct _xmlParserCtxt* )ctx;
 	deserialise_context context = ( deserialise_context )( xmlcontext->_private );
 	
-//printf("on_end_element: %s\n", name );
 	if ( context->is_value == 1 && context->pass == 1 && xmlStrcmp( name, _x("property") ) != 0 )
 		context_pop_node( context );
 	else if ( xmlStrcmp( name, _x("multitrack") ) == 0 )
@@ -1400,6 +1467,28 @@ static xmlEntityPtr on_get_entity( void *ctx, const xmlChar* name )
 	return e;
 }
 
+static void	on_error( void * ctx, const char * msg, ... )
+{
+	struct _xmlError* err_ptr = xmlCtxtGetLastError( ctx );
+
+	switch( err_ptr->level )
+	{
+	case XML_ERR_WARNING:
+		mlt_log_warning( NULL, "[producer_xml] parse warning: %s\trow: %d\tcol: %d\n",
+				         err_ptr->message, err_ptr->line, err_ptr->int2 );
+		break;
+	case XML_ERR_ERROR:
+		mlt_log_error( NULL, "[producer_xml] parse error: %s\trow: %d\tcol: %d\n",
+				       err_ptr->message, err_ptr->line, err_ptr->int2 );
+		break;
+	default:
+	case XML_ERR_FATAL:
+		mlt_log_fatal( NULL, "[producer_xml] parse fatal: %s\trow: %d\tcol: %d\n",
+				       err_ptr->message, err_ptr->line, err_ptr->int2 );
+		break;
+	}
+}
+
 /** Convert a hexadecimal character to its value.
 */
 static int tohex( char p )
@@ -1538,8 +1627,11 @@ mlt_producer producer_xml_init( mlt_profile profile, mlt_service_type servtype, 
 	// We need to track the number of registered filters
 	mlt_properties_set_int( context->destructors, "registered", 0 );
 
-	// Setup SAX callbacks
+	// Setup SAX callbacks for first pass
 	sax->startElement = on_start_element;
+	sax->warning = on_error;
+	sax->error = on_error;
+	sax->fatalError = on_error;
 
 	// Setup libxml2 SAX parsing
 	xmlInitParser(); 
@@ -1567,6 +1659,7 @@ mlt_producer producer_xml_init( mlt_profile profile, mlt_service_type servtype, 
 	xmlcontext->sax = sax;
 	xmlcontext->_private = ( void* )context;	
 	xmlParseDocument( xmlcontext );
+	well_formed = xmlcontext->wellFormed;
 	
 	// Cleanup after parsing
 	xmlcontext->sax = NULL;
@@ -1574,6 +1667,19 @@ mlt_producer producer_xml_init( mlt_profile profile, mlt_service_type servtype, 
 	xmlFreeParserCtxt( xmlcontext );
 	context->stack_node_size = 0;
 	context->stack_service_size = 0;
+
+	// Bad xml - clean up and return NULL
+	if ( !well_formed )
+	{
+		mlt_properties_close( context->producer_map );
+		mlt_properties_close( context->destructors );
+		mlt_properties_close( context->params );
+		xmlFreeDoc( context->entity_doc );
+		free( context );
+		free( sax );
+		free( filename );
+		return NULL;
+	}
 
 	// Setup the second pass
 	context->pass ++;
@@ -1595,7 +1701,7 @@ mlt_producer producer_xml_init( mlt_profile profile, mlt_service_type servtype, 
 		return NULL;
 	}
 
-	// Setup SAX callbacks
+	// Setup SAX callbacks for second pass
 	sax->endElement = on_end_element;
 	sax->characters = on_characters;
 	sax->cdataBlock = on_characters;

@@ -47,6 +47,7 @@ private:
 	int              m_topFieldFirst;
 	int              m_colorspace;
 	int              m_vancLines;
+	mlt_cache        m_cache;
 
 	BMDDisplayMode getDisplayMode( mlt_profile profile, int vancLines )
 	{
@@ -89,17 +90,18 @@ public:
 
 	~DeckLinkProducer()
 	{
-		if ( m_decklinkInput )
-			m_decklinkInput->Release();
-		if ( m_decklink )
-			m_decklink->Release();
 		if ( m_queue )
 		{
 			stop();
 			mlt_deque_close( m_queue );
 			pthread_mutex_destroy( &m_mutex );
 			pthread_cond_destroy( &m_condition );
+			mlt_cache_close( m_cache );
 		}
+		if ( m_decklinkInput )
+			m_decklinkInput->Release();
+		if ( m_decklink )
+			m_decklink->Release();
 	}
 
 	bool open( unsigned card =  0 )
@@ -142,6 +144,10 @@ public:
 			m_started = false;
 			m_dropped = 0;
 			m_isBuffering = true;
+			m_cache = mlt_cache_init();
+
+			// 3 covers YADIF and increasing framerate use cases
+			mlt_cache_set_size( m_cache, 3 );
 		}
 		catch ( const char *error )
 		{
@@ -246,6 +252,8 @@ public:
 		struct timeval now;
 		struct timespec tm;
 		double fps = mlt_producer_get_fps( getProducer() );
+		mlt_position position = mlt_producer_position( getProducer() );
+		mlt_cache_item cached = mlt_cache_get( m_cache, (void*) position );
 
 		// Allow the buffer to fill to the requested initial buffer level.
 		if ( m_isBuffering )
@@ -270,24 +278,36 @@ public:
 			pthread_mutex_unlock( &m_mutex );
 		}
 
-		// Wait if queue is empty
-		pthread_mutex_lock( &m_mutex );
-		while ( mlt_deque_count( m_queue ) < 1 )
+		if ( cached )
 		{
-			// Wait up to twice frame duration
-			gettimeofday( &now, NULL );
-			long usec = now.tv_sec * 1000000 + now.tv_usec;
-			usec += 2000000 / fps;
-			tm.tv_sec = usec / 1000000;
-			tm.tv_nsec = (usec % 1000000) * 1000;
-			if ( pthread_cond_timedwait( &m_condition, &m_mutex, &tm ) )
-				// Stop waiting if error (timed out)
-				break;
+			// Copy cached frame instead of pulling from queue
+			frame = mlt_frame_clone( (mlt_frame) mlt_cache_item_data( cached, NULL ), 0 );
+			mlt_cache_item_close( cached );
 		}
+		else
+		{
+			// Wait if queue is empty
+			pthread_mutex_lock( &m_mutex );
+			while ( mlt_deque_count( m_queue ) < 1 )
+			{
+				// Wait up to twice frame duration
+				gettimeofday( &now, NULL );
+				long usec = now.tv_sec * 1000000 + now.tv_usec;
+				usec += 2000000 / fps;
+				tm.tv_sec = usec / 1000000;
+				tm.tv_nsec = (usec % 1000000) * 1000;
+				if ( pthread_cond_timedwait( &m_condition, &m_mutex, &tm ) )
+					// Stop waiting if error (timed out)
+					break;
+			}
+			frame = ( mlt_frame ) mlt_deque_pop_front( m_queue );
+			pthread_mutex_unlock( &m_mutex );
 
-		// Get the first frame from the queue
-		frame = ( mlt_frame ) mlt_deque_pop_front( m_queue );
-		pthread_mutex_unlock( &m_mutex );
+			// add to cache
+			if ( frame )
+				mlt_cache_put( m_cache, (void*) position, mlt_frame_clone( frame, 1 ), 0,
+					(mlt_destructor) mlt_frame_close );
+		}
 
 		// Set frame timestamp and properties
 		if ( frame )
@@ -315,6 +335,9 @@ public:
 			mlt_properties_set_int( properties, "audio_channels",
 				mlt_properties_get_int( MLT_PRODUCER_PROPERTIES( getProducer() ), "channels" ) );
 		}
+		else
+			mlt_log_warning( getProducer(), "buffer underrun\n" );
+
 		return frame;
 	}
 

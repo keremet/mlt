@@ -455,7 +455,7 @@ int mlt_frame_get_image( mlt_frame self, uint8_t **buffer, mlt_image_format *for
 		{
 			mlt_properties_set_int( properties, "width", *width );
 			mlt_properties_set_int( properties, "height", *height );
-			if ( self->convert_image && *buffer )
+			if ( self->convert_image && *buffer && requested_format != mlt_image_none )
 				self->convert_image( self, buffer, format, requested_format );
 			mlt_properties_set_int( properties, "format", *format );
 		}
@@ -471,7 +471,7 @@ int mlt_frame_get_image( mlt_frame self, uint8_t **buffer, mlt_image_format *for
 		*buffer = mlt_properties_get_data( properties, "image", NULL );
 		*width = mlt_properties_get_int( properties, "width" );
 		*height = mlt_properties_get_int( properties, "height" );
-		if ( self->convert_image && *buffer )
+		if ( self->convert_image && *buffer && requested_format != mlt_image_none )
 		{
 			self->convert_image( self, buffer, format, requested_format );
 			mlt_properties_set_int( properties, "format", *format );
@@ -670,7 +670,7 @@ int mlt_frame_get_audio( mlt_frame self, void **buffer, mlt_audio_format *format
 		mlt_properties_set_int( properties, "audio_channels", *channels );
 		mlt_properties_set_int( properties, "audio_samples", *samples );
 		mlt_properties_set_int( properties, "audio_format", *format );
-		if ( self->convert_audio )
+		if ( self->convert_audio && *buffer && requested_format != mlt_audio_none )
 			self->convert_audio( self, buffer, format, requested_format );
 	}
 	else if ( mlt_properties_get_data( properties, "audio", NULL ) )
@@ -680,7 +680,7 @@ int mlt_frame_get_audio( mlt_frame self, void **buffer, mlt_audio_format *format
 		*frequency = mlt_properties_get_int( properties, "audio_frequency" );
 		*channels = mlt_properties_get_int( properties, "audio_channels" );
 		*samples = mlt_properties_get_int( properties, "audio_samples" );
-		if ( self->convert_audio )
+		if ( self->convert_audio && *buffer && requested_format != mlt_audio_none )
 			self->convert_audio( self, buffer, format, requested_format );
 	}
 	else
@@ -976,4 +976,68 @@ mlt_properties mlt_frame_unique_properties( mlt_frame self, mlt_service service 
 	}
 
 	return instance_props;
+}
+
+/** Make a copy of a frame.
+ *
+ * This does not copy the get_image/get_audio processing stacks or any
+ * data properties other than the audio and image.
+ *
+ * \public \memberof mlt_frame_s
+ * \param self the frame to clone
+ * \param is_deep a boolean to indicate whether to make a deep copy of the audio
+ * and video data chunks or to make a shallow copy by pointing to the supplied frame
+ * \return a almost-complete copy of the frame
+ * \todo copy the processing deques
+ */
+
+mlt_frame mlt_frame_clone( mlt_frame self, int is_deep )
+{
+	mlt_frame new_frame = mlt_frame_init( NULL );
+	mlt_properties properties = MLT_FRAME_PROPERTIES( self );
+	mlt_properties new_props = MLT_FRAME_PROPERTIES( new_frame );
+	void *data, *copy;
+	int size;
+
+	mlt_properties_inherit( new_props, properties );
+	if ( is_deep )
+	{
+		data = mlt_properties_get_data( properties, "audio", &size );
+		if ( data )
+		{
+			if ( !size )
+				size = mlt_audio_format_size( mlt_properties_get_int( properties, "audio_format" ),
+					mlt_properties_get_int( properties, "audio_samples" ),
+					mlt_properties_get_int( properties, "audio_channels" ) );
+			copy = mlt_pool_alloc( size );
+			memcpy( copy, data, size );
+			mlt_properties_set_data( new_props, "audio", copy, size, mlt_pool_release, NULL );
+		}
+		data = mlt_properties_get_data( properties, "image", &size );
+		if ( data )
+		{
+			if ( ! size )
+				size = mlt_image_format_size( mlt_properties_get_int( properties, "format" ),
+					mlt_properties_get_int( properties, "width" ),
+					mlt_properties_get_int( properties, "height" ), NULL );
+			copy = mlt_pool_alloc( size );
+			memcpy( copy, data, size );
+			mlt_properties_set_data( new_props, "image", copy, size, mlt_pool_release, NULL );
+		}
+	}
+	else
+	{
+		// This frame takes a reference on the original frame since the data is a shallow copy.
+		mlt_properties_inc_ref( properties );
+		mlt_properties_set_data( new_props, "_cloned_frame", self, 0,
+			(mlt_destructor) mlt_frame_close, NULL );
+
+		// Copy properties
+		data = mlt_properties_get_data( properties, "audio", &size );
+		mlt_properties_set_data( new_props, "audio", data, size, NULL, NULL );
+		data = mlt_properties_get_data( properties, "image", &size );
+		mlt_properties_set_data( new_props, "image", data, size, NULL, NULL );
+	}
+
+	return new_frame;
 }

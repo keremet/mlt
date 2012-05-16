@@ -22,6 +22,7 @@
 #include <string.h>
 #include <limits.h>
 
+extern mlt_consumer consumer_multi_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
 extern mlt_consumer consumer_null_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
 extern mlt_filter filter_audiochannels_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
 extern mlt_filter filter_audioconvert_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
@@ -31,6 +32,7 @@ extern mlt_filter filter_channelcopy_init( mlt_profile profile, mlt_service_type
 extern mlt_filter filter_crop_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
 extern mlt_filter filter_data_feed_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
 extern mlt_filter filter_data_show_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
+extern mlt_filter filter_fieldorder_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
 extern mlt_filter filter_gamma_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
 extern mlt_filter filter_greyscale_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
 extern mlt_filter filter_imageconvert_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
@@ -66,6 +68,7 @@ static mlt_properties metadata( mlt_service_type type, const char *id, void *dat
 
 MLT_REPOSITORY
 {
+	MLT_REGISTER( consumer_type, "multi", consumer_multi_init );
 	MLT_REGISTER( consumer_type, "null", consumer_null_init );
 	MLT_REGISTER( filter_type, "audiochannels", filter_audiochannels_init );
 	MLT_REGISTER( filter_type, "audioconvert", filter_audioconvert_init );
@@ -76,6 +79,7 @@ MLT_REPOSITORY
     MLT_REGISTER( filter_type, "crop", filter_crop_init );
 	MLT_REGISTER( filter_type, "data_feed", filter_data_feed_init );
 	MLT_REGISTER( filter_type, "data_show", filter_data_show_init );
+	MLT_REGISTER( filter_type, "fieldorder", filter_fieldorder_init );
 	MLT_REGISTER( filter_type, "gamma", filter_gamma_init );
 	MLT_REGISTER( filter_type, "greyscale", filter_greyscale_init );
 	MLT_REGISTER( filter_type, "grayscale", filter_greyscale_init );
@@ -105,12 +109,14 @@ MLT_REPOSITORY
 	MLT_REGISTER( transition_type, "mix", transition_mix_init );
 	MLT_REGISTER( transition_type, "region", transition_region_init );
 
+	MLT_REGISTER_METADATA( consumer_type, "multi", metadata, "consumer_multi.yml" );
 	MLT_REGISTER_METADATA( filter_type, "audiowave", metadata, "filter_audiowave.yml" );
 	MLT_REGISTER_METADATA( filter_type, "brightness", metadata, "filter_brightness.yml" );
 	MLT_REGISTER_METADATA( filter_type, "channelcopy", metadata, "filter_channelcopy.yml" );
 	MLT_REGISTER_METADATA( filter_type, "channelswap", metadata, "filter_channelcopy.yml" );
 	MLT_REGISTER_METADATA( filter_type, "crop", metadata, "filter_crop.yml" );
 	MLT_REGISTER_METADATA( filter_type, "data_show", metadata, "filter_data_show.yml" );
+	MLT_REGISTER_METADATA( filter_type, "fieldorder", metadata, "filter_fieldorder.yml" );
 	MLT_REGISTER_METADATA( filter_type, "gamma", metadata, "filter_gamma.yml" );
 	MLT_REGISTER_METADATA( filter_type, "greyscale", metadata, "filter_greyscale.yml" );
 	MLT_REGISTER_METADATA( filter_type, "grayscale", metadata, "filter_greyscale.yml" );

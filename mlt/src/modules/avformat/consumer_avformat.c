@@ -1,7 +1,8 @@
 /*
  * consumer_avformat.c -- an encoder based on avformat
- * Copyright (C) 2003-2004 Ushodaya Enterprises Limited
+ * Copyright (C) 2003-2012 Ushodaya Enterprises Limited
  * Author: Charles Yates <charles.yates@pandora.be>
+ * Author: Dan Dennedy <dan@dennedy.org>
  * Much code borrowed from ffmpeg.c: Copyright (c) 2000-2003 Fabrice Bellard
  *
  * This library is free software; you can redistribute it and/or
@@ -44,6 +45,16 @@
 #if LIBAVUTIL_VERSION_INT >= ((50<<16)+(8<<8)+0)
 #include <libavutil/pixdesc.h>
 #endif
+#include <libavutil/mathematics.h>
+
+#if LIBAVUTIL_VERSION_INT >= ((50<<16)+(38<<8)+0)
+#  include <libavutil/samplefmt.h>
+#else
+#  define AV_SAMPLE_FMT_NONE SAMPLE_FMT_NONE
+#  define AV_SAMPLE_FMT_S16 SAMPLE_FMT_S16
+#  define AV_SAMPLE_FMT_S32 SAMPLE_FMT_S32
+#  define AV_SAMPLE_FMT_FLT SAMPLE_FMT_FLT
+#endif
 
 #if LIBAVUTIL_VERSION_INT < (50<<16)
 #define PIX_FMT_RGB32 PIX_FMT_RGBA32
@@ -64,16 +75,13 @@
 #define AUDIO_BUFFER_SIZE (1024 * 42)
 #define VIDEO_BUFFER_SIZE (2048 * 1024)
 
-void avformat_lock( );
-void avformat_unlock( );
-
 //
 // This structure should be extended and made globally available in mlt
 //
 
 typedef struct
 {
-	int16_t *buffer;
+	uint8_t *buffer;
 	int size;
 	int used;
 	double time;
@@ -90,42 +98,16 @@ sample_fifo sample_fifo_init( int frequency, int channels )
 	return fifo;
 }
 
-// sample_fifo_clear and check are temporarily aborted (not working as intended)
-
-void sample_fifo_clear( sample_fifo fifo, double time )
-{
-	int words = ( float )( time - fifo->time ) * fifo->frequency * fifo->channels;
-	if ( ( int )( ( float )time * 100 ) < ( int )( ( float )fifo->time * 100 ) && fifo->used > words && words > 0 )
-	{
-		memmove( fifo->buffer, &fifo->buffer[ words ], ( fifo->used - words ) * sizeof( int16_t ) );
-		fifo->used -= words;
-		fifo->time = time;
-	}
-	else if ( ( int )( ( float )time * 100 ) != ( int )( ( float )fifo->time * 100 ) )
-	{
-		fifo->used = 0;
-		fifo->time = time;
-	}
-}
-
-void sample_fifo_check( sample_fifo fifo, double time )
-{
-	if ( fifo->used == 0 )
-	{
-		if ( ( int )( ( float )time * 100 ) < ( int )( ( float )fifo->time * 100 ) )
-			fifo->time = time;
-	}
-}
-
-void sample_fifo_append( sample_fifo fifo, int16_t *samples, int count )
+// count is the number of samples multiplied by the number of bytes per sample
+void sample_fifo_append( sample_fifo fifo, uint8_t *samples, int count )
 {
 	if ( ( fifo->size - fifo->used ) < count )
 	{
 		fifo->size += count * 5;
-		fifo->buffer = realloc( fifo->buffer, fifo->size * sizeof( int16_t ) );
+		fifo->buffer = realloc( fifo->buffer, fifo->size );
 	}
 
-	memcpy( &fifo->buffer[ fifo->used ], samples, count * sizeof( int16_t ) );
+	memcpy( &fifo->buffer[ fifo->used ], samples, count );
 	fifo->used += count;
 }
 
@@ -134,14 +116,14 @@ int sample_fifo_used( sample_fifo fifo )
 	return fifo->used;
 }
 
-int sample_fifo_fetch( sample_fifo fifo, int16_t *samples, int count )
+int sample_fifo_fetch( sample_fifo fifo, uint8_t *samples, int count )
 {
 	if ( count > fifo->used )
 		count = fifo->used;
 
-	memcpy( samples, fifo->buffer, count * sizeof( int16_t ) );
+	memcpy( samples, fifo->buffer, count );
 	fifo->used -= count;
-	memmove( fifo->buffer, &fifo->buffer[ count ], fifo->used * sizeof( int16_t ) );
+	memmove( fifo->buffer, &fifo->buffer[ count ], fifo->used );
 
 	fifo->time += ( double )count / fifo->channels / fifo->frequency;
 
@@ -275,7 +257,11 @@ static int consumer_start( mlt_consumer consumer )
 		mlt_properties_set_data( properties, "vcodec", codecs, 0, (mlt_destructor) mlt_properties_close, NULL );
 		mlt_properties_set_data( doc, "video_codecs", codecs, 0, NULL, NULL );
 		while ( ( codec = av_codec_next( codec ) ) )
+#if LIBAVCODEC_VERSION_INT >= ((53<<16)+(34<<8)+0)
+			if ( (codec->encode || codec->encode2) && codec->type == CODEC_TYPE_VIDEO )
+#else
 			if ( codec->encode && codec->type == CODEC_TYPE_VIDEO )
+#endif
 			{
 				snprintf( key, sizeof(key), "%d", mlt_properties_count( codecs ) );
 				mlt_properties_set( codecs, key, codec->name );
@@ -352,11 +338,11 @@ static int consumer_start( mlt_consumer consumer )
 		// Assign the thread to properties
 		mlt_properties_set_data( properties, "thread", thread, sizeof( pthread_t ), free, NULL );
 
-		// Set the running state
-		mlt_properties_set_int( properties, "running", 1 );
-
 		// Create the thread
 		pthread_create( thread, NULL, consumer_thread, consumer );
+
+		// Set the running state
+		mlt_properties_set_int( properties, "running", 1 );
 	}
 	return error;
 }
@@ -368,18 +354,18 @@ static int consumer_stop( mlt_consumer consumer )
 {
 	// Get the properties
 	mlt_properties properties = MLT_CONSUMER_PROPERTIES( consumer );
+	pthread_t *thread = mlt_properties_get_data( properties, "thread", NULL );
 
 	// Check that we're running
-	if ( mlt_properties_get_int( properties, "running" ) )
+	if ( thread )
 	{
-		// Get the thread
-		pthread_t *thread = mlt_properties_get_data( properties, "thread", NULL );
-
 		// Stop the thread
 		mlt_properties_set_int( properties, "running", 0 );
 
 		// Wait for termination
 		pthread_join( *thread, NULL );
+
+		mlt_properties_set( properties, "thread", NULL );
 	}
 
 	return 0;
@@ -402,21 +388,33 @@ static void apply_properties( void *obj, mlt_properties properties, int flags )
 {
 	int i;
 	int count = mlt_properties_count( properties );
+#if LIBAVUTIL_VERSION_INT < ((51<<16)+(12<<8)+0)
 	int alloc = 1;
+#endif
 
 	for ( i = 0; i < count; i++ )
 	{
 		const char *opt_name = mlt_properties_get_name( properties, i );
+#if LIBAVUTIL_VERSION_INT >= ((51<<16)+(10<<8)+0)
+		const AVOption *opt = av_opt_find( obj, opt_name, NULL, flags, flags );
+#else
 		const AVOption *opt = av_find_opt( obj, opt_name, NULL, flags, flags );
+#endif
 
 		// If option not found, see if it was prefixed with a or v (-vb)
 		if ( !opt && (
 			( opt_name[0] == 'v' && ( flags & AV_OPT_FLAG_VIDEO_PARAM ) ) ||
 			( opt_name[0] == 'a' && ( flags & AV_OPT_FLAG_AUDIO_PARAM ) ) ) )
+#if LIBAVUTIL_VERSION_INT >= ((51<<16)+(10<<8)+0)
+			opt = av_opt_find( obj, ++opt_name, NULL, flags, flags );
+#else
 			opt = av_find_opt( obj, ++opt_name, NULL, flags, flags );
+#endif
 		// Apply option if found
 		if ( opt )
-#if LIBAVCODEC_VERSION_INT >= ((52<<16)+(7<<8)+0)
+#if LIBAVUTIL_VERSION_INT >= ((51<<16)+(12<<8)+0)
+			av_opt_set( obj, opt_name, mlt_properties_get_value( properties, i), 0 );
+#elif LIBAVCODEC_VERSION_INT >= ((52<<16)+(7<<8)+0)
 			av_set_string3( obj, opt_name, mlt_properties_get_value( properties, i), alloc, NULL );
 #elif LIBAVCODEC_VERSION_INT >= ((51<<16)+(59<<8)+0)
 			av_set_string2( obj, opt_name, mlt_properties_get_value( properties, i), alloc );
@@ -424,6 +422,73 @@ static void apply_properties( void *obj, mlt_properties properties, int flags )
 			av_set_string( obj, opt_name, mlt_properties_get_value( properties, i) );
 #endif
 	}
+}
+
+static int get_mlt_audio_format( int av_sample_fmt )
+{
+	switch ( av_sample_fmt )
+	{
+	case AV_SAMPLE_FMT_S32:
+		return mlt_audio_s32le;
+	case AV_SAMPLE_FMT_FLT:
+		return mlt_audio_f32le;
+#if LIBAVUTIL_VERSION_INT >= ((51<<16)+(17<<8)+0)
+	case AV_SAMPLE_FMT_S32P:
+		return mlt_audio_s32;
+	case AV_SAMPLE_FMT_FLTP:
+		return mlt_audio_float;
+#endif
+	default:
+		return mlt_audio_s16;
+	}
+}
+
+static int pick_sample_fmt( mlt_properties properties, AVCodec *codec )
+{
+	int sample_fmt = AV_SAMPLE_FMT_S16;
+	const char *format = mlt_properties_get( properties, "mlt_audio_format" );
+	const int *p = codec->sample_fmts;
+
+	// get default av_sample_fmt from mlt_audio_format
+	if ( format )
+	{
+		if ( !strcmp( format, "s32le" ) )
+			sample_fmt = AV_SAMPLE_FMT_S32;
+		else if ( !strcmp( format, "f32le" ) )
+			sample_fmt = AV_SAMPLE_FMT_FLT;
+#if LIBAVUTIL_VERSION_INT >= ((51<<16)+(17<<8)+0)
+		else if ( !strcmp( format, "s32" ) )
+			sample_fmt = AV_SAMPLE_FMT_S32P;
+		else if ( !strcmp( format, "float" ) )
+			sample_fmt = AV_SAMPLE_FMT_FLTP;
+#endif
+	}
+	// check if codec supports our mlt_audio_format
+	for ( ; *p != -1; p++ )
+	{
+		if ( *p == sample_fmt )
+			return sample_fmt;
+	}
+	// no match - pick first one we support
+	for ( p = codec->sample_fmts; *p != -1; p++ )
+	{
+		switch (*p)
+		{
+		case AV_SAMPLE_FMT_S16:
+		case AV_SAMPLE_FMT_S32:
+		case AV_SAMPLE_FMT_FLT:
+#if LIBAVUTIL_VERSION_INT >= ((51<<16)+(17<<8)+0)
+		case AV_SAMPLE_FMT_S32P:
+		case AV_SAMPLE_FMT_FLTP:
+#endif
+			return *p;
+		default:
+			break;
+		}
+	}
+	mlt_log_error( properties, "audio codec sample_fmt not compatible" );
+
+	return AV_SAMPLE_FMT_NONE;
 }
 
 /** Add an audio output stream
@@ -435,7 +500,11 @@ static AVStream *add_audio_stream( mlt_consumer consumer, AVFormatContext *oc, A
 	mlt_properties properties = MLT_CONSUMER_PROPERTIES( consumer );
 
 	// Create a new stream
+#if LIBAVFORMAT_VERSION_INT >= ((53<<16)+(10<<8)+0)
+	AVStream *st = avformat_new_stream( oc, codec );
+#else
 	AVStream *st = av_new_stream( oc, oc->nb_streams );
+#endif
 
 	// If created, then initialise from properties
 	if ( st != NULL ) 
@@ -451,7 +520,7 @@ static AVStream *add_audio_stream( mlt_consumer consumer, AVFormatContext *oc, A
 
 		c->codec_id = codec->id;
 		c->codec_type = CODEC_TYPE_AUDIO;
-		c->sample_fmt = SAMPLE_FMT_S16;
+		c->sample_fmt = pick_sample_fmt( properties, codec );
 
 #if 0 // disabled until some audio codecs are multi-threaded
 		// Setup multi-threading
@@ -490,7 +559,10 @@ static AVStream *add_audio_stream( mlt_consumer consumer, AVFormatContext *oc, A
         if ( audio_qscale > QSCALE_NONE )
 		{
 			c->flags |= CODEC_FLAG_QSCALE;
-			c->global_quality = st->quality = FF_QP2LAMBDA * audio_qscale;
+			c->global_quality = FF_QP2LAMBDA * audio_qscale;
+#if LIBAVFORMAT_VERSION_MAJOR < 53
+			st->quality = c->global_quality;
+#endif
 		}
 
 		// Set parameters controlled by MLT
@@ -500,7 +572,11 @@ static AVStream *add_audio_stream( mlt_consumer consumer, AVFormatContext *oc, A
 
 		if ( mlt_properties_get( properties, "alang" ) != NULL )
 #if LIBAVFORMAT_VERSION_INT >= ((52<<16)+(43<<8)+0)
+#if LIBAVUTIL_VERSION_INT >= ((51<<16)+(8<<8)+0)
+			av_dict_set( &oc->metadata, "language", mlt_properties_get( properties, "alang" ), 0 );
+#else
 			av_metadata_set2( &oc->metadata, "language", mlt_properties_get( properties, "alang" ), 0 );
+#endif
 #else
 
 			strncpy( st->language, mlt_properties_get( properties, "alang" ), sizeof( st->language ) );
@@ -529,7 +605,7 @@ static int open_audio( mlt_properties properties, AVFormatContext *oc, AVStream 
 	else
 		codec = avcodec_find_encoder( c->codec_id );
 
-#if LIBAVCODEC_VERSION_MAJOR >= 53
+#if LIBAVCODEC_VERSION_INT >= ((52<<16)+(122<<8)+0)
 	// Process properties as AVOptions on the AVCodec
 	if ( codec && codec->priv_class )
 	{
@@ -550,10 +626,12 @@ static int open_audio( mlt_properties properties, AVFormatContext *oc, AVStream 
 	}
 #endif
 
-	avformat_lock();
-	
 	// Continue if codec found and we can open it
-	if ( codec != NULL && avcodec_open( c, codec ) >= 0 )
+#if LIBAVCODEC_VERSION_INT >= ((53<<16)+(8<<8)+0)
+	if ( codec && avcodec_open2( c, codec, NULL ) >= 0 )
+#else
+	if ( codec && avcodec_open( c, codec ) >= 0 )
+#endif
 	{
 		// ugly hack for PCM codecs (will be removed ASAP with new PCM
 		// support to compute the input frame size in samples
@@ -587,8 +665,6 @@ static int open_audio( mlt_properties properties, AVFormatContext *oc, AVStream 
 	{
 		mlt_log_warning( NULL, "%s: Unable to encode audio - disabling audio output.\n", __FILE__ );
 	}
-	
-	avformat_unlock();
 
 	return audio_input_frame_size;
 }
@@ -596,11 +672,7 @@ static int open_audio( mlt_properties properties, AVFormatContext *oc, AVStream 
 static void close_audio( AVFormatContext *oc, AVStream *st )
 {
 	if ( st && st->codec )
-	{
-		avformat_lock();
 		avcodec_close( st->codec );
-		avformat_unlock();
-	}
 }
 
 /** Add a video output stream 
@@ -612,7 +684,11 @@ static AVStream *add_video_stream( mlt_consumer consumer, AVFormatContext *oc, A
 	mlt_properties properties = MLT_CONSUMER_PROPERTIES( consumer );
 
 	// Create a new stream
+#if LIBAVFORMAT_VERSION_INT >= ((53<<16)+(10<<8)+0)
+	AVStream *st = avformat_new_stream( oc, codec );
+#else
 	AVStream *st = av_new_stream( oc, oc->nb_streams );
+#endif
 
 	if ( st != NULL ) 
 	{
@@ -756,7 +832,10 @@ static AVStream *add_video_stream( mlt_consumer consumer, AVFormatContext *oc, A
 		if ( mlt_properties_get_double( properties, "qscale" ) > 0 )
 		{
 			c->flags |= CODEC_FLAG_QSCALE;
-			st->quality = FF_QP2LAMBDA * mlt_properties_get_double( properties, "qscale" );
+			c->global_quality = FF_QP2LAMBDA * mlt_properties_get_double( properties, "qscale" );
+#if LIBAVFORMAT_VERSION_MAJOR < 53
+			st->quality = c->global_quality;
+#endif
 		}
 
 		// Allow the user to override the video fourcc
@@ -914,7 +993,7 @@ static int open_video( mlt_properties properties, AVFormatContext *oc, AVStream 
 	else
 		codec = avcodec_find_encoder( video_enc->codec_id );
 
-#if LIBAVCODEC_VERSION_MAJOR >= 53
+#if LIBAVCODEC_VERSION_INT >= ((52<<16)+(122<<8)+0)
 	// Process properties as AVOptions on the AVCodec
 	if ( codec && codec->priv_class )
 	{
@@ -947,10 +1026,11 @@ static int open_video( mlt_properties properties, AVFormatContext *oc, AVStream 
 			video_enc->pix_fmt = codec->pix_fmts[ 0 ];
 	}
 
-	// Open the codec safely
-	avformat_lock();
-	int result = codec != NULL && avcodec_open( video_enc, codec ) >= 0;
-	avformat_unlock();
+#if LIBAVCODEC_VERSION_INT >= ((53<<16)+(8<<8)+0)
+	int result = codec && avcodec_open2( video_enc, codec, NULL ) >= 0;
+#else
+	int result = codec && avcodec_open( video_enc, codec ) >= 0;
+#endif
 	
 	return result;
 }
@@ -959,10 +1039,8 @@ void close_video(AVFormatContext *oc, AVStream *st)
 {
 	if ( st && st->codec )
 	{
-		avformat_lock();
 		av_freep( &st->codec->stats_in );
 		avcodec_close(st->codec);
-		avformat_unlock();
 	}
 }
 
@@ -1017,11 +1095,10 @@ static void *consumer_thread( void *arg )
 	int img_height = height;
 
 	// Get default audio properties
-	mlt_audio_format aud_fmt = mlt_audio_s16;
 	int channels = mlt_properties_get_int( properties, "channels" );
 	int total_channels = channels;
 	int frequency = mlt_properties_get_int( properties, "frequency" );
-	int16_t *pcm = NULL;
+	void *pcm = NULL;
 	int samples = 0;
 
 	// AVFormat audio buffer and frame size
@@ -1051,8 +1128,8 @@ static void *consumer_thread( void *arg )
 	mlt_image_format img_fmt = mlt_image_yuv422;
 
 	// For receiving audio samples back from the fifo
-	int16_t *audio_buf_1 = av_malloc( AUDIO_ENCODE_BUFFER_SIZE );
-	int16_t *audio_buf_2 = NULL;
+	uint8_t *audio_buf_1 = av_malloc( AUDIO_ENCODE_BUFFER_SIZE );
+	uint8_t *audio_buf_2 = NULL;
 	int count = 0;
 
 	// Allocate the context
@@ -1143,6 +1220,10 @@ static void *consumer_thread( void *arg )
 				acodec = mlt_properties_get( properties, "_acodec" );
 				audio_codec = avcodec_find_encoder_by_name( acodec );
 			}
+			else if ( !strcmp( acodec, "aac" ) )
+			{
+				mlt_properties_set( properties, "astrict", "experimental" );
+			}
 		}
 		else
 		{
@@ -1190,7 +1271,11 @@ static void *consumer_thread( void *arg )
 				markup[0] = '\0';
 				if ( !strstr( key, ".stream." ) )
 #if LIBAVFORMAT_VERSION_INT >= ((52<<16)+(43<<8)+0)
+#if LIBAVUTIL_VERSION_INT >= ((51<<16)+(8<<8)+0)
+					av_dict_set( &oc->metadata, key, mlt_properties_get_value( properties, i ), 0 );
+#else
 					av_metadata_set2( &oc->metadata, key, mlt_properties_get_value( properties, i ), 0 );
+#endif
 #else
 					av_metadata_set( &oc->metadata, key, mlt_properties_get_value( properties, i ) );
 #endif
@@ -1231,13 +1316,16 @@ static void *consumer_thread( void *arg )
 	frame = mlt_consumer_rt_frame( consumer );
 
 	// Set the timecode from the MLT metadata if available.
-	const char *timecode = mlt_properties_get( MLT_FRAME_PROPERTIES(frame), "meta.attr.vitc.markup" );
-	if ( timecode && strcmp( timecode, "" ) )
-	{
-		mlt_properties_set( properties, "timecode", timecode );
-		if ( strchr( timecode, ';' ) )
-			mlt_properties_set_int( properties, "drop_frame_timecode", 1 );
-	}
+    if ( frame )
+    {
+        const char *timecode = mlt_properties_get( MLT_FRAME_PROPERTIES(frame), "meta.attr.vitc.markup" );
+        if ( timecode && strcmp( timecode, "" ) )
+        {
+            mlt_properties_set( properties, "timecode", timecode );
+            if ( strchr( timecode, ';' ) )
+                mlt_properties_set_int( properties, "drop_frame_timecode", 1 );
+        }
+    }
 
 	// Add audio and video streams
 	if ( video_codec_id != CODEC_ID_NONE )
@@ -1268,10 +1356,24 @@ static void *consumer_thread( void *arg )
 	}
 	mlt_properties_set_int( properties, "channels", total_channels );
 
+	// Audio format is determined when adding the audio stream
+	mlt_audio_format aud_fmt = mlt_audio_none;
+	if ( audio_st[0] )
+		aud_fmt = get_mlt_audio_format( audio_st[0]->codec->sample_fmt );
+	int sample_bytes = mlt_audio_format_size( aud_fmt, 1, 1 );
+	sample_bytes = sample_bytes ? sample_bytes : 1; // prevent divide by zero
+
 	// Set the parameters (even though we have none...)
-	if ( av_set_parameters(oc, NULL) >= 0 ) 
+#if LIBAVFORMAT_VERSION_INT < ((53<<16)+(2<<8)+0)
+	if ( av_set_parameters(oc, NULL) >= 0 )
+#endif
 	{
+#if LIBAVFORMAT_VERSION_MAJOR >= 53
+		if ( mlt_properties_get( properties, "muxpreload" ) && ! mlt_properties_get( properties, "preload" ) )
+			mlt_properties_set_double( properties, "preload", mlt_properties_get_double( properties, "muxpreload" ) );
+#else
 		oc->preload = ( int )( mlt_properties_get_double( properties, "muxpreload" ) * AV_TIME_BASE );
+#endif
 		oc->max_delay= ( int )( mlt_properties_get_double( properties, "muxdelay" ) * AV_TIME_BASE );
 
 		// Process properties as AVOptions
@@ -1280,14 +1382,14 @@ static void *consumer_thread( void *arg )
 		{
 			mlt_properties p = mlt_properties_load( fpre );
 			apply_properties( oc, p, AV_OPT_FLAG_ENCODING_PARAM );
-#if LIBAVFORMAT_VERSION_MAJOR >= 53
+#if LIBAVFORMAT_VERSION_INT >= ((52<<16)+(110<<8)+0)
 			if ( oc->oformat && oc->oformat->priv_class && oc->priv_data )
 				apply_properties( oc->priv_data, p, AV_OPT_FLAG_ENCODING_PARAM );
 #endif
 			mlt_properties_close( p );
 		}
 		apply_properties( oc, properties, AV_OPT_FLAG_ENCODING_PARAM );
-#if LIBAVFORMAT_VERSION_MAJOR >= 53
+#if LIBAVFORMAT_VERSION_INT >= ((52<<16)+(110<<8)+0)
 		if ( oc->oformat && oc->oformat->priv_class && oc->priv_data )
 			apply_properties( oc->priv_data, properties, AV_OPT_FLAG_ENCODING_PARAM );
 #endif
@@ -1338,19 +1440,27 @@ static void *consumer_thread( void *arg )
 #endif
 			{
 				mlt_log_error( MLT_CONSUMER_SERVICE( consumer ), "Could not open '%s'\n", filename );
-				mlt_properties_set_int( properties, "running", 0 );
+				mlt_events_fire( properties, "consumer-fatal-error", NULL );
+				goto on_fatal_error;
 			}
 		}
 	
 		// Write the stream header.
 		if ( mlt_properties_get_int( properties, "running" ) )
+#if LIBAVFORMAT_VERSION_INT >= ((53<<16)+(2<<8)+0)
+			avformat_write_header( oc, NULL );
+#else
 			av_write_header( oc );
+#endif
 	}
+#if LIBAVFORMAT_VERSION_INT < ((53<<16)+(2<<8)+0)
 	else
 	{
 		mlt_log_error( MLT_CONSUMER_SERVICE( consumer ), "Invalid output format parameters\n" );
-		mlt_properties_set_int( properties, "running", 0 );
+		mlt_events_fire( properties, "consumer-fatal-error", NULL );
+		goto on_fatal_error;
 	}
+#endif
 
 	// Allocate picture
 	if ( video_st )
@@ -1358,7 +1468,10 @@ static void *consumer_thread( void *arg )
 
 	// Last check - need at least one stream
 	if ( !audio_st[0] && !video_st )
-		mlt_properties_set_int( properties, "running", 0 );
+	{
+		mlt_events_fire( properties, "consumer-fatal-error", NULL );
+		goto on_fatal_error;
+	}
 
 	// Get the starting time (can ignore the times above)
 	gettimeofday( &ante, NULL );
@@ -1387,7 +1500,7 @@ static void *consumer_thread( void *arg )
 			{
 				samples = mlt_sample_calculator( fps, frequency, count ++ );
 				channels = total_channels;
-				mlt_frame_get_audio( frame, (void**) &pcm, &aud_fmt, &frequency, &channels, &samples );
+				mlt_frame_get_audio( frame, &pcm, &aud_fmt, &frequency, &channels, &samples );
 
 				// Save the audio channel remap properties for later
 				mlt_properties_pass( frame_meta_properties, frame_properties, "meta.map.audio." );
@@ -1398,15 +1511,16 @@ static void *consumer_thread( void *arg )
 					fifo = sample_fifo_init( frequency, channels );
 					mlt_properties_set_data( properties, "sample_fifo", fifo, 0, ( mlt_destructor )sample_fifo_close, NULL );
 				}
+				if ( pcm )
+				{
+					// Silence if not normal forward speed
+					if ( mlt_properties_get_double( frame_properties, "_speed" ) != 1.0 )
+						memset( pcm, 0, samples * channels * sample_bytes );
 
-				// Silence if not normal forward speed
-				if ( mlt_properties_get_double( frame_properties, "_speed" ) != 1.0 )
-					memset( pcm, 0, samples * channels * 2 );
-
-				// Append the samples
-				sample_fifo_append( fifo, pcm, samples * channels );
-				total_time += ( samples * 1000000 ) / frequency;
-
+					// Append the samples
+					sample_fifo_append( fifo, pcm, samples * channels * sample_bytes );
+					total_time += ( samples * 1000000 ) / frequency;
+				}
 				if ( !video_st )
 					mlt_events_fire( properties, "consumer-frame-show", frame, NULL );
 			}
@@ -1426,15 +1540,15 @@ static void *consumer_thread( void *arg )
 			if ( !video_st || ( video_st && audio_st[0] && audio_pts < video_pts ) )
 			{
 				// Write audio
-				if ( ( video_st && terminated ) || ( channels * audio_input_frame_size ) < sample_fifo_used( fifo ) )
+				if ( ( video_st && terminated ) || ( channels * audio_input_frame_size ) < sample_fifo_used( fifo ) / sample_bytes )
 				{
 					int j = 0; // channel offset into interleaved source buffer
-					int n = FFMIN( FFMIN( channels * audio_input_frame_size, sample_fifo_used( fifo ) ), AUDIO_ENCODE_BUFFER_SIZE );
+					int n = FFMIN( FFMIN( channels * audio_input_frame_size, sample_fifo_used( fifo ) / sample_bytes ), AUDIO_ENCODE_BUFFER_SIZE );
 
 					// Get the audio samples
 					if ( n > 0 )
 					{
-						sample_fifo_fetch( fifo, audio_buf_1, n );
+						sample_fifo_fetch( fifo, audio_buf_1, n * sample_bytes );
 					}
 					else if ( audio_codec_id == CODEC_ID_VORBIS && terminated )
 					{
@@ -1461,7 +1575,7 @@ static void *consumer_thread( void *arg )
 						// Optimized for single track and no channel remap
 						if ( !audio_st[1] && !mlt_properties_count( frame_meta_properties ) )
 						{
-							pkt.size = avcodec_encode_audio( codec, audio_outbuf, audio_outbuf_size, audio_buf_1 );
+							pkt.size = avcodec_encode_audio( codec, audio_outbuf, audio_outbuf_size, (short*) audio_buf_1 );
 						}
 						else
 						{
@@ -1510,14 +1624,14 @@ static void *consumer_thread( void *arg )
 									// Interleave the audio buffer with the # channels for this stream/mapping.
 									for ( k = 0; k < map_channels; k++, j++, source_offset++, dest_offset++ )
 									{
-										int16_t *src = audio_buf_1 + source_offset;
-										int16_t *dest = audio_buf_2 + dest_offset;
+										void *src = audio_buf_1 + source_offset * sample_bytes;
+										void *dest = audio_buf_2 + dest_offset * sample_bytes;
 										int s = samples + 1;
 
 										while ( --s ) {
-											*dest = *src;
-											dest += current_channels;
-											src += channels;
+											memcpy( dest, src, sample_bytes );
+											dest += current_channels * sample_bytes;
+											src += channels * sample_bytes;
 										}
 									}
 								}
@@ -1528,7 +1642,7 @@ static void *consumer_thread( void *arg )
 									dest_offset += current_channels;
 								}
 							}
-							pkt.size = avcodec_encode_audio( codec, audio_outbuf, audio_outbuf_size, audio_buf_2 );
+							pkt.size = avcodec_encode_audio( codec, audio_outbuf, audio_outbuf_size, (short*) audio_buf_2 );
 						}
 
 						// Write the compressed frame in the media file
@@ -1597,7 +1711,7 @@ static void *consumer_thread( void *arg )
 
 						// Do the colour space conversion
 #ifdef SWSCALE
-						int flags = SWS_BILINEAR;
+						int flags = SWS_BICUBIC;
 #ifdef USE_MMX
 						flags |= SWS_CPU_CAPS_MMX;
 #endif
@@ -1660,7 +1774,7 @@ static void *consumer_thread( void *arg )
 					else 
 					{
 						// Set the quality
-						output->quality = video_st->quality;
+						output->quality = c->global_quality;
 
 						// Set frame interlace hints
 						output->interlaced_frame = !mlt_properties_get_int( frame_properties, "progressive" );
@@ -1726,7 +1840,7 @@ static void *consumer_thread( void *arg )
 			long passed = time_difference( &ante );
 			if ( fifo != NULL )
 			{
-				long pending = ( ( ( long )sample_fifo_used( fifo ) * 1000 ) / frequency ) * 1000;
+				long pending = ( ( ( long )sample_fifo_used( fifo ) / sample_bytes * 1000 ) / frequency ) * 1000;
 				passed -= pending;
 			}
 			if ( passed < total_time )
@@ -1750,11 +1864,11 @@ static void *consumer_thread( void *arg )
 			av_init_packet( &pkt );
 			pkt.size = 0;
 
-			if ( /*( c->capabilities & CODEC_CAP_SMALL_LAST_FRAME ) &&*/
-				( channels * audio_input_frame_size < sample_fifo_used( fifo ) ) )
+			if ( fifo &&
+				( channels * audio_input_frame_size < sample_fifo_used( fifo ) / sample_bytes ) )
 			{
-				sample_fifo_fetch( fifo, audio_buf_1, channels * audio_input_frame_size );
-				pkt.size = avcodec_encode_audio( c, audio_outbuf, audio_outbuf_size, audio_buf_1 );
+				sample_fifo_fetch( fifo, audio_buf_1, channels * audio_input_frame_size * sample_bytes );
+				pkt.size = avcodec_encode_audio( c, audio_outbuf, audio_outbuf_size, (short*) audio_buf_1 );
 			}
 			if ( pkt.size <= 0 )
 				pkt.size = avcodec_encode_audio( c, audio_outbuf, audio_outbuf_size, NULL );
@@ -1812,7 +1926,8 @@ static void *consumer_thread( void *arg )
 on_fatal_error:
 	
 	// Write the trailer, if any
-	av_write_trailer( oc );
+	if ( frames )
+		av_write_trailer( oc );
 
 	// close each codec
 	if ( video_st )
@@ -1825,13 +1940,13 @@ on_fatal_error:
 		av_freep( &oc->streams[i] );
 
 	// Close the output file
-	if ( !( fmt->flags & AVFMT_NOFILE ) )
+	if ( !( fmt->flags & AVFMT_NOFILE ) &&
+		!mlt_properties_get_int( properties, "redirect" ) )
 	{
 #if LIBAVFORMAT_VERSION_MAJOR >= 53
-		if ( !mlt_properties_get_int( properties, "redirect" ) )
-			avio_close( oc->pb );
+		if ( oc->pb  ) avio_close( oc->pb );
 #elif LIBAVFORMAT_VERSION_MAJOR >= 52
-		url_fclose( oc->pb );
+		if ( oc->pb  ) url_fclose( oc->pb );
 #else
 		url_fclose( &oc->pb );
 #endif
@@ -1851,8 +1966,6 @@ on_fatal_error:
 	av_free( oc );
 
 	// Just in case we terminated on pause
-	mlt_properties_set_int( properties, "running", 0 );
-
 	mlt_consumer_stopped( consumer );
 	mlt_properties_close( frame_meta_properties );
 

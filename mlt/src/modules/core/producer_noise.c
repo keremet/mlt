@@ -65,6 +65,12 @@ mlt_producer producer_noise_init( mlt_profile profile, mlt_service_type type, co
 
 static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_format *format, int *width, int *height, int writable )
 {
+	// Choose suitable out values if nothing specific requested
+	if ( *width <= 0 )
+		*width = mlt_service_profile( MLT_PRODUCER_SERVICE( mlt_frame_get_original_producer( frame ) ) )->width;
+	if ( *height <= 0 )
+		*height = mlt_service_profile( MLT_PRODUCER_SERVICE( mlt_frame_get_original_producer( frame ) ) )->height;
+
 	// Calculate the size of the image
 	int size = *width * *height * 2;
 
@@ -106,6 +112,7 @@ static int producer_get_audio( mlt_frame frame, int16_t **buffer, mlt_audio_form
 	*samples = *samples <= 0 ? 1920 : *samples;
 	*channels = *channels <= 0 ? 2 : *channels;
 	*frequency = *frequency <= 0 ? 48000 : *frequency;
+	*format = mlt_audio_s16;
 
 	// Calculate the size of the buffer
 	size = *samples * *channels * sizeof( int16_t );

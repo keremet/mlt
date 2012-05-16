@@ -25,6 +25,7 @@
 #include <unistd.h>
 #include <sys/time.h>
 #include <limits.h>
+#include <pthread.h>
 #ifdef WIN32
 #include <objbase.h>
 #include "DeckLinkAPI_h.h"
@@ -58,6 +59,7 @@ private:
 	uint32_t                    m_preroll;
 	uint32_t                    m_acnt;
 	bool                        m_reprio;
+	pthread_t                   m_prerollThread;
 
 	IDeckLinkDisplayMode* getDisplayMode()
 	{
@@ -77,8 +79,9 @@ private:
 				int p = mode->GetFieldDominance() == bmdProgressiveFrame;
 				mlt_log_verbose( getConsumer(), "BMD mode %dx%d %.3f fps prog %d\n", m_width, m_height, m_fps, p );
 				
-				if ( m_width == profile->width && m_height == profile->height && p == profile->progressive
-					 && m_fps == mlt_profile_fps( profile ) )
+				if ( m_width == profile->width && p == profile->progressive
+					 && m_fps == mlt_profile_fps( profile )
+					 && ( m_height == profile->height || ( m_height == 486 && profile->height == 480 ) ) )
 					result = mode;
 			}
 		}
@@ -177,10 +180,28 @@ public:
 		
 		return true;
 	}
-	
+
+
+	void* preroll_thread()
+	{
+		// preroll frames
+		for ( unsigned i = 0; i < m_preroll; i++ )
+			ScheduleNextFrame( true );
+
+		// start scheduled playback
+		m_deckLinkOutput->StartScheduledPlayback( 0, m_timescale, 1.0 );
+
+		return 0;
+	}
+
+	static void* preroll_thread_proxy( void* arg )
+	{
+		DeckLinkConsumer* self = static_cast< DeckLinkConsumer* >( arg );
+		return self->preroll_thread();
+	}
+
 	bool start( unsigned preroll )
 	{
-		unsigned i;
 		mlt_properties properties = MLT_CONSUMER_PROPERTIES( getConsumer() );
 
 		// Initialize members
@@ -240,12 +261,8 @@ public:
 		m_preroll = preroll;
 		m_reprio = false;
 
-		// preroll frames
-		for( i = 0; i < preroll; i++ )
-			ScheduleNextFrame( true );
-
-		// start scheduled playback
-		m_deckLinkOutput->StartScheduledPlayback( 0, m_timescale, 1.0 );
+		// Do preroll in thread to ensure asynchronicity of mlt_consumer_start().
+		pthread_create( &m_prerollThread, NULL, preroll_thread_proxy, this );
 
 		// Set the running state
 		mlt_properties_set_int( properties, "running", 1 );
@@ -256,15 +273,11 @@ public:
 	bool stop()
 	{
 		mlt_properties properties = MLT_CONSUMER_PROPERTIES( getConsumer() );
+		bool wasRunning = !!mlt_properties_get_int( properties, "running" );
 
 		// set running state is 0
 		mlt_properties_set_int( properties, "running", 0 );
 		mlt_consumer_stopped( getConsumer() );
-
-		// release decklink frame
-		if ( m_decklinkFrame )
-			m_decklinkFrame->Release();
-		m_decklinkFrame = NULL;
 
 		// Stop the audio and video output streams immediately
 		if ( m_deckLinkOutput )
@@ -273,6 +286,14 @@ public:
 			m_deckLinkOutput->DisableAudioOutput();
 			m_deckLinkOutput->DisableVideoOutput();
 		}
+
+		// release decklink frame
+		if ( m_decklinkFrame )
+			m_decklinkFrame->Release();
+		m_decklinkFrame = NULL;
+
+		if ( wasRunning )
+			pthread_join( m_prerollThread, NULL );
 
 		return true;
 	}
@@ -351,8 +372,9 @@ public:
 		mlt_image_format format = m_isKeyer? mlt_image_rgb24a : mlt_image_yuv422;
 		uint8_t* image = 0;
 		int rendered = mlt_properties_get_int( MLT_FRAME_PROPERTIES(frame), "rendered");
+		int height = m_height;
 
-		if ( rendered && !mlt_frame_get_image( frame, &image, &format, &m_width, &m_height, 0 ) )
+		if ( rendered && !mlt_frame_get_image( frame, &image, &format, &m_width, &height, 0 ) )
 		{
 			uint8_t* buffer = 0;
 			int stride = m_width * ( m_isKeyer? 4 : 2 );
@@ -366,26 +388,41 @@ public:
 			{
 				int progressive = mlt_properties_get_int( MLT_FRAME_PROPERTIES( frame ), "progressive" );
 
+				// NTSC SDI is always 486 lines
+				if ( m_height == 486 && height == 480 )
+				{
+					// blank first 6 lines
+					if ( m_isKeyer )
+					{
+						memset( buffer, 0, stride * 6 );
+						buffer += stride * 6;
+					}
+					else for ( int i = 0; i < m_width * 6; i++ )
+					{
+						*buffer++ = 128;
+						*buffer++ = 16;
+					}
+				}
 				if ( !m_isKeyer )
 				{
 					// Normal non-keyer playout - needs byte swapping
 					if ( !progressive && m_displayMode->GetFieldDominance() == bmdUpperFieldFirst )
 						// convert lower field first to top field first
-						swab( (char*) image, (char*) buffer + stride, stride * ( m_height - 1 ) );
+						swab( (char*) image, (char*) buffer + stride, stride * ( height - 1 ) );
 					else
-						swab( (char*) image, (char*) buffer, stride * m_height );
+						swab( (char*) image, (char*) buffer, stride * height );
 				}
 				else if ( !mlt_properties_get_int( MLT_FRAME_PROPERTIES( frame ), "test_image" ) )
 				{
 					// Normal keyer output
-					int y = m_height + 1;
+					int y = height + 1;
 					uint32_t* s = (uint32_t*) image;
 					uint32_t* d = (uint32_t*) buffer;
 
 					if ( !progressive && m_displayMode->GetFieldDominance() == bmdUpperFieldFirst )
 					{
 						// Correct field order
-						m_height--;
+						height--;
 						y--;
 						d += m_width;
 					}
@@ -404,7 +441,7 @@ public:
 				else
 				{
 					// Keying blank frames - nullify alpha
-					memset( buffer, 0, stride * m_height );
+					memset( buffer, 0, stride * height );
 				}
 			}
 		}
@@ -473,7 +510,7 @@ public:
 				r = pthread_setschedparam(thread, SCHED_FIFO, &param);
 				if( r )
 					mlt_log_verbose( getConsumer(),
-						"ScheduledFrameCompleted: pthread_setschedparam retured %d\n", r);
+						"ScheduledFrameCompleted: pthread_setschedparam returned %d\n", r);
 				else
 					mlt_log_verbose( getConsumer(),
 						"ScheduledFrameCompleted: param.sched_priority=%d\n", param.sched_priority);
@@ -490,7 +527,7 @@ public:
 		m_deckLinkOutput->GetBufferedAudioSampleFrameCount( &cnt );
 		if ( cnt != m_acnt )
 		{
-			mlt_log_verbose( getConsumer(),
+			mlt_log_debug( getConsumer(),
 				"ScheduledFrameCompleted: GetBufferedAudioSampleFrameCount %u -> %lu, m_count=%"PRIu64"\n",
 				m_acnt, cnt, m_count );
 			m_acnt = cnt;

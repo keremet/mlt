@@ -2,7 +2,7 @@
  * \file mlt_types.h
  * \brief Provides forward definitions of all public types
  *
- * Copyright (C) 2003-2009 Ushodaya Enterprises Limited
+ * Copyright (C) 2003-2012 Ushodaya Enterprises Limited
  * \author Charles Yates <charles.yates@pandora.be>
  *
  * This library is free software; you can redistribute it and/or
@@ -28,8 +28,12 @@
 #endif
 
 #include <inttypes.h>
-
+#include <limits.h>
 #include "mlt_pool.h"
+
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
 
 /** The set of supported image formats */
 
@@ -53,8 +57,8 @@ typedef enum
 	mlt_audio_s16 = 1, /**< signed 16-bit interleaved PCM */
 	mlt_audio_s32,     /**< signed 32-bit non-interleaved PCM */
 	mlt_audio_float,   /**< 32-bit non-interleaved floating point */
-	mlt_audio_s32le,   /**< signed 32-bit interleaved PCM, may only used by producers */
-	mlt_audio_f32le    /**< 32-bit interleaved floating point, may only be used by producers */
+	mlt_audio_s32le,   /**< signed 32-bit interleaved PCM */
+	mlt_audio_f32le    /**< 32-bit interleaved floating point */
 }
 mlt_audio_format;
 

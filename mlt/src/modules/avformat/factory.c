@@ -1,6 +1,6 @@
 /*
  * factory.c -- the factory method interfaces
- * Copyright (C) 2003-2004 Ushodaya Enterprises Limited
+ * Copyright (C) 2003-2012 Ushodaya Enterprises Limited
  * Author: Charles Yates <charles.yates@pandora.be>
  *
  * This library is free software; you can redistribute it and/or
@@ -46,48 +46,29 @@ extern mlt_producer producer_avformat_init( mlt_profile profile, const char *ser
 // A static flag used to determine if avformat has been initialised
 static int avformat_initialised = 0;
 
-// A locking mutex
-static pthread_mutex_t avformat_mutex;
-
-#if 0
-// These 3 functions should override the alloc functions in libavformat
-// but some formats or codecs seem to crash when used (wmv in particular)
-
-void *av_malloc( unsigned int size )
+static int avformat_lockmgr(void **mutex, enum AVLockOp op)
 {
-	return mlt_pool_alloc( size );
-}
+   pthread_mutex_t** pmutex = (pthread_mutex_t**) mutex;
 
-void *av_realloc( void *ptr, unsigned int size )
-{
-	return mlt_pool_realloc( ptr, size );
-}
+   switch (op)
+   {
+   case AV_LOCK_CREATE:
+      *pmutex = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
+       pthread_mutex_init(*pmutex, NULL);
+       break;
+   case AV_LOCK_OBTAIN:
+       pthread_mutex_lock(*pmutex);
+       break;
+   case AV_LOCK_RELEASE:
+       pthread_mutex_unlock(*pmutex);
+       break;
+   case AV_LOCK_DESTROY:
+       pthread_mutex_destroy(*pmutex);
+       free(*pmutex);
+       break;
+   }
 
-void av_free( void *ptr )
-{
-	return mlt_pool_release( ptr );
-}
-#endif
-
-void avformat_destroy( void *ignore )
-{
-	// Clean up
-	// av_free_static( ); -XXX this is deprecated
-
-	// Destroy the mutex
-	pthread_mutex_destroy( &avformat_mutex );
-}
-
-void avformat_lock( )
-{
-	// Lock the mutex now
-	pthread_mutex_lock( &avformat_mutex );
-}
-
-void avformat_unlock( )
-{
-	// Unlock the mutex now
-	pthread_mutex_unlock( &avformat_mutex );
+   return 0;
 }
 
 static void avformat_init( )
@@ -96,12 +77,14 @@ static void avformat_init( )
 	if ( avformat_initialised == 0 )
 	{
 		avformat_initialised = 1;
-		pthread_mutex_init( &avformat_mutex, NULL );
+		av_lockmgr_register( &avformat_lockmgr );
 		av_register_all( );
 #ifdef AVDEVICE
 		avdevice_register_all();
 #endif
-		mlt_factory_register_for_clean_up( NULL, avformat_destroy );
+#if LIBAVFORMAT_VERSION_INT >= ((53<<16)+(13<<8))
+		avformat_network_init();
+#endif
 		av_log_set_level( mlt_log_get_level() );
 	}
 }
@@ -140,7 +123,11 @@ static void add_parameters( mlt_properties params, void *object, int req_flags, 
 	const AVOption *opt = NULL;
 
 	// For each AVOption on the AVClass object
+#if LIBAVUTIL_VERSION_INT >= ((51<<16)+(12<<8)+0)
+	while ( ( opt = av_opt_next( object, opt ) ) )
+#else
 	while ( ( opt = av_next_option( object, opt ) ) )
+#endif
 	{
 		// If matches flags and not a binary option (not supported by Mlt)
 		if ( !( opt->flags & req_flags ) || ( opt->type == FF_OPT_TYPE_BINARY ) )
@@ -310,7 +297,11 @@ static mlt_properties avformat_metadata( mlt_service_type type, const char *id, 
 		// Annotate the yaml properties with AVOptions.
 		mlt_properties params = (mlt_properties) mlt_properties_get_data( result, "parameters", NULL );
 		AVFormatContext *avformat = avformat_alloc_context();
+#if LIBAVCODEC_VERSION_INT > ((53<<16)+(8<<8)+0)
+		AVCodecContext *avcodec = avcodec_alloc_context3( NULL );
+#else
 		AVCodecContext *avcodec = avcodec_alloc_context();
+#endif
 		int flags = ( type == consumer_type )? AV_OPT_FLAG_ENCODING_PARAM : AV_OPT_FLAG_DECODING_PARAM;
 
 		add_parameters( params, avformat, flags, NULL, NULL );

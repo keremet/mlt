@@ -508,6 +508,7 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 	// Get width and height
 	*width = this->width;
 	*height = this->height;
+	*format = mlt_image_rgb24a;
 
 	// Always clone here to allow 'animated' text
 	if ( this->pixbuf )
@@ -519,7 +520,6 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 
 		// Now update properties so we free the copy after
 		mlt_frame_set_image( frame, *buffer, image_size, mlt_pool_release );
-		*format = mlt_image_rgb24a;
 	}
 	else
 	{
@@ -535,6 +535,9 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 static int producer_get_frame( mlt_producer producer, mlt_frame_ptr frame, int index )
 {
 	producer_pango this = producer->child;
+
+	// Fetch the producers properties
+	mlt_properties producer_properties = MLT_PRODUCER_PROPERTIES( producer );
 
 	// Generate a frame
 	*frame = mlt_frame_init( MLT_PRODUCER_SERVICE( producer ) );
@@ -556,7 +559,11 @@ static int producer_get_frame( mlt_producer producer, mlt_frame_ptr frame, int i
 
 	// Set producer-specific frame properties
 	mlt_properties_set_int( properties, "progressive", 1 );
-	mlt_properties_set_double( properties, "aspect_ratio", 1 );
+	double force_ratio = mlt_properties_get_double( producer_properties, "force_aspect_ratio" );
+	if ( force_ratio > 0.0 )
+		mlt_properties_set_double( properties, "aspect_ratio", force_ratio );
+	else
+		mlt_properties_set_double( properties, "aspect_ratio", 1.0);
 
 	// Stack the get image callback
 	mlt_frame_push_service( *frame, this );
