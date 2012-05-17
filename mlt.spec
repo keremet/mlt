@@ -24,7 +24,7 @@
 
 Name: mlt
 Version: 0.7.8
-Release: alt1
+Release: alt0.1
 Summary: Multimedia framework designed for television broadcasting
 License: GPL
 Group: Video
@@ -40,7 +40,7 @@ BuildRequires: ImageMagick-tools gcc-c++ jackit-devel ladspa_sdk libSDL-devel
 BuildRequires: libSDL_image-devel libX11-devel libavdevice-devel libavformat-devel
 BuildRequires: libquicktime-devel libsamplerate-devel libsox-devel libswscale-devel
 BuildRequires: libxml2-devel kde4libs-devel libqt4-devel swig python-devel
-BuildRequires: frei0r-devel
+BuildRequires: frei0r-devel libalsa-devel
 
 %description
 %Name is a multimedia framework designed for television broadcasting.
