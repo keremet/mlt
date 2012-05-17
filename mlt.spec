@@ -24,7 +24,7 @@
 
 Name: mlt
 Version: 0.7.8
-Release: alt0.1
+Release: alt1
 Summary: Multimedia framework designed for television broadcasting
 License: GPL
 Group: Video
