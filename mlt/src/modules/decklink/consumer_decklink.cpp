@@ -26,12 +26,7 @@
 #include <sys/time.h>
 #include <limits.h>
 #include <pthread.h>
-#ifdef WIN32
-#include <objbase.h>
-#include "DeckLinkAPI_h.h"
-#else
-#include "DeckLinkAPI.h"
-#endif
+#include "common.h"
 
 static const unsigned PREROLL_MINIMUM = 3;
 
@@ -64,10 +59,10 @@ private:
 	IDeckLinkDisplayMode* getDisplayMode()
 	{
 		mlt_profile profile = mlt_service_profile( MLT_CONSUMER_SERVICE( getConsumer() ) );
-		IDeckLinkDisplayModeIterator* iter;
-		IDeckLinkDisplayMode* mode;
+		IDeckLinkDisplayModeIterator* iter = NULL;
+		IDeckLinkDisplayMode* mode = NULL;
 		IDeckLinkDisplayMode* result = 0;
-		
+
 		if ( m_deckLinkOutput->GetDisplayModeIterator( &iter ) == S_OK )
 		{
 			while ( !result && iter->Next( &mode ) == S_OK )
@@ -78,31 +73,41 @@ private:
 				m_fps = (double) m_timescale / m_duration;
 				int p = mode->GetFieldDominance() == bmdProgressiveFrame;
 				mlt_log_verbose( getConsumer(), "BMD mode %dx%d %.3f fps prog %d\n", m_width, m_height, m_fps, p );
-				
+
 				if ( m_width == profile->width && p == profile->progressive
-					 && m_fps == mlt_profile_fps( profile )
+					 && (int) m_fps == (int) mlt_profile_fps( profile )
 					 && ( m_height == profile->height || ( m_height == 486 && profile->height == 480 ) ) )
 					result = mode;
+				else
+					SAFE_RELEASE( mode );
 			}
+			SAFE_RELEASE( iter );
 		}
-		
+
 		return result;
 	}
-	
+
 public:
 	mlt_consumer getConsumer()
 		{ return &m_consumer; }
-	
+
+	DeckLinkConsumer()
+	{
+		m_displayMode = NULL;
+		m_deckLinkKeyer = NULL;
+		m_deckLinkOutput = NULL;
+		m_deckLink = NULL;
+		m_decklinkFrame = NULL;
+	}
+
 	~DeckLinkConsumer()
 	{
-		if ( m_deckLinkKeyer )
-			m_deckLinkKeyer->Release();
-		if ( m_deckLinkOutput )
-			m_deckLinkOutput->Release();
-		if ( m_deckLink )
-			m_deckLink->Release();
+		SAFE_RELEASE( m_displayMode );
+		SAFE_RELEASE( m_deckLinkKeyer );
+		SAFE_RELEASE( m_deckLinkOutput );
+		SAFE_RELEASE( m_deckLink );
 	}
-	
+
 	bool open( unsigned card = 0 )
 	{
 		unsigned i = 0;
@@ -122,37 +127,39 @@ public:
 		}
 #else
 		IDeckLinkIterator* deckLinkIterator = CreateDeckLinkIteratorInstance();
-		
+
 		if ( !deckLinkIterator )
 		{
 			mlt_log_error( getConsumer(), "The DeckLink drivers not installed.\n" );
 			return false;
 		}
 #endif
-		
+
 		// Connect to the Nth DeckLink instance
-		do {
-			if ( deckLinkIterator->Next( &m_deckLink ) != S_OK )
-			{
-				mlt_log_error( getConsumer(), "DeckLink card not found\n" );
-				deckLinkIterator->Release();
-				return false;
-			}
-		} while ( ++i <= card );
-		deckLinkIterator->Release();
-		
+		for ( i = 0; deckLinkIterator->Next( &m_deckLink ) == S_OK ; i++)
+		{
+			if( i == card )
+				break;
+			else
+				SAFE_RELEASE( m_deckLink );
+		}
+		SAFE_RELEASE( deckLinkIterator );
+		if ( !m_deckLink )
+		{
+			mlt_log_error( getConsumer(), "DeckLink card not found\n" );
+			return false;
+		}
+
 		// Obtain the audio/video output interface (IDeckLinkOutput)
 		if ( m_deckLink->QueryInterface( IID_IDeckLinkOutput, (void**)&m_deckLinkOutput ) != S_OK )
 		{
 			mlt_log_error( getConsumer(), "No DeckLink cards support output\n" );
-			m_deckLink->Release();
-			m_deckLink = 0;
+			SAFE_RELEASE( m_deckLink );
 			return false;
 		}
-		
+
 		// Get the keyer interface
 		IDeckLinkAttributes *deckLinkAttributes = 0;
-		m_deckLinkKeyer = 0;
 		if ( m_deckLink->QueryInterface( IID_IDeckLinkAttributes, (void**) &deckLinkAttributes ) == S_OK )
 		{
 #ifdef WIN32
@@ -165,31 +172,32 @@ public:
 				if ( m_deckLink->QueryInterface( IID_IDeckLinkKeyer, (void**) &m_deckLinkKeyer ) != S_OK )
 				{
 					mlt_log_error( getConsumer(), "Failed to get keyer\n" );
-					m_deckLinkOutput->Release();
-					m_deckLinkOutput = 0;
-					m_deckLink->Release();
-					m_deckLink = 0;
+					SAFE_RELEASE( m_deckLinkOutput );
+					SAFE_RELEASE( m_deckLink );
 					return false;
 				}
 			}
-			deckLinkAttributes->Release();
+			SAFE_RELEASE( deckLinkAttributes );
 		}
 
 		// Provide this class as a delegate to the audio and video output interfaces
 		m_deckLinkOutput->SetScheduledFrameCompletionCallback( this );
-		
+
 		return true;
 	}
 
 
 	void* preroll_thread()
 	{
+		mlt_properties properties = MLT_CONSUMER_PROPERTIES( getConsumer() );
+
 		// preroll frames
-		for ( unsigned i = 0; i < m_preroll; i++ )
+		for ( unsigned i = 0; i < m_preroll && mlt_properties_get_int( properties, "running" ); i++ )
 			ScheduleNextFrame( true );
 
 		// start scheduled playback
-		m_deckLinkOutput->StartScheduledPlayback( 0, m_timescale, 1.0 );
+		if ( mlt_properties_get_int( properties, "running" ) )
+			m_deckLinkOutput->StartScheduledPlayback( 0, m_timescale, 1.0 );
 
 		return 0;
 	}
@@ -220,7 +228,7 @@ public:
 			mlt_log_error( getConsumer(), "Profile is not compatible with decklink.\n" );
 			return false;
 		}
-		
+
 		// Set the keyer
 		if ( m_deckLinkKeyer && ( m_isKeyer = mlt_properties_get_int( properties, "keyer" ) ) )
 		{
@@ -261,15 +269,15 @@ public:
 		m_preroll = preroll;
 		m_reprio = false;
 
-		// Do preroll in thread to ensure asynchronicity of mlt_consumer_start().
-		pthread_create( &m_prerollThread, NULL, preroll_thread_proxy, this );
-
 		// Set the running state
 		mlt_properties_set_int( properties, "running", 1 );
 
+		// Do preroll in thread to ensure asynchronicity of mlt_consumer_start().
+		pthread_create( &m_prerollThread, NULL, preroll_thread_proxy, this );
+
 		return true;
 	}
-	
+
 	bool stop()
 	{
 		mlt_properties properties = MLT_CONSUMER_PROPERTIES( getConsumer() );
@@ -277,7 +285,9 @@ public:
 
 		// set running state is 0
 		mlt_properties_set_int( properties, "running", 0 );
-		mlt_consumer_stopped( getConsumer() );
+
+		if ( wasRunning )
+			pthread_join( m_prerollThread, NULL );
 
 		// Stop the audio and video output streams immediately
 		if ( m_deckLinkOutput )
@@ -288,12 +298,9 @@ public:
 		}
 
 		// release decklink frame
-		if ( m_decklinkFrame )
-			m_decklinkFrame->Release();
-		m_decklinkFrame = NULL;
+		SAFE_RELEASE( m_decklinkFrame );
 
-		if ( wasRunning )
-			pthread_join( m_prerollThread, NULL );
+		mlt_consumer_stopped( getConsumer() );
 
 		return true;
 	}
@@ -347,7 +354,7 @@ public:
 			stop();
 			return false;
 		}
-		
+
 		// Make the first line black for field order correction.
 		if ( S_OK == frame->GetBytes( (void**) &buffer ) && buffer )
 		{
@@ -379,8 +386,7 @@ public:
 			uint8_t* buffer = 0;
 			int stride = m_width * ( m_isKeyer? 4 : 2 );
 
-			if ( m_decklinkFrame )
-				m_decklinkFrame->Release();
+			SAFE_RELEASE( m_decklinkFrame );
 			if ( createFrame( &m_decklinkFrame ) )
 				m_decklinkFrame->GetBytes( (void**) &buffer );
 
@@ -467,7 +473,7 @@ public:
 
 		return result;
 	}
-	
+
 	// *** DeckLink API implementation of IDeckLinkVideoOutputCallback IDeckLinkAudioOutputCallback *** //
 
 	// IUnknown needs only a dummy implementation
@@ -477,9 +483,9 @@ public:
 		{ return 1; }
 	virtual ULONG STDMETHODCALLTYPE Release()
 		{ return 1; }
-	
+
 	/************************* DeckLink API Delegate Methods *****************************/
-	
+
 	virtual HRESULT STDMETHODCALLTYPE ScheduledFrameCompleted( IDeckLinkVideoFrame* completedFrame, BMDOutputFrameCompletionResult completed )
 	{
 		if( !m_reprio )
@@ -561,7 +567,7 @@ public:
 	{
 		return mlt_consumer_is_stopped( getConsumer() ) ? S_FALSE : S_OK;
 	}
-	
+
 
 	void ScheduleNextFrame( bool preroll )
 	{
@@ -643,6 +649,53 @@ static void close( mlt_consumer consumer )
 
 extern "C" {
 
+// Listen for the list_devices property to be set
+static void on_property_changed( void*, mlt_properties properties, const char *name )
+{
+	IDeckLinkIterator* decklinkIterator = NULL;
+	IDeckLink* decklink = NULL;
+	IDeckLinkInput* decklinkOutput = NULL;
+	int i = 0;
+
+	if ( name && !strcmp( name, "list_devices" ) )
+		mlt_event_block( (mlt_event) mlt_properties_get_data( properties, "list-devices-event", NULL ) );
+	else
+		return;
+
+#ifdef WIN32
+	if ( FAILED( CoInitialize( NULL ) ) )
+		return;
+	if ( FAILED( CoCreateInstance( CLSID_CDeckLinkIterator, NULL, CLSCTX_ALL, IID_IDeckLinkIterator, (void**) &decklinkIterator ) ) )
+		return;
+#else
+	if ( !( decklinkIterator = CreateDeckLinkIteratorInstance() ) )
+		return;
+#endif
+	for ( ; decklinkIterator->Next( &decklink ) == S_OK; i++ )
+	{
+		if ( decklink->QueryInterface( IID_IDeckLinkOutput, (void**) &decklinkOutput ) == S_OK )
+		{
+			DLString name = NULL;
+			if ( decklink->GetModelName( &name ) == S_OK )
+			{
+				char *name_cstr = getCString( name );
+				const char *format = "device.%d";
+				char *key = (char*) calloc( 1, strlen( format ) + 1 );
+
+				sprintf( key, format, i );
+				mlt_properties_set( properties, key, name_cstr );
+				free( key );
+				freeDLString( name );
+				freeCString( name_cstr );
+			}
+			SAFE_RELEASE( decklinkOutput );
+		}
+		SAFE_RELEASE( decklink );
+	}
+	SAFE_RELEASE( decklinkIterator );
+	mlt_properties_set_int( properties, "devices", i );
+}
+
 /** Initialise the consumer.
  */
 
@@ -659,13 +712,17 @@ mlt_consumer consumer_decklink_init( mlt_profile profile, mlt_service_type type,
 		if ( decklink->open( arg? atoi(arg) : 0 ) )
 		{
 			consumer = decklink->getConsumer();
-			
+			mlt_properties properties = MLT_CONSUMER_PROPERTIES( consumer );
+
 			// Setup callbacks
 			consumer->close = close;
 			consumer->start = start;
 			consumer->stop = stop;
 			consumer->is_stopped = is_stopped;
-			mlt_properties_set( MLT_CONSUMER_PROPERTIES(consumer), "deinterlace_method", "onefield" );
+			mlt_properties_set( properties, "deinterlace_method", "onefield" );
+
+			mlt_event event = mlt_events_listen( properties, properties, "property-changed", (mlt_listener) on_property_changed );
+			mlt_properties_set_data( properties, "list-devices-event", event, 0, NULL, NULL );
 		}
 	}
 

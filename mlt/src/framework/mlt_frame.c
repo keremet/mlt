@@ -41,7 +41,7 @@
 mlt_frame mlt_frame_init( mlt_service service )
 {
 	// Allocate a frame
-	mlt_frame self = calloc( sizeof( struct mlt_frame_s ), 1 );
+	mlt_frame self = calloc( 1, sizeof( struct mlt_frame_s ) );
 
 	if ( self != NULL )
 	{
@@ -56,8 +56,6 @@ mlt_frame mlt_frame_init( mlt_service service )
 		mlt_properties_set_data( properties, "image", NULL, 0, NULL, NULL );
 		mlt_properties_set_int( properties, "width", profile? profile->width : 720 );
 		mlt_properties_set_int( properties, "height", profile? profile->height : 576 );
-		mlt_properties_set_int( properties, "normalised_width", profile? profile->width : 720 );
-		mlt_properties_set_int( properties, "normalised_height", profile? profile->height : 576 );
 		mlt_properties_set_double( properties, "aspect_ratio", mlt_profile_sar( NULL ) );
 		mlt_properties_set_data( properties, "audio", NULL, 0, NULL, NULL );
 		mlt_properties_set_data( properties, "alpha", NULL, 0, NULL, NULL );
@@ -134,14 +132,34 @@ int mlt_frame_set_aspect_ratio( mlt_frame self, double value )
 
 /** Get the time position of this frame.
  *
+ * This position is not necessarily the position as the original
+ * producer knows it. It could be the position that the playlist,
+ * multitrack, or tractor producer set.
+ *
  * \public \memberof mlt_frame_s
  * \param self a frame
  * \return the position
+ * \see mlt_frame_original_position
  */
 
 mlt_position mlt_frame_get_position( mlt_frame self )
 {
 	int pos = mlt_properties_get_position( MLT_FRAME_PROPERTIES( self ), "_position" );
+	return pos < 0 ? 0 : pos;
+}
+
+/** Get the original time position of this frame.
+ *
+ * This is the position that the original producer set on the frame.
+ *
+ * \public \memberof mlt_frame_s
+ * \param self a frame
+ * \return the position
+ */
+
+mlt_position mlt_frame_original_position( mlt_frame self )
+{
+	int pos = mlt_properties_get_position( MLT_FRAME_PROPERTIES( self ), "original_position" );
 	return pos < 0 ? 0 : pos;
 }
 
@@ -155,6 +173,9 @@ mlt_position mlt_frame_get_position( mlt_frame self )
 
 int mlt_frame_set_position( mlt_frame self, mlt_position value )
 {
+	// Only set the original_position the first time.
+	if ( ! mlt_properties_get( MLT_FRAME_PROPERTIES( self ), "original_position" ) )
+		mlt_properties_set_position( MLT_FRAME_PROPERTIES( self ), "original_position", value );
 	return mlt_properties_set_position( MLT_FRAME_PROPERTIES( self ), "_position", value );
 }
 
@@ -322,6 +343,7 @@ int mlt_frame_set_image( mlt_frame self, uint8_t *image, int size, mlt_destructo
 
 int mlt_frame_set_alpha( mlt_frame self, uint8_t *alpha, int size, mlt_destructor destroy )
 {
+	self->get_alpha_mask = NULL;
 	return mlt_properties_set_data( MLT_FRAME_PROPERTIES( self ), "alpha", alpha, size, destroy, NULL );
 }
 
@@ -484,7 +506,6 @@ int mlt_frame_get_image( mlt_frame self, uint8_t **buffer, mlt_image_format *for
 		if ( test_frame )
 		{
 			mlt_properties test_properties = MLT_FRAME_PROPERTIES( test_frame );
-			mlt_properties_set_double( test_properties, "consumer_aspect_ratio", mlt_properties_get_double( properties, "consumer_aspect_ratio" ) );
 			mlt_properties_set( test_properties, "rescale.interp", mlt_properties_get( properties, "rescale.interp" ) );
 			mlt_frame_get_image( test_frame, buffer, format, width, height, writable );
 			mlt_properties_set_data( properties, "test_card_frame", test_frame, 0, ( mlt_destructor )mlt_frame_close, NULL );
@@ -608,6 +629,7 @@ const char * mlt_audio_format_name( mlt_audio_format format )
 		case mlt_audio_s32le:  return "s32le";
 		case mlt_audio_float:  return "float";
 		case mlt_audio_f32le:  return "f32le";
+		case mlt_audio_u8:     return "u8";
 	}
 	return "invalid";
 }
@@ -631,6 +653,7 @@ int mlt_audio_format_size( mlt_audio_format format, int samples, int channels )
 		case mlt_audio_s32:    return samples * channels * sizeof( int32_t );
 		case mlt_audio_f32le:
 		case mlt_audio_float:  return samples * channels * sizeof( float );
+		case mlt_audio_u8:     return samples * channels;
 	}
 	return 0;
 }
@@ -800,9 +823,13 @@ unsigned char *mlt_frame_get_waveform( mlt_frame self, int w, int h )
 
 	// Make an 8-bit buffer large enough to hold rendering
 	int size = w * h;
+	if ( size <= 0 )
+		return NULL;
 	unsigned char *bitmap = ( unsigned char* )mlt_pool_alloc( size );
 	if ( bitmap != NULL )
 		memset( bitmap, 0, size );
+	else
+		return NULL;
 	mlt_properties_set_data( properties, "waveform", bitmap, size, ( mlt_destructor )mlt_pool_release, NULL );
 
 	// Render vertical lines
@@ -926,8 +953,8 @@ int64_t mlt_sample_calculator_to_now( float fps, int frequency, int64_t position
 
 void mlt_frame_write_ppm( mlt_frame frame )
 {
-	int width;
-	int height;
+	int width = 0;
+	int height = 0;
 	mlt_image_format format = mlt_image_rgb24;
 	uint8_t *image;
 	
@@ -1023,6 +1050,17 @@ mlt_frame mlt_frame_clone( mlt_frame self, int is_deep )
 			copy = mlt_pool_alloc( size );
 			memcpy( copy, data, size );
 			mlt_properties_set_data( new_props, "image", copy, size, mlt_pool_release, NULL );
+
+			data = mlt_properties_get_data( properties, "alpha", &size );
+			if ( data )
+			{
+				if ( ! size )
+					size = mlt_properties_get_int( properties, "width" ) *
+						mlt_properties_get_int( properties, "height" );
+				copy = mlt_pool_alloc( size );
+				memcpy( copy, data, size );
+				mlt_properties_set_data( new_props, "alpha", copy, size, mlt_pool_release, NULL );
+			};
 		}
 	}
 	else
@@ -1037,6 +1075,8 @@ mlt_frame mlt_frame_clone( mlt_frame self, int is_deep )
 		mlt_properties_set_data( new_props, "audio", data, size, NULL, NULL );
 		data = mlt_properties_get_data( properties, "image", &size );
 		mlt_properties_set_data( new_props, "image", data, size, NULL, NULL );
+		data = mlt_properties_get_data( properties, "alpha", &size );
+		mlt_properties_set_data( new_props, "alpha", data, size, NULL, NULL );
 	}
 
 	return new_frame;

@@ -33,20 +33,31 @@ void read_xml(mlt_properties properties)
 		int size = 0;
 		long lSize;
  
-		fseek (f , 0 , SEEK_END);
+		if ( fseek (f , 0 , SEEK_END) < 0 )
+			goto error;
 		lSize = ftell (f);
+		if ( lSize <= 0 )
+			goto error;
 		rewind (f);
 
 		char *infile = (char*) mlt_pool_alloc(lSize);
-		size=fread(infile,1,lSize,f);
-		infile[size] = '\0';
+		if ( infile )
+		{
+			size = fread(infile,1,lSize,f);
+			if ( size )
+			{
+				infile[size] = '\0';
+				mlt_properties_set(properties, "_xmldata", infile);
+			}
+			mlt_pool_release( infile );
+		}
+error:
 		fclose(f);
-		mlt_properties_set(properties, "_xmldata", infile);
-		mlt_pool_release( infile );
 	}
 }
 
 static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_format *format, int *width, int *height, int writable )
+
 {
 	/* Obtain properties of frame */
 	mlt_properties properties = MLT_FRAME_PROPERTIES( frame );
@@ -64,13 +75,12 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 
 	/* Allocate the image */
 	*format = mlt_image_rgb24a;
-	mlt_position time = mlt_producer_position( &this->parent ) + mlt_producer_get_in( &this->parent );
 	if ( mlt_properties_get_int( producer_props, "force_reload" ) ) {
-		if (mlt_properties_get_int( producer_props, "force_reload" ) > 1) read_xml(producer_props);
+		if ( mlt_properties_get_int( producer_props, "force_reload" ) > 1 ) read_xml( producer_props );
 		mlt_properties_set_int( producer_props, "force_reload", 0 );
-		drawKdenliveTitle( this, frame, *width, *height, time, 1);
+		drawKdenliveTitle( this, frame, *width, *height, mlt_frame_original_position( frame ), 1);
 	}
-	else drawKdenliveTitle( this, frame, *width, *height, time, 0);
+	else drawKdenliveTitle( this, frame, *width, *height, mlt_frame_original_position( frame ), 0);
 
 	// Get width and height (may have changed during the refresh)
 	*width = mlt_properties_get_int( properties, "width" );
@@ -119,9 +129,7 @@ static int producer_get_frame( mlt_producer producer, mlt_frame_ptr frame, int i
 		mlt_frame_set_position( *frame, mlt_producer_position( producer ) );
 
 		/* Set producer-specific frame properties */
-		mlt_profile profile = mlt_service_profile ( MLT_PRODUCER_SERVICE( producer ) ) ;
-		mlt_properties_set_int( properties, "progressive", ( profile ) ? profile->progressive : 1 );
-		mlt_properties_set_double( properties, "aspect_ratio", mlt_properties_get_double( producer_props, "aspect_ratio" ) );
+		mlt_properties_pass_list( properties, producer_props, "progressive, aspect_ratio" );
 
 		/* Push the get_image method */
 		mlt_frame_push_get_image( *frame, producer_get_image );
@@ -147,7 +155,7 @@ mlt_producer producer_kdenlivetitle_init( mlt_profile profile, mlt_service_type 
   	/* fprintf(stderr, ":::::::::::: CREATE TITLE\n"); */
 	/* Create a new producer object */
 	
-	producer_ktitle this = calloc( sizeof( struct producer_ktitle_s ), 1 );
+	producer_ktitle this = calloc( 1, sizeof( struct producer_ktitle_s ) );
 	if ( this != NULL && mlt_producer_init( &this->parent, this ) == 0 )
 	{
 		mlt_producer producer = &this->parent;
@@ -158,7 +166,7 @@ mlt_producer producer_kdenlivetitle_init( mlt_profile profile, mlt_service_type 
 		producer->get_frame = producer_get_frame;
 		producer->close = ( mlt_destructor )producer_close;
 		mlt_properties_set( properties, "resource", filename );
-		//mlt_properties_set_int( properties, "aspect_ratio", 1 );
+		mlt_properties_set_int( properties, "progressive", 1 );
 		read_xml(properties);
 		return producer;
 	}

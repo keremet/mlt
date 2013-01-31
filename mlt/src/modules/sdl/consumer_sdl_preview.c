@@ -67,7 +67,7 @@ static void consumer_refresh_cb( mlt_consumer sdl, mlt_consumer this, char *name
 
 mlt_consumer consumer_sdl_preview_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg )
 {
-	consumer_sdl this = calloc( sizeof( struct consumer_sdl_s ), 1 );
+	consumer_sdl this = calloc( 1, sizeof( struct consumer_sdl_s ) );
 	if ( this != NULL && mlt_consumer_init( &this->parent, this, profile ) == 0 )
 	{
 		// Get the parent consumer object
@@ -93,6 +93,8 @@ mlt_consumer consumer_sdl_preview_init( mlt_profile profile, mlt_service_type ty
 		mlt_properties_set( properties, "rescale", "nearest" );
 		mlt_properties_set( properties, "deinterlace_method", "onefield" );
 		mlt_properties_set_int( properties, "prefill", 1 );
+		mlt_properties_set_int( properties, "top_field_first", -1 );
+
 		parent->close = consumer_close;
 		parent->start = consumer_start;
 		parent->stop = consumer_stop;
@@ -199,9 +201,10 @@ static int consumer_start( mlt_consumer parent )
 
 		mlt_properties_pass_list( play, properties,
 			"deinterlace_method,resize,rescale,width,height,aspect_ratio,display_ratio,preview_off,preview_format,window_background"
-			",volume,real_time,buffer,prefill,audio_off,frequency,drop_max" );
+			",top_field_first,volume,real_time,buffer,prefill,audio_off,frequency,drop_max" );
 		mlt_properties_pass_list( still, properties,
-			"deinterlace_method,resize,rescale,width,height,aspect_ratio,display_ratio,preview_off,preview_format,window_background" );
+			"deinterlace_method,resize,rescale,width,height,aspect_ratio,display_ratio,preview_off,preview_format,window_background"
+			",top_field_first");
 
 		mlt_properties_pass( play, properties, "play." );
 		mlt_properties_pass( still, properties, "still." );
@@ -287,12 +290,16 @@ static void *consumer_thread( void *arg )
 	mlt_frame frame = NULL;
 	int last_position = -1;
 	int eos = 0;
-	int eos_threshold = 20 + mlt_properties_get_int( MLT_CONSUMER_PROPERTIES( this->play ), "buffer" );
+	int eos_threshold = 20;
+	if ( this->play )
+		eos_threshold = eos_threshold + mlt_properties_get_int( MLT_CONSUMER_PROPERTIES( this->play ), "buffer" );
 
 	// Determine if the application is dealing with the preview
 	int preview_off = mlt_properties_get_int( properties, "preview_off" );
 
+	pthread_mutex_lock( &this->refresh_mutex );
 	this->refresh_count = 0;
+	pthread_mutex_unlock( &this->refresh_mutex );
 
 	// Loop until told not to
 	while( this->running )
@@ -425,7 +432,8 @@ static void *consumer_thread( void *arg )
 					this->ignore_change = 0;
 					mlt_consumer_start( this->play );
 				}
-				mlt_consumer_put_frame( this->play, frame );
+				if ( this->play )
+					mlt_consumer_put_frame( this->play, frame );
 			}
 
 			// Copy the rectangle info from the active consumer

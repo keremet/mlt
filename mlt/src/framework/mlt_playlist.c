@@ -53,6 +53,7 @@ struct playlist_entry_s
 static int producer_get_frame( mlt_producer producer, mlt_frame_ptr frame, int index );
 static int mlt_playlist_unmix( mlt_playlist self, int clip );
 static int mlt_playlist_resize_mix( mlt_playlist self, int clip, int in, int out );
+static void mlt_playlist_next( mlt_listener listener, mlt_properties owner, mlt_service self, void **args );
 
 /** Construct a playlist.
  *
@@ -64,13 +65,13 @@ static int mlt_playlist_resize_mix( mlt_playlist self, int clip, int in, int out
 
 mlt_playlist mlt_playlist_init( )
 {
-	mlt_playlist self = calloc( sizeof( struct mlt_playlist_s ), 1 );
+	mlt_playlist self = calloc( 1, sizeof( struct mlt_playlist_s ) );
 	if ( self != NULL )
 	{
 		mlt_producer producer = &self->parent;
 
 		// Construct the producer
-		mlt_producer_init( producer, self );
+		if ( mlt_producer_init( producer, self ) != 0 ) goto error1;
 
 		// Override the producer get_frame
 		producer->get_frame = producer_get_frame;
@@ -80,7 +81,7 @@ mlt_playlist mlt_playlist_init( )
 		producer->close_object = self;
 
 		// Initialise blank
-		mlt_producer_init( &self->blank, NULL );
+		if ( mlt_producer_init( &self->blank, NULL ) != 0 ) goto error1;
 		mlt_properties_set( MLT_PRODUCER_PROPERTIES( &self->blank ), "mlt_service", "blank" );
 		mlt_properties_set( MLT_PRODUCER_PROPERTIES( &self->blank ), "resource", "blank" );
 
@@ -96,10 +97,35 @@ mlt_playlist mlt_playlist_init( )
 		mlt_properties_set_position( MLT_PLAYLIST_PROPERTIES( self ), "length", 0 );
 
 		self->size = 10;
-		self->list = malloc( self->size * sizeof( playlist_entry * ) );
+		self->list = calloc( self->size, sizeof( playlist_entry * ) );
+		if ( self->list == NULL ) goto error2;
+		
+		mlt_events_register( MLT_PLAYLIST_PROPERTIES( self ), "playlist-next", (mlt_transmitter) mlt_playlist_next );
 	}
 
 	return self;
+error2:
+	free( self->list );
+error1:
+	free( self );
+	return NULL;
+}
+
+/** Construct a playlist with a profile.
+ *
+ * Sets the resource property to "<playlist>".
+ * Set the mlt_type to property to "mlt_producer".
+ * \public \memberof mlt_playlist_s
+ * \param profile the profile to use with the profile
+ * \return a new playlist
+ */
+
+mlt_playlist mlt_playlist_new( mlt_profile profile )
+{
+    mlt_playlist self = mlt_playlist_init();
+    if ( self )
+        mlt_properties_set_data( MLT_PLAYLIST_PROPERTIES( self ), "_profile", profile, 0, NULL, NULL );
+    return self;
 }
 
 /** Get the producer associated to this playlist.
@@ -312,7 +338,7 @@ static int mlt_playlist_virtual_append( mlt_playlist self, mlt_producer source, 
 	}
 
 	// Create the entry
-	self->list[ self->count ] = calloc( sizeof( playlist_entry ), 1 );
+	self->list[ self->count ] = calloc( 1, sizeof( playlist_entry ) );
 	if ( self->list[ self->count ] != NULL )
 	{
 		self->list[ self->count ]->producer = producer;
@@ -369,6 +395,24 @@ static mlt_producer mlt_playlist_locate( mlt_playlist self, mlt_position *positi
 
 	return producer;
 }
+
+/** The transmitter for the producer-next event
+ *
+ * Invokes the listener.
+ *
+ * \private \memberof mlt_playlist_s
+ * \param listener a function pointer that will be invoked
+ * \param owner the events object that will be passed to \p listener
+ * \param self a service that will be passed to \p listener
+ * \param args an array of pointers.
+ */
+
+static void mlt_playlist_next( mlt_listener listener, mlt_properties owner, mlt_service self, void **args )
+{
+	if ( listener )
+		listener( owner, self, args[ 0 ] );
+}
+
 
 /** Seek in the virtual playlist.
  *
@@ -456,6 +500,10 @@ static mlt_service mlt_playlist_virtual_seek( mlt_playlist self, int *progressiv
 	{
 		producer = &self->blank;
 	}
+
+	// Determine if we have moved to the next entry in the playlist.
+	if ( original == total - 2 )
+		mlt_events_fire( properties, "playlist-next", i, NULL );
 
 	return MLT_PRODUCER_SERVICE( producer );
 }
@@ -702,15 +750,36 @@ int mlt_playlist_append_io( mlt_playlist self, mlt_producer producer, mlt_positi
  *
  * \public \memberof mlt_playlist_s
  * \param self a playlist
- * \param length the ending time of the blank entry, not its duration
+ * \param out the ending time of the blank entry, not its duration
  * \return true if there was an error
  */
 
-int mlt_playlist_blank( mlt_playlist self, mlt_position length )
+int mlt_playlist_blank( mlt_playlist self, mlt_position out )
 {
 	// Append to the virtual list
-	if (length >= 0)
-		return mlt_playlist_virtual_append( self, &self->blank, 0, length );
+	if ( out >= 0 )
+		return mlt_playlist_virtual_append( self, &self->blank, 0, out );
+	else
+		return 1;
+}
+
+/** Append a blank item to the playlist with duration as a time string.
+ *
+ * \public \memberof mlt_playlist_s
+ * \param self a playlist
+ * \param length the duration of the blank entry as a time string
+ * \return true if there was an error
+ */
+
+int mlt_playlist_blank_time( mlt_playlist self, const char* length )
+{
+	if ( self && length )
+	{
+		mlt_properties properties = MLT_PLAYLIST_PROPERTIES( self );
+		mlt_properties_set( properties , "_blank_time", length );
+		mlt_position duration = mlt_properties_get_position( properties, "_blank_time" );
+		return mlt_playlist_blank( self, duration - 1 );
+	}
 	else
 		return 1;
 }
@@ -766,12 +835,6 @@ int mlt_playlist_remove( mlt_playlist self, int where )
 
 		// Get the clip info
 		mlt_playlist_get_clip_info( self, &where_info, where );
-
-		// Make sure the clip to be removed is valid and correct if necessary
-		if ( where < 0 )
-			where = 0;
-		if ( where >= self->count )
-			where = self->count - 1;
 
 		// Reorganise the list
 		for ( i = where + 1; i < self->count; i ++ )
@@ -1067,7 +1130,7 @@ int mlt_playlist_join( mlt_playlist self, int clip, int count, int merge )
 	if ( error == 0 )
 	{
 		int i = clip;
-		mlt_playlist new_clip = mlt_playlist_init( );
+		mlt_playlist new_clip = mlt_playlist_new( mlt_service_profile( MLT_PLAYLIST_SERVICE(self) ) );
 		mlt_events_block( MLT_PLAYLIST_PROPERTIES( self ), self );
 		if ( clip + count >= self->count )
 			count = self->count - clip - 1;

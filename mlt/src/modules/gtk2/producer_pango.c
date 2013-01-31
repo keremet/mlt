@@ -123,7 +123,7 @@ static PangoFT2FontMap *fontmap = NULL;
 
 mlt_producer producer_pango_init( const char *filename )
 {
-	producer_pango this = calloc( sizeof( struct producer_pango_s ), 1 );
+	producer_pango this = calloc( 1, sizeof( struct producer_pango_s ) );
 	if ( this != NULL && mlt_producer_init( &this->parent, this ) == 0 )
 	{
 		mlt_producer producer = &this->parent;
@@ -154,8 +154,10 @@ mlt_producer producer_pango_init( const char *filename )
 		mlt_properties_set( properties, "style", "normal" );
 		mlt_properties_set( properties, "encoding", "UTF-8" );
 		mlt_properties_set_int( properties, "weight", PANGO_WEIGHT_NORMAL );
+		mlt_properties_set_int( properties, "seekable", 1 );
 
 		if ( filename == NULL || ( filename && ( !strcmp( filename, "" )
+			|| strstr( filename, "<producer>" )
 			// workaround for old kdenlive countdown generator
 			|| strstr( filename, "&lt;producer&gt;" ) ) ) )
 		{
@@ -167,7 +169,8 @@ mlt_producer producer_pango_init( const char *filename )
 			char *markup = copy;
 			if ( strstr( markup, "/+" ) )
 				markup = strstr( markup, "/+" ) + 2;
-			( *strrchr( markup, '.' ) ) = '\0';
+			if ( strrchr( markup, '.' ) )
+				( *strrchr( markup, '.' ) ) = '\0';
 			while ( strchr( markup, '~' ) )
 				( *strchr( markup, '~' ) ) = '\n';
 			mlt_properties_set( properties, "resource", filename );
@@ -215,7 +218,8 @@ mlt_producer producer_pango_init( const char *filename )
 					if ( markup )
 					{
 						markup = realloc( markup, size );
-						strcat( markup, line );
+						if ( markup )
+							strcat( markup, line );
 					}
 					else
 					{
@@ -224,11 +228,14 @@ mlt_producer producer_pango_init( const char *filename )
 				}
 				fclose( f );
 
-				if ( markup[ strlen( markup ) - 1 ] == '\n' ) 
+				if ( markup && markup[ strlen( markup ) - 1 ] == '\n' )
 					markup[ strlen( markup ) - 1 ] = '\0';
 
 				mlt_properties_set( properties, "resource", filename );
-				mlt_properties_set( properties, "markup", ( markup == NULL ? "" : markup ) );
+				if ( markup )
+					mlt_properties_set( properties, "markup", markup );
+				else
+					mlt_properties_set( properties, "markup", "" );
 				free( markup );
 			}
 			else
@@ -305,7 +312,7 @@ static int iconv_utf8( mlt_properties properties, const char *prop_name, const c
 	int result = -1;
 	
 	iconv_t	cd = iconv_open( "UTF-8", encoding );
-	if ( cd != ( iconv_t )-1 )
+	if ( text && ( cd != ( iconv_t )-1 ) )
 	{
 		char *inbuf_p = text;
 		size_t inbuf_n = strlen( text );
@@ -321,9 +328,9 @@ static int iconv_utf8( mlt_properties properties, const char *prop_name, const c
 			mlt_properties_set( properties, prop_name, "" );
 
 		mlt_pool_release( outbuf );
-		iconv_close( cd );
 		result = 0;
 	}
+	iconv_close( cd );
 	return result;
 }
 
@@ -364,14 +371,13 @@ static void refresh_image( mlt_frame frame, int width, int height )
 	if ( pixbuf == NULL )
 	{
 		// Check for file support
-		int position = mlt_properties_get_position( properties, "pango_position" );
 		mlt_properties contents = mlt_properties_get_data( producer_props, "contents", NULL );
 		mlt_geometry key_frames = mlt_properties_get_data( producer_props, "key_frames", NULL );
 		struct mlt_geometry_item_s item;
 		if ( contents != NULL )
 		{
 			char temp[ 20 ];
-			mlt_geometry_prev_key( key_frames, &item, position );
+			mlt_geometry_prev_key( key_frames, &item, mlt_frame_original_position( frame ) );
 			sprintf( temp, "%d", item.frame );
 			markup = mlt_properties_get( contents, temp );
 		}
@@ -442,8 +448,8 @@ static void refresh_image( mlt_frame frame, int width, int height )
 			g_object_ref( pixbuf );
 			mlt_properties_set_data( MLT_FRAME_PROPERTIES( frame ), "pixbuf", pixbuf, 0, ( mlt_destructor )g_object_unref, NULL );
 
-			mlt_properties_set_int( producer_props, "real_width", gdk_pixbuf_get_width( pixbuf ) );
-			mlt_properties_set_int( producer_props, "real_height", gdk_pixbuf_get_height( pixbuf ) );
+			mlt_properties_set_int( producer_props, "meta.media.width", gdk_pixbuf_get_width( pixbuf ) );
+			mlt_properties_set_int( producer_props, "meta.media.height", gdk_pixbuf_get_height( pixbuf ) );
 
 			// Store the width/height of the pixbuf temporarily
 			this->width = gdk_pixbuf_get_width( pixbuf );
@@ -484,8 +490,6 @@ static void refresh_image( mlt_frame frame, int width, int height )
 	// Set width/height
 	mlt_properties_set_int( properties, "width", this->width );
 	mlt_properties_set_int( properties, "height", this->height );
-	mlt_properties_set_int( properties, "real_width", mlt_properties_get_int( producer_props, "real_width" ) );
-	mlt_properties_set_int( properties, "real_height", mlt_properties_get_int( producer_props, "real_height" ) );
 }
 
 static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_format *format, int *width, int *height, int writable )
@@ -550,7 +554,6 @@ static int producer_get_frame( mlt_producer producer, mlt_frame_ptr frame, int i
 
 	// Update timecode on the frame we're creating
 	mlt_frame_set_position( *frame, mlt_producer_position( producer ) );
-	mlt_properties_set_position( properties, "pango_position", mlt_producer_frame( producer ) );
 
 	// Refresh the pango image
 	pthread_mutex_lock( &pango_mutex );

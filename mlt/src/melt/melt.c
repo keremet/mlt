@@ -1,6 +1,6 @@
 /*
  * melt.c -- MLT command line utility
- * Copyright (C) 2002-2012 Ushodaya Enterprises Limited
+ * Copyright (C) 2002-2013 Ushodaya Enterprises Limited
  * Authors: Charles Yates <charles.yates@pandora.be>
  *          Dan Dennedy <dan@dennedy.org>
  *
@@ -29,14 +29,26 @@
 #include <libgen.h>
 #include <limits.h>
 #include <unistd.h>
+#include <signal.h>
 
 #include <framework/mlt.h>
 
-#if defined(__DARWIN__) || defined(WIN32)
+#if (defined(__DARWIN__) || defined(WIN32)) && !defined(MELT_NOSDL)
 #include <SDL.h>
 #endif
 
 #include "io.h"
+
+static mlt_producer melt = NULL;
+
+static void stop_handler(int signum)
+{
+	if ( melt )
+	{
+		mlt_properties properties = MLT_PRODUCER_PROPERTIES( melt );
+		mlt_properties_set_int( properties, "done", 1 );
+	}
+}
 
 static void transport_action( mlt_producer producer, char *value )
 {
@@ -44,7 +56,7 @@ static void transport_action( mlt_producer producer, char *value )
 	mlt_multitrack multitrack = mlt_properties_get_data( properties, "multitrack", NULL );
 	mlt_consumer consumer = mlt_properties_get_data( properties, "transport_consumer", NULL );
 	mlt_properties jack = mlt_properties_get_data( MLT_CONSUMER_PROPERTIES( consumer ), "jack_filter", NULL );
-	mlt_position position = mlt_producer_position( producer );
+	mlt_position position = producer? mlt_producer_position( producer ) : 0;
 
 	mlt_properties_set_int( properties, "stats_off", 1 );
 
@@ -321,7 +333,7 @@ static void load_consumer( mlt_consumer *consumer, mlt_profile profile, int argc
 	}
 }
 
-#if defined(__DARWIN__) || defined(WIN32)
+#if (defined(__DARWIN__) || defined(WIN32)) && !defined(MELT_NOSDL)
 
 static void event_handling( mlt_producer producer, mlt_consumer consumer )
 {
@@ -353,7 +365,7 @@ static void transport( mlt_producer producer, mlt_consumer consumer )
 	mlt_properties properties = MLT_PRODUCER_PROPERTIES( producer );
 	int silent = mlt_properties_get_int( MLT_CONSUMER_PROPERTIES( consumer ), "silent" );
 	int progress = mlt_properties_get_int( MLT_CONSUMER_PROPERTIES( consumer ), "progress" );
-	struct timespec tm = { 0, 40000 };
+	struct timespec tm = { 0, 40000000 };
 	int total_length = mlt_producer_get_length( producer );
 	int last_position = 0;
 
@@ -385,7 +397,7 @@ static void transport( mlt_producer producer, mlt_consumer consumer )
 				transport_action( producer, string );
 			}
 
-#if defined(__DARWIN__) || defined(WIN32)
+#if (defined(__DARWIN__) || defined(WIN32)) && !defined(MELT_NOSDL)
 			event_handling( producer, consumer );
 #endif
 
@@ -406,6 +418,7 @@ static void transport( mlt_producer producer, mlt_consumer consumer )
 				{
 					fprintf( stderr, "Current Position: %10d\r", (int)mlt_consumer_position( consumer ) );
 				}
+				fflush( stderr );
 			}
 
 			if ( silent || progress )
@@ -661,7 +674,6 @@ int main( int argc, char **argv )
 {
 	int i;
 	mlt_consumer consumer = NULL;
-	mlt_producer melt = NULL;
 	FILE *store = NULL;
 	char *name = NULL;
 	mlt_profile profile = NULL;
@@ -672,7 +684,7 @@ int main( int argc, char **argv )
 	// Construct the factory
 	mlt_repository repo = mlt_factory_init( NULL );
 
-#ifdef WIN32
+#if defined(WIN32) && !defined(MELT_NOSDL)
 	is_silent = 1;
 #endif
 	
@@ -770,7 +782,7 @@ query_all:
 		else if ( !strcmp( argv[ i ], "-version" ) || !strcmp( argv[ i ], "--version" ) )
 		{
 			fprintf( stdout, "%s " VERSION "\n"
-				"Copyright (C) 2002-2012 Ushodaya Enterprises Limited\n"
+				"Copyright (C) 2002-2013 Ushodaya Enterprises Limited\n"
 				"<http://www.mltframework.org/>\n"
 				"This is free software; see the source for copying conditions.  There is NO\n"
 				"warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n",
@@ -782,7 +794,7 @@ query_all:
 			mlt_log_set_level( MLT_LOG_DEBUG );
 		}
 	}
-	if ( !is_silent && !isatty( STDIN_FILENO ) )
+	if ( !is_silent && !isatty( STDIN_FILENO ) && !is_progress )
 		is_progress = 1;
 
 	// Create profile if not set explicitly
@@ -906,6 +918,14 @@ query_all:
 			mlt_events_listen( properties, consumer, "consumer-fatal-error", ( mlt_listener )on_fatal_error );
 			if ( mlt_consumer_start( consumer ) == 0 )
 			{
+				// Try to exit gracefully upon these signals
+				signal( SIGINT, stop_handler );
+				signal( SIGTERM, stop_handler );
+#ifndef WIN32
+				signal( SIGHUP, stop_handler );
+				signal( SIGPIPE, stop_handler );
+#endif
+
 				// Transport functionality
 				transport( melt, consumer );
 				

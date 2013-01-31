@@ -337,6 +337,8 @@ static int convert_image( mlt_frame frame, uint8_t **buffer, mlt_image_format *f
 			                 ? mlt_pool_alloc( width * height ) : NULL;
 			if ( requested_format == mlt_image_rgb24a || requested_format == mlt_image_opengl )
 			{
+				if ( alpha )
+					mlt_pool_release( alpha );
 				alpha = mlt_frame_get_alpha_mask( frame );
 				mlt_properties_get_data( properties, "alpha", &alpha_size );
 			}
@@ -379,7 +381,7 @@ static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
 
 mlt_filter filter_imageconvert_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg )
 {
-	mlt_filter this = calloc( sizeof( struct mlt_filter_s ), 1 );
+	mlt_filter this = calloc( 1, sizeof( struct mlt_filter_s ) );
 	if ( mlt_filter_init( this, this ) == 0 )
 	{
 		this->process = filter_process;

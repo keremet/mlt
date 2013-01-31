@@ -85,7 +85,7 @@ static void create_filter( mlt_profile profile, mlt_service service, char *effec
 
 	// The swscale and avcolor_space filters require resolution as arg to test compatibility
 	if ( strncmp( effect, "swscale", 7 ) == 0 || strncmp( effect, "avcolo", 6 ) == 0 )
-		arg = (char*) mlt_properties_get_int( MLT_SERVICE_PROPERTIES( service ), "_real_width" );
+		arg = (char*) mlt_properties_get_int( MLT_SERVICE_PROPERTIES( service ), "meta.media.width" );
 
 	mlt_filter filter = mlt_factory_filter( profile, id, arg );
 	if ( filter != NULL )
@@ -137,6 +137,11 @@ static void attach_normalisers( mlt_profile profile, mlt_service service )
 	create_filter( profile, service, "audioconvert", &created );
 }
 
+static void on_frame_show( void *dummy, mlt_properties properties, mlt_frame frame )
+{
+	mlt_events_fire( properties, "consumer-frame-show", frame, NULL );
+}
+
 static mlt_consumer generate_consumer( mlt_consumer consumer, mlt_properties props, int index )
 {
 	mlt_profile profile = NULL;
@@ -166,6 +171,14 @@ static mlt_consumer generate_consumer( mlt_consumer consumer, mlt_properties pro
 		mlt_properties_inherit( nested_props, props );
 
 		attach_normalisers( profile, MLT_CONSUMER_SERVICE(nested) );
+
+		// Relay the first available consumer-frame-show event
+		mlt_event event = mlt_properties_get_data( properties, "frame-show-event", NULL );
+		if ( !event )
+		{
+			event = mlt_events_listen( nested_props, properties, "consumer-frame-show", (mlt_listener) on_frame_show );
+			mlt_properties_set_data( properties, "frame-show-event", event, 0, /*mlt_event_close*/ NULL, NULL );
+		}
 	}
 	else
 	{
@@ -328,7 +341,8 @@ static void foreach_consumer_put( mlt_consumer consumer, mlt_frame frame )
 			while ( nested_time <= self_time )
 			{
 				// put ideal number of samples into cloned frame
-				mlt_frame clone_frame = mlt_frame_clone( frame, 0 );
+				int deeply = index > 1 ? 1 : 0;
+				mlt_frame clone_frame = mlt_frame_clone( frame, deeply );
 				int nested_samples = mlt_sample_calculator( nested_fps, frequency, nested_pos );
 				// -10 is an optimization to avoid tiny amounts of leftover samples
 				nested_samples = nested_samples > current_samples - 10 ? current_samples : nested_samples;
@@ -504,7 +518,6 @@ static void *consumer_thread( void *arg )
 				if ( mlt_properties_get_int( MLT_FRAME_PROPERTIES(frame), "_speed" ) == 0 )
 					foreach_consumer_refresh( consumer );
 				foreach_consumer_put( consumer, frame );
-				mlt_events_fire( properties, "consumer-frame-show", frame, NULL );
 			}
 			else
 			{
@@ -520,7 +533,6 @@ static void *consumer_thread( void *arg )
 			{
 				// Send this termination frame to nested consumers for their cancellation
 				foreach_consumer_put( consumer, frame );
-				mlt_events_fire( properties, "consumer-frame-show", frame, NULL );
 			}
 			if ( frame )
 				mlt_frame_close( frame );

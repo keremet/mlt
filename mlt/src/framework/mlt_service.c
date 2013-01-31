@@ -87,7 +87,7 @@ int mlt_service_init( mlt_service self, void *child )
 	self->child = child;
 
 	// Generate local space
-	self->local = calloc( sizeof( mlt_service_base ), 1 );
+	self->local = calloc( 1, sizeof( mlt_service_base ) );
 
 	// Associate the methods
 	self->get_frame = service_get_frame;
@@ -648,6 +648,18 @@ mlt_filter mlt_service_filter( mlt_service self, int index )
 mlt_profile mlt_service_profile( mlt_service self )
 {
 	return self? mlt_properties_get_data( MLT_SERVICE_PROPERTIES( self ), "_profile", NULL ) : NULL;
+}
+
+/** Set the profile for a service.
+ *
+ * \public \memberof mlt_service_s
+ * \param self a service
+ * \param profile the profile to set onto the service
+ */
+
+void mlt_service_set_profile( mlt_service self, mlt_profile profile )
+{
+    mlt_properties_set_data( MLT_SERVICE_PROPERTIES( self ), "_profile", profile, 0, NULL, NULL );
 }
 
 /** Destroy a service.

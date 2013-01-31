@@ -27,20 +27,24 @@
 #include <qimage.h>
 #include <qmutex.h>
 
-#ifdef USE_KDE
+#ifdef USE_KDE3
 #include <kinstance.h>
 #include <kimageio.h>
 #endif
-
 #endif
 
+#ifdef USE_KDE4
+#include <kcomponentdata.h>
+#endif
 
 #ifdef USE_QT4
 #include <QtGui/QImage>
 #include <QtCore/QSysInfo>
+#include <QtGui/QApplication>
 #include <QtCore/QMutex>
 #include <QtCore/QtEndian>
 #include <QtCore/QTemporaryFile>
+#include <QtCore/QLocale>
 #endif
 
 #ifdef USE_EXIF
@@ -55,71 +59,119 @@ extern "C" {
 #include <framework/mlt_pool.h>
 #include <framework/mlt_cache.h>
 
-#ifdef USE_KDE
+#ifdef USE_KDE4
+static KComponentData *instance = 0L;
+#elif USE_KDE3
 static KInstance *instance = 0L;
 #endif
+
+static QApplication *app = NULL;
 
 static void qimage_delete( void *data )
 {
 	QImage *image = ( QImage * )data;
 	delete image;
 	image = NULL;
-#ifdef USE_KDE
+#if defined(USE_KDE3) || defined(USE_KDE4) 
 	if (instance) delete instance;
 	instance = 0L;
 #endif
+
 }
 
-static QMutex g_mutex;
-
-#ifdef USE_KDE
 void init_qimage()
 {
-	if (!instance) {
-	    instance = new KInstance("qimage_prod");
+#ifdef USE_KDE4
+	if ( !instance ) {
+	    instance = new KComponentData( "qimage_prod" );
+	}
+#elif defined(USE_KDE3)
+	if ( !instance ) {
+	    instance = new KInstance( "qimage_prod" );
 	    KImageIO::registerFormats();
 	}
-}
 #endif
+  
+}
 
-void refresh_qimage( producer_qimage self, mlt_frame frame, int width, int height )
+static QImage* reorient_with_exif( producer_qimage self, int image_idx, QImage *qimage )
 {
-	// Obtain properties of frame
+#ifdef USE_EXIF
+	mlt_properties producer_props = MLT_PRODUCER_PROPERTIES( &self->parent );
+	ExifData *d = exif_data_new_from_file( mlt_properties_get_value( self->filenames, image_idx ) );
+	ExifEntry *entry;
+	int exif_orientation = 0;
+	/* get orientation and rotate image accordingly if necessary */
+	if (d) {
+		if ( ( entry = exif_content_get_entry ( d->ifd[EXIF_IFD_0], EXIF_TAG_ORIENTATION ) ) )
+			exif_orientation = exif_get_short (entry->data, exif_data_get_byte_order (d));
+
+		/* Free the EXIF data */
+		exif_data_unref(d);
+	}
+
+	// Remember EXIF value, might be useful for someone
+	mlt_properties_set_int( producer_props, "_exif_orientation" , exif_orientation );
+
+	if ( exif_orientation > 1 )
+	{
+		  // Rotate image according to exif data
+		  QImage processed;
+		  QMatrix matrix;
+
+		  switch ( exif_orientation ) {
+		  case 2:
+			  matrix.scale( -1, 1 );
+			  break;
+		  case 3:
+			  matrix.rotate( 180 );
+			  break;
+		  case 4:
+			  matrix.scale( 1, -1 );
+			  break;
+		  case 5:
+			  matrix.rotate( 270 );
+			  matrix.scale( -1, 1 );
+			  break;
+		  case 6:
+			  matrix.rotate( 90 );
+			  break;
+		  case 7:
+			  matrix.rotate( 90 );
+			  matrix.scale( -1, 1 );
+			  break;
+		  case 8:
+			  matrix.rotate( 270 );
+			  break;
+		  }
+		  processed = qimage->transformed( matrix );
+		  delete qimage;
+		  qimage = new QImage( processed );
+	}
+#endif
+	return qimage;
+}
+
+int refresh_qimage( producer_qimage self, mlt_frame frame )
+{
+	// Obtain properties of frame and producer
 	mlt_properties properties = MLT_FRAME_PROPERTIES( frame );
-
-	// Obtain the producer 
 	mlt_producer producer = &self->parent;
-
-	// Obtain properties of producer
 	mlt_properties producer_props = MLT_PRODUCER_PROPERTIES( producer );
-
-	// restore QImage
-	pthread_mutex_lock( &self->mutex );
-	mlt_cache_item qimage_cache = mlt_service_cache_get( MLT_PRODUCER_SERVICE( producer ), "qimage.qimage" );
-	QImage *qimage = static_cast<QImage*>( mlt_cache_item_data( qimage_cache, NULL ) );
-
-	// restore scaled image
-	self->image_cache = mlt_service_cache_get( MLT_PRODUCER_SERVICE( producer ), "qimage.image" );
-	self->current_image = static_cast<uint8_t*>( mlt_cache_item_data( self->image_cache, NULL ) );
 
 	// Check if user wants us to reload the image
 	if ( mlt_properties_get_int( producer_props, "force_reload" ) )
 	{
-		qimage = NULL;
+		self->qimage = NULL;
 		self->current_image = NULL;
 		mlt_properties_set_int( producer_props, "force_reload", 0 );
 	}
-
-	// Obtain the cache flag and structure
-	int use_cache = mlt_properties_get_int( producer_props, "cache" );
-	mlt_properties cache = ( mlt_properties )mlt_properties_get_data( producer_props, "_cache", NULL );
-	int update_cache = 0;
 
 	// Get the time to live for each frame
 	double ttl = mlt_properties_get_int( producer_props, "ttl" );
 
 	// Get the original position of this frame
-	mlt_position position = mlt_properties_get_position( properties, "qimage_position" );
+	mlt_position position = mlt_frame_original_position( frame );
 	position += mlt_producer_get_in( producer );
 
 	// Image index
@@ -129,138 +181,101 @@ void refresh_qimage( producer_qimage self, mlt_frame frame, int width, int heigh
 	char image_key[ 10 ];
 	sprintf( image_key, "%d", image_idx );
 
-	g_mutex.lock();
-
-	// Check if the frame is already loaded
-	if ( use_cache )
+	int disable_exif = mlt_properties_get_int( producer_props, "disable_exif" );
+	
+	
+	if ( app == NULL ) 
 	{
-		if ( cache == NULL )
+		if ( qApp ) 
 		{
-			cache = mlt_properties_new( );
-			mlt_properties_set_data( producer_props, "_cache", cache, 0, ( mlt_destructor )mlt_properties_close, NULL );
+			app = qApp;
 		}
-
-		mlt_frame cached = ( mlt_frame )mlt_properties_get_data( cache, image_key, NULL );
-
-		if ( cached )
+		else 
 		{
-			self->image_idx = image_idx;
-			mlt_properties cached_props = MLT_FRAME_PROPERTIES( cached );
-			self->current_width = mlt_properties_get_int( cached_props, "width" );
-			self->current_height = mlt_properties_get_int( cached_props, "height" );
-			mlt_properties_set_int( producer_props, "_real_width", mlt_properties_get_int( cached_props, "real_width" ) );
-			mlt_properties_set_int( producer_props, "_real_height", mlt_properties_get_int( cached_props, "real_height" ) );
-			self->current_image = ( uint8_t * )mlt_properties_get_data( cached_props, "image", NULL );
-			self->has_alpha = mlt_properties_get_int( cached_props, "alpha" );
-
-			if ( width != 0 && ( width != self->current_width || height != self->current_height ) )
-				self->current_image = NULL;
+#ifdef linux
+			if ( getenv("DISPLAY") == 0 )
+			{
+				mlt_log_panic( MLT_PRODUCER_SERVICE( producer ), "Error, cannot render titles without an X11 environment.\nPlease either run melt from an X session or use a fake X server like xvfb:\nxvfb-run -a melt (...)\n" );
+				return -1;
+			}
+#endif
+			int argc = 1;
+			char* argv[1];
+			argv[0] = (char*) "xxx";
+			app = new QApplication( argc, argv );
+			const char *localename = mlt_properties_get_lcnumeric( MLT_SERVICE_PROPERTIES( MLT_PRODUCER_SERVICE( producer ) ) );
+			QLocale::setDefault( QLocale( localename ) );
 		}
 	}
 
-	int disable_exif = mlt_properties_get_int( producer_props, "disable_exif" );
-
-	// optimization for subsequent iterations on single pictur
-	if ( width != 0 && ( image_idx != self->image_idx || width != self->current_width || height != self->current_height ) )
-		self->current_image = NULL;
 	if ( image_idx != self->qimage_idx )
-		qimage = NULL;
-
-	if ( !qimage || mlt_properties_get_int( producer_props, "_disable_exif" ) != disable_exif)
+		self->qimage = NULL;
+	if ( !self->qimage || mlt_properties_get_int( producer_props, "_disable_exif" ) != disable_exif )
 	{
 		self->current_image = NULL;
-		qimage = new QImage( mlt_properties_get_value( self->filenames, image_idx ) );
+		QImage *qimage = new QImage( QString::fromUtf8( mlt_properties_get_value( self->filenames, image_idx ) ) );
+		self->qimage = qimage;
 
 		if ( !qimage->isNull( ) )
 		{
-#ifdef USE_EXIF
 			// Read the exif value for this file
-			if ( disable_exif == 0) {
-				ExifData *d = exif_data_new_from_file( mlt_properties_get_value( self->filenames, image_idx ) );
-				ExifEntry *entry;
-				int exif_orientation = 0;
-				/* get orientation and rotate image accordingly if necessary */
-				if (d) {
-					if ( ( entry = exif_content_get_entry ( d->ifd[EXIF_IFD_0], EXIF_TAG_ORIENTATION ) ) )
-						exif_orientation = exif_get_short (entry->data, exif_data_get_byte_order (d));
-					
-					/* Free the EXIF data */
-					exif_data_unref(d);
-				}
+			if ( !disable_exif )
+				qimage = reorient_with_exif( self, image_idx, qimage );
 
-				// Remember EXIF value, might be useful for someone
-				mlt_properties_set_int( producer_props, "_exif_orientation" , exif_orientation );
-				      
-				if ( exif_orientation > 1 )
-				{
-				      // Rotate image according to exif data
-				      QImage processed;
-				      QMatrix matrix;
+			// Register qimage for destruction and reuse
+			mlt_cache_item_close( self->qimage_cache );
+			mlt_service_cache_put( MLT_PRODUCER_SERVICE( producer ), "qimage.qimage", qimage, 0, ( mlt_destructor )qimage_delete );
+			self->qimage_cache = mlt_service_cache_get( MLT_PRODUCER_SERVICE( producer ), "qimage.qimage" );
+			self->qimage_idx = image_idx;
 
-				      switch ( exif_orientation ) {
-					  case 2:
-					      matrix.scale( -1, 1 );
-					      break;
-					  case 3:
-					      matrix.rotate( 180 );
-					      break;
-					  case 4:
-					      matrix.scale( 1, -1 );
-					      break;
-					  case 5:
-					      matrix.rotate( 270 );
-					      matrix.scale( -1, 1 );
-					      break;
-					  case 6:
-					      matrix.rotate( 90 );
-					      break;
-					  case 7:
-					      matrix.rotate( 90 );
-					      matrix.scale( -1, 1 );
-					      break;
-					  case 8:
-					      matrix.rotate( 270 );
-					      break;
-				      }
-				      processed = qimage->transformed( matrix );
-				      delete qimage;
-				      qimage = new QImage( processed );
-				}
-			}
-#endif			
-			// Store the width/height of the qimage  
+			// Store the width/height of the qimage
 			self->current_width = qimage->width( );
 			self->current_height = qimage->height( );
 
-			// Register qimage for destruction and reuse
-			mlt_cache_item_close( qimage_cache );
-			mlt_service_cache_put( MLT_PRODUCER_SERVICE( producer ), "qimage.qimage", qimage, 0, ( mlt_destructor )qimage_delete );
-			qimage_cache = mlt_service_cache_get( MLT_PRODUCER_SERVICE( producer ), "qimage.qimage" );
-			self->qimage_idx = image_idx;
-
 			mlt_events_block( producer_props, NULL );
-			mlt_properties_set_int( producer_props, "_real_width", self->current_width );
-			mlt_properties_set_int( producer_props, "_real_height", self->current_height );
+			mlt_properties_set_int( producer_props, "meta.media.width", self->current_width );
+			mlt_properties_set_int( producer_props, "meta.media.height", self->current_height );
 			mlt_properties_set_int( producer_props, "_disable_exif", disable_exif );
 			mlt_events_unblock( producer_props, NULL );
 		}
 		else
 		{
 			delete qimage;
-			qimage = NULL;
+			self->qimage = NULL;
 		}
 	}
 
-	// If we have a pixbuf and this request specifies a valid dimension and we haven't already got a cached version...
-	if ( qimage && width > 0 && !self->current_image )
+	// Set width/height of frame
+	mlt_properties_set_int( properties, "width", self->current_width );
+	mlt_properties_set_int( properties, "height", self->current_height );
+
+	return image_idx;
+}
+
+void refresh_image( producer_qimage self, mlt_frame frame, mlt_image_format format, int width, int height )
+{
+	// Obtain properties of frame and producer
+	mlt_properties properties = MLT_FRAME_PROPERTIES( frame );
+	mlt_producer producer = &self->parent;
+
+	// Get index and qimage
+	int image_idx = refresh_qimage( self, frame );
+
+	// optimization for subsequent iterations on single pictur
+	if ( image_idx != self->image_idx || width != self->current_width || height != self->current_height )
+		self->current_image = NULL;
+
+	// If we have a qimage and need a new scaled image
+	if ( self->qimage && ( !self->current_image || ( format != mlt_image_none  && format != self->format ) ) )
 	{
 		char *interps = mlt_properties_get( properties, "rescale.interp" );
 		int interp = 0;
+		QImage *qimage = static_cast<QImage*>( self->qimage );
 
 		// QImage has two scaling modes - we'll toggle between them here
-		if ( strcmp( interps, "tiles" ) == 0 )
-			interp = 1;
-		else if ( strcmp( interps, "hyper" ) == 0 )
+		if ( strcmp( interps, "tiles" ) == 0
+			|| strcmp( interps, "hyper" ) == 0
+			|| strcmp( interps, "bicubic" ) == 0 )
 			interp = 1;
 
 #ifdef USE_QT4
@@ -270,10 +285,11 @@ void refresh_qimage( producer_qimage self, mlt_frame frame, int width, int heigh
 			QImage temp = qimage->convertToFormat( QImage::Format_RGB32 );
 			delete qimage;
 			qimage = new QImage( temp );
+			self->qimage = qimage;
 		}
 		QImage scaled = interp == 0 ? qimage->scaled( QSize( width, height ) ) :
 			qimage->scaled( QSize(width, height), Qt::IgnoreAspectRatio, Qt::SmoothTransformation );
-		self->has_alpha = scaled.hasAlphaChannel();
+		int has_alpha = scaled.hasAlphaChannel();
 #endif
 
 #ifdef USE_QT3
@@ -288,9 +304,11 @@ void refresh_qimage( producer_qimage self, mlt_frame frame, int width, int heigh
 		self->current_height = height;
 
 		// Allocate/define image
-		int dst_stride = width * ( self->has_alpha ? 4 : 3 );
+		int dst_stride = width * ( has_alpha ? 4 : 3 );
 		int image_size = dst_stride * ( height + 1 );
 		self->current_image = ( uint8_t * )mlt_pool_alloc( image_size );
+		self->current_alpha = NULL;
+		self->format = has_alpha ? mlt_image_rgb24a : mlt_image_rgb24;
 
 		// Copy the image
 		int y = self->current_height + 1;
@@ -304,51 +322,55 @@ void refresh_qimage( producer_qimage self, mlt_frame frame, int width, int heigh
 				*dst++ = qRed(*src);
 				*dst++ = qGreen(*src);
 				*dst++ = qBlue(*src);
-				if ( self->has_alpha ) *dst++ = qAlpha(*src);
+				if ( has_alpha ) *dst++ = qAlpha(*src);
 				++src;
 			}
 		}
 
+		// Convert image to requested format
+		if ( format != mlt_image_none && format != self->format )
+		{
+			uint8_t *buffer = NULL;
+
+			// First, set the image so it can be converted when we get it
+			mlt_frame_replace_image( frame, self->current_image, self->format, width, height );
+			mlt_frame_set_image( frame, self->current_image, image_size, mlt_pool_release );
+			self->format = format;
+
+			// get_image will do the format conversion
+			mlt_frame_get_image( frame, &buffer, &format, &width, &height, 0 );
+
+			// cache copies of the image and alpha buffers
+			if ( buffer )
+			{
+				image_size = mlt_image_format_size( format, width, height, NULL );
+				self->current_image = (uint8_t*) mlt_pool_alloc( image_size );
+				memcpy( self->current_image, buffer, image_size );
+			}
+			if ( ( buffer = mlt_frame_get_alpha_mask( frame ) ) )
+			{
+				self->current_alpha = (uint8_t*) mlt_pool_alloc( width * height );
+				memcpy( self->current_alpha, buffer, width * height );
+			}
+		}
+
 		// Update the cache
-		if ( !use_cache )
-			mlt_cache_item_close( self->image_cache );
+		mlt_cache_item_close( self->image_cache );
 		mlt_service_cache_put( MLT_PRODUCER_SERVICE( producer ), "qimage.image", self->current_image, image_size, mlt_pool_release );
 		self->image_cache = mlt_service_cache_get( MLT_PRODUCER_SERVICE( producer ), "qimage.image" );
 		self->image_idx = image_idx;
-
-		// Ensure we update the cache when we need to
-		update_cache = use_cache;
-	}
-
-	// release references no longer needed
-	mlt_cache_item_close( qimage_cache );
-	if ( width == 0 )
-	{
-		pthread_mutex_unlock( &self->mutex );
-		mlt_cache_item_close( self->image_cache );
+		mlt_cache_item_close( self->alpha_cache );
+		self->alpha_cache = NULL;
+		if ( self->current_alpha )
+		{
+			mlt_service_cache_put( MLT_PRODUCER_SERVICE( producer ), "qimage.alpha", self->current_alpha, width * height, mlt_pool_release );
+			self->alpha_cache = mlt_service_cache_get( MLT_PRODUCER_SERVICE( producer ), "qimage.alpha" );
+		}
 	}
 
 	// Set width/height of frame
 	mlt_properties_set_int( properties, "width", self->current_width );
 	mlt_properties_set_int( properties, "height", self->current_height );
-	mlt_properties_set_int( properties, "real_width", mlt_properties_get_int( producer_props, "_real_width" ) );
-	mlt_properties_set_int( properties, "real_height", mlt_properties_get_int( producer_props, "_real_height" ) );
-
-	if ( update_cache )
-	{
-		mlt_frame cached = mlt_frame_init( MLT_PRODUCER_SERVICE( producer ) );
-		mlt_properties cached_props = MLT_FRAME_PROPERTIES( cached );
-		mlt_properties_set_int( cached_props, "width", self->current_width );
-		mlt_properties_set_int( cached_props, "height", self->current_height );
-		mlt_properties_set_int( cached_props, "real_width", mlt_properties_get_int( producer_props, "_real_width" ) );
-		mlt_properties_set_int( cached_props, "real_height", mlt_properties_get_int( producer_props, "_real_height" ) );
-		mlt_properties_set_data( cached_props, "image", self->current_image,
-			self->current_width * ( self->current_height + 1 ) * ( self->has_alpha ? 4 : 3 ),
-			mlt_pool_release, NULL );
-		mlt_properties_set_int( cached_props, "alpha", self->has_alpha );
-		mlt_properties_set_data( cache, image_key, cached, 0, ( mlt_destructor )mlt_frame_close, NULL );
-	}
-	g_mutex.unlock();
 }
 
 extern void make_tempfile( producer_qimage self, const char *xml )

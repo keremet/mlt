@@ -87,7 +87,7 @@ static void consumer_sdl_event( mlt_listener listener, mlt_properties owner, mlt
 mlt_consumer consumer_sdl_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg )
 {
 	// Create the consumer object
-	consumer_sdl this = calloc( sizeof( struct consumer_sdl_s ), 1 );
+	consumer_sdl this = calloc( 1, sizeof( struct consumer_sdl_s ) );
 
 	// If no malloc'd and consumer init ok
 	if ( this != NULL && mlt_consumer_init( &this->parent, this, profile ) == 0 )
@@ -117,6 +117,7 @@ mlt_consumer consumer_sdl_init( mlt_profile profile, mlt_service_type type, cons
 		// Default scaler (for now we'll use nearest)
 		mlt_properties_set( this->properties, "rescale", "nearest" );
 		mlt_properties_set( this->properties, "deinterlace_method", "onefield" );
+		mlt_properties_set_int( this->properties, "top_field_first", -1 );
 
 		// Default buffer for low latency
 		mlt_properties_set_int( this->properties, "buffer", 1 );
@@ -312,7 +313,9 @@ int consumer_stop( mlt_consumer parent )
 			pthread_mutex_unlock( &mlt_sdl_mutex );
 		}
 
+		pthread_mutex_lock( &mlt_sdl_mutex );
 		this->sdl_screen = NULL;
+		pthread_mutex_unlock( &mlt_sdl_mutex );
 	}
 
 	return 0;
@@ -868,7 +871,9 @@ static void *consumer_thread( void *arg )
 	while( mlt_deque_count( this->queue ) )
 		mlt_frame_close( mlt_deque_pop_back( this->queue ) );
 
+	pthread_mutex_lock( &mlt_sdl_mutex );
 	this->sdl_screen = NULL;
+	pthread_mutex_unlock( &mlt_sdl_mutex );
 	this->audio_avail = 0;
 
 	return NULL;

@@ -1,7 +1,7 @@
 #!/bin/sh
 
-export version=0.7.8
-export soversion=4
+export version=0.8.8
+export soversion=5
 
 show_help()
 {
@@ -18,7 +18,8 @@ General build options:
   --libdir=directory      - lib directory (default: $prefix/lib)
   --datadir=directory     - data directory (default: $prefix/share)
   --mandir=directory      - man documentation directory (default: $prefix/share/man)
-  --enable-gpl            - Enable GPL components
+  --enable-gpl            - Enable GPLv2 components
+  --enable-gpl3           - Enable GPLv3 components
   --enable-debug          - Compile without optimizations support (default: off)
   --disable-debug         - Compile without debug support (default: on)
   --disable-mmx           - Compile without MMX support (default: on)
@@ -26,6 +27,8 @@ General build options:
   --disable-sse2          - Compile without SSE2 support (default: on)
   --arch='arch'           - Compile for a specific architecture (default: none)
   --cpu='cpu'             - Compile for a specific CPU (default: none)
+  --target-os='os'        - Cross-compile to a specific OS (default: $(uname -s))
+  --target-arch='arch'    - Cross-compile to a specific CPU architecture
 
 Module disable options:
 
@@ -68,6 +71,7 @@ build_config()
 
 		echo "LARGE_FILE=-D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE"
 
+		[ "$amd64" = "true" ] && echo "ARCH_X86_64=1" && echo "CFLAGS+=-DARCH_X86_64"
 		[ "$arch" != "" ] && echo "TARGETARCH=-march=$arch"
 		[ "$cpu" != "" ] && echo "TARGETCPU=-mcpu=$cpu"
 		if [ "$optimisations" = "true" ]
@@ -83,13 +87,11 @@ build_config()
 
 		case $targetos in
 		Darwin)
-		sysctl -a hw | grep "x86_64: 1" > /dev/null && echo "ARCH_X86_64=1" && echo "CFLAGS+=-DARCH_X86_64"
 		echo "CFLAGS+=-fPIC -D__DARWIN__ `sdl-config --cflags`"
 		echo "SHFLAGS=-dynamiclib"
 		echo "LDFLAGS+=`sdl-config --libs`"
 		;;
 		Linux|GNU/kFreeBSD|GNU)
-		[ "$(uname -m)" = "x86_64" ] && echo "ARCH_X86_64=1" && echo "CFLAGS+=-DARCH_X86_64"
 		[ "$optimisations" = "true" ] &&
 			echo "OPTIMISATIONS+=-ffast-math"
 		echo "CFLAGS+=-fPIC -pthread"
@@ -99,7 +101,6 @@ build_config()
 		echo "LDFLAGS+=-Wl,--no-undefined -Wl,--as-needed"
 		;;
 		FreeBSD)
-		[ "$(uname -m)" = "amd64" -o "$(uname -m)" = "x86_64" ] && echo "ARCH_X86_64=1" && echo "CFLAGS+=-DARCH_X86_64"
 		[ "$optimisations" = "true" ] &&
 			echo "OPTIMISATIONS+=-ffast-math"
 		echo "CFLAGS+=-fPIC -pthread"
@@ -108,16 +109,14 @@ build_config()
 		echo "LDFLAGS+=-Wl,--no-undefined -Wl,--as-needed"
 		;;
 		NetBSD)
-		[ "$(uname -m)" = "amd64" ] && echo "ARCH_X86_64=1" && echo "CFLAGS+=-DARCH_X86_64"
 		[ "$optimisations" = "true" ] &&
 			echo "OPTIMISATIONS+=-ffast-math"
-		echo "CFLAGS+=-pthread"
+		echo "CFLAGS+=-fPIC -pthread"
 		echo "SHFLAGS=-shared"
 		echo "RDYNAMIC=-rdynamic"
 		echo "LDFLAGS+=-Wl,--no-undefined -Wl,--as-needed"
 		;;
 		MinGW)
-		[ "$(uname -m)" = "x86_64" ] && echo "ARCH_X86_64=1" && echo "CFLAGS+=-DARCH_X86_64"
 		[ "$optimisations" = "true" ] &&
 			echo "OPTIMISATIONS+=-ffast-math"
 		echo "SHFLAGS=-shared"
@@ -189,35 +188,21 @@ export mmx=true
 export sse=true
 export sse2=true
 export gpl=false
+export gpl3=false
 export arch=
 export cpu=
-export targetos=
+export targetos=$(uname -s)
+export targetarch=
+export amd64=false
 
-# Determine OS
-targetos=$(uname -s)
-# Chose appropriate suffix for libraries
-case $targetos in
-	Darwin)
-	LIBSUF=".dylib"
-	;;
-	Linux|FreeBSD|NetBSD)
-	LIBSUF=".so"
-	;;
-	MINGW32_NT-*)
-	targetos="MinGW"
-	LIBSUF=".dll"
-	;;
-	*)
-	LIBSUF=".so"
-	;;
-esac
-export LIBSUF
+# Define the compiler used in tests (gcc is not installed everywhere)
+: ${CC:=gcc}
 
 # Iterate through arguments
 for i in "$@"
 do
 	case $i in
-		--help )			help=1 ;;
+		--help )		help=1 ;;
 		--prefix=* )		prefix="${i#--prefix=}" ;;
 		--libdir=* )		libdir="${i#--libdir=}" ;;
 		--datadir=* )		datadir="${i#--datadir=}" ;;
@@ -228,10 +213,40 @@ do
 		--disable-sse )		sse=false; sse2=false ;;
 		--disable-sse2 )	sse2=false ;;
 		--enable-gpl )		gpl=true ;;
-		--arch=* )			arch="${i#--arch=}" ;;
-		--cpu=* )			cpu="${i#--cpu=}" ;;
+		--enable-gpl3 )		gpl3=true ;;
+		--arch=* )		arch="${i#--arch=}" ;;
+		--cpu=* )		cpu="${i#--cpu=}" ;;
+		--target-os=* )		targetos="${i#--target-os=}" ;;
+		--target-arch=* )	targetarch="${i#--target-arch=}" ;;
 	esac
 done
+
+# Chose appropriate suffix for libraries
+case $targetos in
+	Darwin)
+	LIBSUF=".dylib"
+	if [ "$targetarch" = "" ]
+	then
+		sysctl -a hw | grep "x86_64: 1" > /dev/null
+		[ "$?" = "0" ] && targetarch="amd64"
+	fi
+	;;
+	Linux|FreeBSD|NetBSD)
+	LIBSUF=".so"
+	;;
+	MINGW32_NT-*|MinGW|mingw)
+	targetos="MinGW"
+	LIBSUF=".dll"
+	;;
+	*)
+	LIBSUF=".so"
+	;;
+esac
+export LIBSUF
+
+# Determine if we are compiling for 64-bit Intel architecture
+[ "$targetarch" = "" ] && targetarch=$(uname -m)
+[ "$targetarch" = "amd64" -o "$targetarch" = "x86_64" ] && amd64=true
 
 # Determine the libdir if it's not specified in the args
 [ "$libdir" = "" ] && libdir=$prefix/lib
@@ -315,7 +330,7 @@ do
 		[ $help = 0 ] && echo "Configuring `basename $i`:"
 		olddir=`pwd`
 		cd src/$i
-		./configure "$@"
+		CC="$CC" ./configure "$@"
 		[ $? != 0 ] && exit 1
 		cd $olddir
 	fi
@@ -324,8 +339,16 @@ done
 # Build the pkg-config files
 build_pkgconfig
 
-# Report GPL Usage
-[ $help != 1 ] && 
-( [ "$gpl" = "false" ] && 
-echo "GPL Components are disabled" || 
-echo "GPL License Used" )
+# Report license Usage
+if [ $help != 1 ]
+then
+	if [ "$gpl" = "false" ]
+	then
+		echo "LGPLv2.1 license used; GPL components disabled"
+	elif [ "$gpl3" = "false" ]
+	then
+		echo "GPLv2 license used; GPLv3 components disabled"
+	else
+		echo "GPLv3 license used"
+	fi
+fi

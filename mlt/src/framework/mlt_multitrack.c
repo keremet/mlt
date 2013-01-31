@@ -43,7 +43,7 @@ static int producer_get_frame( mlt_producer producer, mlt_frame_ptr frame, int i
 mlt_multitrack mlt_multitrack_init( )
 {
 	// Allocate the multitrack object
-	mlt_multitrack self = calloc( sizeof( struct mlt_multitrack_s ), 1 );
+	mlt_multitrack self = calloc( 1, sizeof( struct mlt_multitrack_s ) );
 
 	if ( self != NULL )
 	{
@@ -323,7 +323,7 @@ mlt_position mlt_multitrack_clip( mlt_multitrack self, mlt_whence whence, int in
 	mlt_position position = 0;
 	int i = 0;
 	int j = 0;
-	mlt_position *map = malloc( 1000 * sizeof( mlt_position ) );
+	mlt_position *map = calloc( 1000, sizeof( mlt_position ) );
 	int count = 0;
 
 	for ( i = 0; i < self->count; i ++ )

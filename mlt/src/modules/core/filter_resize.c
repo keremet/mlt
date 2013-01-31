@@ -123,14 +123,14 @@ static void resize_image( uint8_t *output, int owidth, int oheight, uint8_t *inp
 	resizes.
 */
 
-static uint8_t *frame_resize_image( mlt_frame this, int owidth, int oheight, int bpp )
+static uint8_t *frame_resize_image( mlt_frame frame, int owidth, int oheight, int bpp )
 {
 	// Get properties
-	mlt_properties properties = MLT_FRAME_PROPERTIES( this );
+	mlt_properties properties = MLT_FRAME_PROPERTIES( frame );
 
 	// Get the input image, width and height
 	uint8_t *input = mlt_properties_get_data( properties, "image", NULL );
-	uint8_t *alpha = mlt_frame_get_alpha_mask( this );
+	uint8_t *alpha = mlt_frame_get_alpha_mask( frame );
 	int alpha_size = 0;
 	mlt_properties_get_data( properties, "alpha", &alpha_size );
 
@@ -149,17 +149,14 @@ static uint8_t *frame_resize_image( mlt_frame this, int owidth, int oheight, int
 		resize_image( output, owidth, oheight, input, iwidth, iheight, bpp );
 
 		// Now update the frame
-		mlt_frame_set_image( this, output, owidth * ( oheight + 1 ) * bpp, mlt_pool_release );
+		mlt_frame_set_image( frame, output, owidth * ( oheight + 1 ) * bpp, mlt_pool_release );
 
 		// We should resize the alpha too
 		if ( alpha && alpha_size >= iwidth * iheight )
 		{
 			alpha = resize_alpha( alpha, owidth, oheight, iwidth, iheight, alpha_value );
 			if ( alpha )
-			{
-				mlt_frame_set_alpha( this, alpha, owidth * oheight, mlt_pool_release );
-				this->get_alpha_mask = NULL;
-			}
+				mlt_frame_set_alpha( frame, alpha, owidth * oheight, mlt_pool_release );
 		}
 
 		// Return the output
@@ -172,25 +169,26 @@ static uint8_t *frame_resize_image( mlt_frame this, int owidth, int oheight, int
 /** Do it :-).
 */
 
-static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *format, int *width, int *height, int writable )
+static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format *format, int *width, int *height, int writable )
 {
 	int error = 0;
 
 	// Get the properties from the frame
-	mlt_properties properties = MLT_FRAME_PROPERTIES( this );
+	mlt_properties properties = MLT_FRAME_PROPERTIES( frame );
 
 	// Pop the top of stack now
-	mlt_filter filter = mlt_frame_pop_service( this );
+	mlt_filter filter = mlt_frame_pop_service( frame );
+	mlt_profile profile = mlt_service_profile( MLT_FILTER_SERVICE( filter ) );
 
 	// Retrieve the aspect ratio
-	double aspect_ratio = mlt_deque_pop_back_double( MLT_FRAME_IMAGE_STACK( this ) );
+	double aspect_ratio = mlt_deque_pop_back_double( MLT_FRAME_IMAGE_STACK( frame ) );
 	double consumer_aspect = mlt_profile_sar( mlt_service_profile( MLT_FILTER_SERVICE( filter ) ) );
 
 	// Correct Width/height if necessary
 	if ( *width == 0 || *height == 0 )
 	{
-		*width = mlt_properties_get_int( properties, "normalised_width" );
-		*height = mlt_properties_get_int( properties, "normalised_height" );
+		*width = profile->width;
+		*height = profile->height;
 	}
 
 	// Assign requested width/height from our subordinate
@@ -204,18 +202,25 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 	// Reset the aspect ratio
 	mlt_properties_set_double( properties, "aspect_ratio", aspect_ratio );
 
+	// XXX: This is a hack, but it forces the force_full_luma to apply by doing a RGB
+	// conversion because range scaling only occurs on YUV->RGB. And we do it here,
+	// after the deinterlace filter, which only operates in YUV to avoid a YUV->RGB->YUV->?.
+	// Instead, it will go YUV->RGB->?.
+	if ( mlt_properties_get_int( properties, "force_full_luma" ) )
+		*format = mlt_image_rgb24a;
+
 	// Hmmm...
 	char *rescale = mlt_properties_get( properties, "rescale.interp" );
 	if ( rescale != NULL && !strcmp( rescale, "none" ) )
-		return mlt_frame_get_image( this, image, format, width, height, writable );
+		return mlt_frame_get_image( frame, image, format, width, height, writable );
 
 	if ( mlt_properties_get_int( properties, "distort" ) == 0 )
 	{
 		// Normalise the input and out display aspect
-		int normalised_width = mlt_properties_get_int( properties, "normalised_width" );
-		int normalised_height = mlt_properties_get_int( properties, "normalised_height" );
-		int real_width = mlt_properties_get_int( properties, "real_width" );
-		int real_height = mlt_properties_get_int( properties, "real_height" );
+		int normalised_width = profile->width;
+		int normalised_height = profile->height;
+		int real_width = mlt_properties_get_int( properties, "meta.media.width" );
+		int real_height = mlt_properties_get_int( properties, "meta.media.height" );
 		if ( real_width == 0 )
 			real_width = mlt_properties_get_int( properties, "width" );
 		if ( real_height == 0 )
@@ -242,7 +247,7 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 		oheight = rint( scaled_height * oheight / normalised_height );
 
 		// Tell frame we have conformed the aspect to the consumer
-		mlt_frame_set_aspect_ratio( this, consumer_aspect );
+		mlt_frame_set_aspect_ratio( frame, consumer_aspect );
 	}
 
 	mlt_properties_set_int( properties, "distort", 0 );
@@ -254,13 +259,13 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 	// Now get the image
 	if ( *format == mlt_image_yuv422 )
 		owidth -= owidth % 2;
-	error = mlt_frame_get_image( this, image, format, &owidth, &oheight, writable );
+	error = mlt_frame_get_image( frame, image, format, &owidth, &oheight, writable );
 
 	if ( error == 0 && *image )
 	{
 		int bpp;
 		mlt_image_format_size( *format, owidth, oheight, &bpp );
-		*image = frame_resize_image( this, *width, *height, bpp );
+		*image = frame_resize_image( frame, *width, *height, bpp );
 	}
 
 	return error;
@@ -269,13 +274,13 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 /** Filter processing.
 */
 
-static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
+static mlt_frame filter_process( mlt_filter filter, mlt_frame frame )
 {
 	// Store the aspect ratio reported by the source
 	mlt_deque_push_back_double( MLT_FRAME_IMAGE_STACK( frame ), mlt_frame_get_aspect_ratio( frame ) );
 
 	// Push this on to the service stack
-	mlt_frame_push_service( frame, this );
+	mlt_frame_push_service( frame, filter );
 
 	// Push the get_image method on to the stack
 	mlt_frame_push_get_image( frame, filter_get_image );
@@ -288,10 +293,10 @@ static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
 
 mlt_filter filter_resize_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg )
 {
-	mlt_filter this = calloc( sizeof( struct mlt_filter_s ), 1 );
-	if ( mlt_filter_init( this, this ) == 0 )
+	mlt_filter filter = calloc( 1, sizeof( struct mlt_filter_s ) );
+	if ( mlt_filter_init( filter, filter ) == 0 )
 	{
-		this->process = filter_process;
+		filter->process = filter_process;
 	}
-	return this;
+	return filter;
 }

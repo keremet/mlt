@@ -78,7 +78,7 @@ static void consumer_sdl_event( mlt_listener listener, mlt_properties owner, mlt
 mlt_consumer consumer_sdl_still_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg )
 {
 	// Create the consumer object
-	consumer_sdl this = calloc( sizeof( struct consumer_sdl_s ), 1 );
+	consumer_sdl this = calloc( 1, sizeof( struct consumer_sdl_s ) );
 
 	// If no malloc'd and consumer init ok
 	if ( this != NULL && mlt_consumer_init( &this->parent, this, profile ) == 0 )
@@ -227,7 +227,9 @@ static int consumer_stop( mlt_consumer parent )
 			pthread_mutex_unlock( &mlt_sdl_mutex );
 		}
 
+		pthread_mutex_lock( &mlt_sdl_mutex );
 		this->sdl_screen = NULL;
+		pthread_mutex_unlock( &mlt_sdl_mutex );
 	}
 
 	return 0;

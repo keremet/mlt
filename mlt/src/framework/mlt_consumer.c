@@ -176,7 +176,6 @@ static void mlt_consumer_property_changed( mlt_properties owner, mlt_consumer se
 				free( profile->description );
 				memcpy( profile, new_profile, sizeof( struct mlt_profile_s ) );
 				profile->description = strdup( new_profile->description );
-				mlt_profile_close( new_profile );
 			}
 			else
 			{
@@ -185,6 +184,7 @@ static void mlt_consumer_property_changed( mlt_properties owner, mlt_consumer se
 
 			// Apply to properties
 			apply_profile_properties( self, profile, properties );
+			mlt_profile_close( new_profile );
 		}
  	}
 	else if ( !strcmp( name, "frame_rate_num" ) )
@@ -232,17 +232,21 @@ static void mlt_consumer_property_changed( mlt_properties owner, mlt_consumer se
 	{
 		mlt_properties properties = MLT_CONSUMER_PROPERTIES( self );
 		mlt_profile profile = mlt_service_profile( MLT_CONSUMER_SERVICE( self ) );
-		profile->sample_aspect_num = mlt_properties_get_int( properties, "sample_aspect_num" );
 		if ( profile )
+		{
+			profile->sample_aspect_num = mlt_properties_get_int( properties, "sample_aspect_num" );
 			mlt_properties_set_double( properties, "aspect_ratio", mlt_profile_sar( profile )  );
+		}
 	}
 	else if ( !strcmp( name, "sample_aspect_den" ) )
 	{
 		mlt_properties properties = MLT_CONSUMER_PROPERTIES( self );
 		mlt_profile profile = mlt_service_profile( MLT_CONSUMER_SERVICE( self ) );
-		profile->sample_aspect_den = mlt_properties_get_int( properties, "sample_aspect_den" );
 		if ( profile )
+		{
+			profile->sample_aspect_den = mlt_properties_get_int( properties, "sample_aspect_den" );
 			mlt_properties_set_double( properties, "aspect_ratio", mlt_profile_sar( profile )  );
+		}
 	}
 	else if ( !strcmp( name, "display_aspect_num" ) )
 	{
@@ -280,8 +284,8 @@ static void mlt_consumer_property_changed( mlt_properties owner, mlt_consumer se
  * \private \memberof mlt_consumer_s
  * \param listener a function pointer that will be invoked
  * \param owner the events object that will be passed to \p listener
- * \param self  a service that will be passed to \p listener
- * \param args an array of pointers - the first entry is passed as a string to \p listener
+ * \param self a service that will be passed to \p listener
+ * \param args an array of pointers - the first entry is passed as a frame to \p listener
  */
 
 static void mlt_consumer_frame_show( mlt_listener listener, mlt_properties owner, mlt_service self, void **args )
@@ -297,8 +301,8 @@ static void mlt_consumer_frame_show( mlt_listener listener, mlt_properties owner
  * \private \memberof mlt_consumer_s
  * \param listener a function pointer that will be invoked
  * \param owner the events object that will be passed to \p listener
- * \param self  a service that will be passed to \p listener
- * \param args an array of pointers - the first entry is passed as a string to \p listener
+ * \param self a service that will be passed to \p listener
+ * \param args an array of pointers - the first entry is passed as a frame to \p listener
  */
 
 static void mlt_consumer_frame_render( mlt_listener listener, mlt_properties owner, mlt_service self, void **args )
@@ -336,11 +340,16 @@ mlt_consumer mlt_consumer_new( mlt_profile profile )
 	mlt_consumer self = malloc( sizeof( struct mlt_consumer_s ) );
 
 	// Initialise it
-	if ( self != NULL )
-		mlt_consumer_init( self, NULL, profile );
-
-	// Return it
-	return self;
+	if ( self != NULL && mlt_consumer_init( self, NULL, profile ) == 0 )
+	{
+		// Return it
+		return self;
+	}
+	else
+	{
+		free(self);
+		return NULL;
+	}
 }
 
 /** Get the parent service object.
@@ -407,8 +416,10 @@ int mlt_consumer_start( mlt_consumer self )
 	char *test_card = mlt_properties_get( properties, "test_card" );
 
 	// Just to make sure nothing is hanging around...
+	pthread_mutex_lock( &self->put_mutex );
 	self->put = NULL;
 	self->put_active = 1;
+	pthread_mutex_unlock( &self->put_mutex );
 
 	// Deal with it now.
 	if ( test_card != NULL )
@@ -438,9 +449,19 @@ int mlt_consumer_start( mlt_consumer self )
 		mlt_properties_set_data( properties, "test_card_producer", NULL, 0, NULL, NULL );
 	}
 
+	// The profile could have changed between a stop and a restart.
+	apply_profile_properties( self, mlt_service_profile( MLT_CONSUMER_SERVICE(self) ), properties );
+
 	// Set the frame duration in microseconds for the frame-dropping heuristic
-	int frame_duration = 1000000 / mlt_properties_get_int( properties, "frame_rate_num" ) *
-			mlt_properties_get_int( properties, "frame_rate_den" );
+	int frame_rate_num = mlt_properties_get_int( properties, "frame_rate_num" );
+	int frame_rate_den = mlt_properties_get_int( properties, "frame_rate_den" );
+	int frame_duration = 0;
+
+	if ( frame_rate_num && frame_rate_den )
+	{
+		frame_duration = 1000000 / frame_rate_num * frame_rate_den;
+	}
+
 	mlt_properties_set_int( properties, "frame_duration", frame_duration );
 
 	// Check and run an ante command
@@ -581,11 +602,9 @@ mlt_frame mlt_consumer_get_frame( mlt_consumer self )
 		if ( test_card != NULL )
 			mlt_properties_set_data( frame_properties, "test_card_producer", test_card, 0, NULL, NULL );
 
-		// Attach the rescale property
+		// Pass along the interpolation and deinterlace options
+		// TODO: get rid of consumer_deinterlace and use profile.progressive
 		mlt_properties_set( frame_properties, "rescale.interp", mlt_properties_get( properties, "rescale" ) );
-
-		// Aspect ratio and other jiggery pokery
-		mlt_properties_set_double( frame_properties, "consumer_aspect_ratio", mlt_properties_get_double( properties, "aspect_ratio" ) );
 		mlt_properties_set_int( frame_properties, "consumer_deinterlace", mlt_properties_get_int( properties, "progressive" ) | mlt_properties_get_int( properties, "deinterlace" ) );
 		mlt_properties_set( frame_properties, "deinterlace_method", mlt_properties_get( properties, "deinterlace_method" ) );
 		mlt_properties_set_int( frame_properties, "consumer_tff", mlt_properties_get_int( properties, "top_field_first" ) );
@@ -650,6 +669,8 @@ static void *consumer_read_ahead_thread( void *arg )
 			afmt = mlt_audio_float;
 		else if ( !strcmp( format, "f32le" ) )
 			afmt = mlt_audio_f32le;
+		else if ( !strcmp( format, "u8" ) )
+			afmt = mlt_audio_u8;
 	}
 	int counter = 0;
 	double fps = mlt_properties_get_double( properties, "fps" );
@@ -1002,6 +1023,7 @@ static void consumer_work_start( mlt_consumer self )
 
 	// We're running now
 	self->ahead = 1;
+	self->threads = thread;
 	
 	// These keep track of the accelleration of frame dropping or recovery.
 	self->consecutive_dropped = 0;
@@ -1138,8 +1160,8 @@ static void consumer_work_stop( mlt_consumer self )
 			pthread_join( *thread, NULL );
 
 		// Deallocate the array of threads
-		if ( thread )
-			free( thread );
+		if ( self->threads )
+			free( self->threads );
 
 		// Indicate that worker threads no longer running
 		self->started = 0;
@@ -1170,7 +1192,7 @@ static void consumer_work_stop( mlt_consumer self )
 
 void mlt_consumer_purge( mlt_consumer self )
 {
-	if ( self->ahead )
+	if ( self && self->ahead )
 	{
 		pthread_mutex_lock( &self->queue_mutex );
 		while ( mlt_deque_count( self->queue ) )
@@ -1447,7 +1469,7 @@ int mlt_consumer_stop( mlt_consumer self )
 int mlt_consumer_is_stopped( mlt_consumer self )
 {
 	// Check if the consumer is stopped
-	if ( self->is_stopped != NULL )
+	if ( self && self->is_stopped )
 		return self->is_stopped( self );
 
 	return 0;

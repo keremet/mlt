@@ -90,11 +90,21 @@ static mlt_producer create_producer( mlt_profile profile, char *file )
 			p ++;
 		}
 
+		// Chop off the query string
+		p = strrchr( lookup, '?' );
+		if ( p )
+			p[0] = '\0';
+
+		// Strip file:// prefix
+		p = lookup;
+		if ( strncmp( lookup, "file://", 7 ) == 0 )
+			p += 7;
+			
 		// Iterate through the dictionary
 		for ( i = 0; result == NULL && i < mlt_properties_count( dictionary ); i ++ )
 		{
 			char *name = mlt_properties_get_name( dictionary, i );
-			if ( fnmatch( name, lookup, 0 ) == 0 )
+			if ( fnmatch( name, p, 0 ) == 0 )
 				result = create_from( profile, file, mlt_properties_get_value( dictionary, i ) );
 		}	
 
@@ -143,7 +153,7 @@ static void create_filter( mlt_profile profile, mlt_producer producer, char *eff
 
 	// The swscale and avcolor_space filters require resolution as arg to test compatibility
 	if ( strncmp( effect, "swscale", 7 ) == 0 || strncmp( effect, "avcolo", 6 ) == 0 )
-		arg = (char*) mlt_properties_get_int( MLT_PRODUCER_PROPERTIES( producer ), "_real_width" );
+		arg = (char*) mlt_properties_get_int( MLT_PRODUCER_PROPERTIES( producer ), "meta.media.width" );
 
 	mlt_filter filter = mlt_factory_filter( profile, id, arg );
 	if ( filter != NULL )

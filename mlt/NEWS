@@ -1,6 +1,57 @@
 MLT Release Notes
 -----------------
 
+Version 0.8.8 - January 20, 2013
+
+This is purely a bugfix release. See the ChangeLog or git log.
+
+
+Version 0.8.6 - November 14, 2012
+
+This is a re-issue of the 0.8.4 release with a fix for a performance
+regression on videos that use full-range colorspaces such as yuv420p.
+
+Version 0.8.4 - November 13, 2012
+
+This is a bugfix and minor enhancement release.
+
+* Added playlist-next event and PlaylistNextListener to Ruby binding
+* FFmpeg 1.0 and libAV master compatibility
+* Improvements to motion_est filter to generate keyframes for apps
+* Added audiolevel (measurement) filter
+
+
+Version 0.8.2 - August 28, 2012
+
+This is a bugfix and minor enhancement release.
+
+* Overhaul of A/V sync with libavformat-based inputs.
+* Fix a major memory leak introduced in previous release.
+* Fixes to problems revealed by Coverity Scan static analysis.
+* Improved encoding presets.
+* melt can now be built without SDL with define MELT_NOSDL, which is handy
+  for running it as a child process on Windows and OS X.
+* melt can now be signaled to quit, which also makes it more useful as a
+  child process.
+
+Special thanks to Mikko Rapeli who provided many of the Coverity fixes.
+
+
+Version 0.8.0 - June 1, 2012
+
+The minor version is increased due to the addition of time properties!
+The soname version increased in the process because some mlt_property
+functions changed; however, very few if any apps actually directly use
+mlt_property preferring to use mlt_properties instead. In addition:
+
+* improve seek speed on AVCHD when using FFmpeg v0.9.1+ (NOT Libav!)
+* composite and dissolve speed improvements on x86-64
+* improve performance of caching in image producers
+* add device enumeration to decklink producer and consumer
+
+Special thanks go to contributors Maksym Veremeyenko and Ed Rogalsky.
+
+
 Version 0.7.8 - February 13, 2012
 
 This is a bugfix and minor enhancement release.

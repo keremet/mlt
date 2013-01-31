@@ -91,7 +91,7 @@ int mlt_properties_init( mlt_properties self, void *child )
 		self->child = child;
 
 		// Allocate the local structure
-		self->local = calloc( sizeof( property_list ), 1 );
+		self->local = calloc( 1, sizeof( property_list ) );
 
 		// Increment the ref count
 		( ( property_list * )self->local )->ref_count = 1;
@@ -113,7 +113,7 @@ int mlt_properties_init( mlt_properties self, void *child )
 mlt_properties mlt_properties_new( )
 {
 	// Construct a standalone properties object
-	mlt_properties self = calloc( sizeof( struct mlt_properties_s ), 1 );
+	mlt_properties self = calloc( 1, sizeof( struct mlt_properties_s ) );
 
 	// Initialise self
 	mlt_properties_init( self, NULL );
@@ -192,8 +192,10 @@ static int load_properties( mlt_properties self, const char *filename )
 		// Read each string from the file
 		while( fgets( temp, 1024, file ) )
 		{
-			// Chomp the string
-			temp[ strlen( temp ) - 1 ] = '\0';
+			// Chomp the new line character from the string
+			int x = strlen( temp ) - 1;
+			if ( temp[x] == '\n' || temp[x] == '\r' )
+				temp[x] = '\0';
 
 			// Check if the line starts with a .
 			if ( temp[ 0 ] == '.' )
@@ -481,6 +483,7 @@ int mlt_properties_pass( mlt_properties self, mlt_properties that, const char *p
 
 static inline mlt_property mlt_properties_find( mlt_properties self, const char *name )
 {
+	if ( !name ) return NULL;
 	property_list *list = self->local;
 	mlt_property value = NULL;
 	int key = generate_hash( name );
@@ -617,7 +620,8 @@ int mlt_properties_pass_list( mlt_properties self, mlt_properties that, const ch
 		mlt_properties_pass_property( self, that, ptr );
 
 		ptr += count + 1;
-		ptr += strspn( ptr, delim );
+		if ( !done )
+			ptr += strspn( ptr, delim );
 	}
 
 	free( props );
@@ -871,8 +875,11 @@ int mlt_properties_parse( mlt_properties self, const char *namevalue )
 
 int mlt_properties_get_int( mlt_properties self, const char *name )
 {
+	mlt_profile profile = mlt_properties_get_data( self, "_profile", NULL );
+	double fps = mlt_profile_fps( profile );
+	property_list *list = self->local;
 	mlt_property value = mlt_properties_find( self, name );
-	return value == NULL ? 0 : mlt_property_get_int( value );
+	return value == NULL ? 0 : mlt_property_get_int( value, fps, list->locale );
 }
 
 /** Set a property to an integer value.
@@ -955,9 +962,11 @@ int mlt_properties_set_int64( mlt_properties self, const char *name, int64_t val
 
 double mlt_properties_get_double( mlt_properties self, const char *name )
 {
+	mlt_profile profile = mlt_properties_get_data( self, "_profile", NULL );
+	double fps = mlt_profile_fps( profile );
 	mlt_property value = mlt_properties_find( self, name );
 	property_list *list = self->local;
-	return value == NULL ? 0 : mlt_property_get_double_l( value, list->locale );
+	return value == NULL ? 0 : mlt_property_get_double( value, fps, list->locale );
 }
 
 /** Set a property to a floating point value.
@@ -998,8 +1007,11 @@ int mlt_properties_set_double( mlt_properties self, const char *name, double val
 
 mlt_position mlt_properties_get_position( mlt_properties self, const char *name )
 {
+	mlt_profile profile = mlt_properties_get_data( self, "_profile", NULL );
+	double fps = mlt_profile_fps( profile );
+	property_list *list = self->local;
 	mlt_property value = mlt_properties_find( self, name );
-	return value == NULL ? 0 : mlt_property_get_position( value );
+	return value == NULL ? 0 : mlt_property_get_position( value, fps, list->locale );
 }
 
 /** Set a property to a position value.
@@ -1791,6 +1803,23 @@ static inline void indent_yaml( strbuf output, int indent )
 		strbuf_printf( output, " " );
 }
 
+static void strbuf_escape( strbuf output, const char *value, char c )
+{
+	char *v = strdup( value );
+	char *s = v;
+	char *found = strchr( s, c );
+
+	while ( found )
+	{
+		*found = '\0';
+		strbuf_printf( output, "%s\\%c", s, c );
+		s = found + 1;
+		found = strchr( s, c );
+	}
+	strbuf_printf( output, "%s", s );
+	free( v );
+}
+
 /** Convert a line string into a YAML block literal.
  *
  * \private \memberof strbuf_s
@@ -1815,6 +1844,7 @@ static void output_yaml_block_literal( strbuf output, const char *value, int ind
 	}
 	indent_yaml( output, indent );
 	strbuf_printf( output, "%s\n", sol );
+	free( v );
 }
 
 /** Recursively serialize a properties list into a string buffer as YAML Tiny.
@@ -1856,6 +1886,12 @@ static void serialise_yaml( mlt_properties self, strbuf output, int indent, int 
 						strbuf_printf( output, "|\n" );
 						output_yaml_block_literal( output, value, indent + strlen( list->name[ i ] ) + strlen( "|" ) );
 					}
+					else if ( strchr( value, ':' ) || strchr( value, '[' ) )
+					{
+						strbuf_printf( output, "\"" );
+						strbuf_escape( output, value, '"' );
+						strbuf_printf( output, "\"\n", value );
+					}
 					else
 					{
 						strbuf_printf( output, "%s\n", value );
@@ -1885,6 +1921,12 @@ static void serialise_yaml( mlt_properties self, strbuf output, int indent, int 
 				{
 					strbuf_printf( output, "%s: |\n", list->name[ i ] );
 					output_yaml_block_literal( output, value, indent + strlen( list->name[ i ] ) + strlen( ": " ) );
+				}
+				else if ( strchr( value, ':' ) || strchr( value, '[' ) )
+				{
+					strbuf_printf( output, "%s: \"", list->name[ i ] );
+					strbuf_escape( output, value, '"' );
+					strbuf_printf( output, "\"\n" );
 				}
 				else
 				{
@@ -1951,4 +1993,27 @@ void mlt_properties_unlock( mlt_properties self )
 {
 	if ( self )
 		pthread_mutex_unlock( &( ( property_list* )( self->local ) )->mutex );
+}
+
+/** Get a time string associated to the name.
+ *
+ * Do not free the returned string. It's lifetime is controlled by the property.
+ * \public \memberof mlt_properties_s
+ * \param self a properties list
+ * \param name the property to get
+ * \param format the time format that you want
+ * \return the property's time value or NULL if \p name does not exist or there is no profile
+ */
+
+char *mlt_properties_get_time( mlt_properties self, const char* name, mlt_time_format format )
+{
+	mlt_profile profile = mlt_properties_get_data( self, "_profile", NULL );
+	if ( profile )
+	{
+		double fps = mlt_profile_fps( profile );
+		mlt_property value = mlt_properties_find( self, name );
+		property_list *list = self->local;
+		return value == NULL ? NULL : mlt_property_get_time( value, format, fps, list->locale );
+	}
+	return NULL;
 }

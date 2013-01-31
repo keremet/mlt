@@ -56,12 +56,15 @@ public:
 
 	RtAudioConsumer()
 		: device_id(-1)
+		, queue(NULL)
 		, joined(0)
 		, running(0)
 		, audio_avail(0)
 		, playing(0)
 		, refresh_count(0)
-		{}
+	{
+		memset( &consumer, 0, sizeof( consumer ) );
+	}
 
 	~RtAudioConsumer()
 	{
@@ -222,7 +225,10 @@ public:
 		int64_t playtime = 0;
 		struct timespec tm = { 0, 100000 };
 	//	int last_position = -1;
+
+		pthread_mutex_lock( &refresh_mutex );
 		refresh_count = 0;
+		pthread_mutex_unlock( &refresh_mutex );
 
 		// Loop until told not to
 		while ( running )
@@ -389,6 +395,7 @@ public:
 		// Set the preferred params of the test card signal
 		int channels = mlt_properties_get_int( properties, "channels" );
 		int frequency = mlt_properties_get_int( properties, "frequency" );
+		int scrub = mlt_properties_get_int( properties, "scrub_audio" );
 		static int counter = 0;
 		int samples = mlt_sample_calculator( mlt_properties_get_double( properties, "fps" ), frequency, counter++ );
 		int16_t *pcm;
@@ -441,7 +448,7 @@ public:
 				pthread_cond_wait( &audio_cond, &audio_mutex );
 			if ( running )
 			{
-				if ( mlt_properties_get_double( properties, "_speed" ) == 1 )
+				if ( scrub || mlt_properties_get_double( properties, "_speed" ) == 1 )
 					memcpy( &audio_buffer[ audio_avail ], pcm, bytes );
 				else
 					memset( &audio_buffer[ audio_avail ], 0, bytes );
@@ -640,7 +647,7 @@ mlt_consumer consumer_rtaudio_init( mlt_profile profile, mlt_service_type type, 
 	if ( rtaudio && !mlt_consumer_init( rtaudio->getConsumer(), rtaudio, profile ) )
 	{
 		// If initialises without error
-		if ( rtaudio->open( arg ) )
+		if ( rtaudio->open( arg? arg : getenv( "AUDIODEV" ) ) )
 		{
 			// Setup callbacks
 			consumer = rtaudio->getConsumer();

@@ -48,7 +48,7 @@ mlt_producer producer_colour_init( mlt_profile profile, mlt_service_type type, c
 		producer->close = ( mlt_destructor )producer_close;
 
 		// Set the default properties
-		mlt_properties_set( properties, "resource", colour == NULL ? "0x000000ff" : colour );
+		mlt_properties_set( properties, "resource", ( !colour || !strcmp( colour, "" ) ) ? "0x000000ff" : colour );
 		mlt_properties_set( properties, "_resource", "" );
 		mlt_properties_set_double( properties, "aspect_ratio", mlt_profile_sar( profile ) );
 		
@@ -79,6 +79,12 @@ rgba_color parse_color( char *color, unsigned int color_int )
 		result.r = 0x00;
 		result.g = 0x00;
 		result.b = 0xff;
+	}
+	else if ( !strcmp( color, "black" ) )
+	{
+		result.r = 0x00;
+		result.g = 0x00;
+		result.b = 0x00;
 	}
 	else if ( strcmp( color, "white" ) )
 	{
@@ -221,8 +227,8 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 	mlt_frame_set_image( frame, *buffer, size, mlt_pool_release );
 	mlt_frame_set_alpha( frame, alpha, alpha_size, mlt_pool_release );
 	mlt_properties_set_double( properties, "aspect_ratio", mlt_properties_get_double( producer_props, "aspect_ratio" ) );
-	mlt_properties_set_int( properties, "real_width", *width );
-	mlt_properties_set_int( properties, "real_height", *height );
+	mlt_properties_set_int( properties, "meta.media.width", *width );
+	mlt_properties_set_int( properties, "meta.media.height", *height );
 
 
 	return 0;
@@ -249,7 +255,8 @@ static int producer_get_frame( mlt_producer producer, mlt_frame_ptr frame, int i
 
 		// Set producer-specific frame properties
 		mlt_properties_set_int( properties, "progressive", 1 );
-		mlt_properties_set_double( properties, "aspect_ratio", mlt_properties_get_double( producer_props, "aspect_ratio" ) );
+		mlt_profile profile = mlt_service_profile( MLT_PRODUCER_SERVICE( producer ) );
+		mlt_properties_set_double( properties, "aspect_ratio", mlt_profile_sar( profile ) );
 
 		// colour is an alias for resource
 		if ( mlt_properties_get( producer_props, "colour" ) != NULL )

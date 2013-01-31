@@ -123,7 +123,6 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 				
 				if ( mlt_service_get_frame( MLT_PRODUCER_SERVICE( producer ), &luma_frame, 0 ) == 0 ){
 		
-					mlt_properties_set_double ( MLT_FRAME_PROPERTIES ( luma_frame ) , "consumer_aspect_ratio" , 1.0 );
 					mlt_image_format luma_format = mlt_image_yuv422;
 					luma_width = dx;
 					luma_height = luma_width * mlt_properties_get_int( MLT_FRAME_PROPERTIES ( luma_frame ) , "height" ) / mlt_properties_get_int( MLT_FRAME_PROPERTIES ( luma_frame ) , "width" );
@@ -140,8 +139,8 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 						memcpy (savealpha, alpha , luma_width * luma_height );
 						memcpy (savepic, luma_image , luma_width * luma_height * 2);
 						
-						mlt_properties_set_data ( properties , savename , savepic , sizeof(uint8_t*) , mlt_pool_release, NULL );
-						mlt_properties_set_data ( properties , savename1 , savealpha , sizeof(uint8_t*)  ,  mlt_pool_release, NULL );
+						mlt_properties_set_data ( properties , savename , savepic , sizeof(savepic) , mlt_pool_release, NULL );
+						mlt_properties_set_data ( properties , savename1 , savealpha , sizeof(savealpha)  ,  mlt_pool_release, NULL );
 						mlt_properties_set_int ( properties , cachedy , luma_height );
 						
 						overlay_image(*image,*width,*height,luma_image,luma_width,luma_height, alpha, x1, y1 , updown , mirror );
@@ -164,9 +163,6 @@ static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *
 
 		int h = *height;
 		int w = *width;
-		if (maxcount==0)
-			return 0;
-
 		int im=rand()%maxcount;
 		
 		while (im-- ){

@@ -1,9 +1,9 @@
 /**
- * \file mlt_profile.c
+ * \file mlt_cache.c
  * \brief least recently used cache
  * \see mlt_profile_s
  *
- * Copyright (C) 2007-2009 Ushodaya Enterprises Limited
+ * Copyright (C) 2007-2012 Ushodaya Enterprises Limited
  * \author Dan Dennedy <dan@dennedy.org>
  *
  * This library is free software; you can redistribute it and/or
@@ -25,6 +25,7 @@
 #include "mlt_log.h"
 #include "mlt_properties.h"
 #include "mlt_cache.h"
+#include "mlt_frame.h"
 
 #include <stdlib.h>
 #include <pthread.h>
@@ -33,7 +34,7 @@
 #define MAX_CACHE_SIZE (200)
 
 /** the default number of data objects to cache per line */
-#define DEFAULT_CACHE_SIZE (10)
+#define DEFAULT_CACHE_SIZE (4)
 
 /** \brief Cache item class
  *
@@ -82,6 +83,7 @@ struct mlt_cache_s
 {
 	int count;             /**< the number of items currently in the cache */
 	int size;              /**< the maximum number of items permitted in the cache <= \p MAX_CACHE_SIZE */
+	int is_frames;         /**< indicates if this cache is used to cache frames */
 	void* *current;        /**< pointer to the current array of pointers */
 	void* A[ MAX_CACHE_SIZE ];
 	void* B[ MAX_CACHE_SIZE ];
@@ -120,6 +122,13 @@ void *mlt_cache_item_data( mlt_cache_item item, int *size )
 static void cache_object_close( mlt_cache cache, void *object, void* data )
 {
 	char key[19];
+
+	if ( cache->is_frames )
+	{
+		// Frame caches are easy - just close the object as mlt_frame.
+		mlt_frame_close( object );
+		return;
+	}
 
 	// Fetch the cache item from the active list by its owner's address
 	sprintf( key, "%p", object );
@@ -259,6 +268,7 @@ void mlt_cache_close( mlt_cache cache )
 
 void mlt_cache_purge( mlt_cache cache, void *object )
 {
+	if (!cache) return;
 	pthread_mutex_lock( &cache->mutex );
 	if ( cache && object )
 	{
@@ -336,6 +346,11 @@ static void** shuffle_get_hit( mlt_cache cache, void *object )
 }
 
 /** Put a chunk of data in the cache.
+ *
+ * This function and mlt_cache_get() are not scalable with a large volume
+ * of unique \p object paramter values. Therefore, it does not make sense
+ * to use it for a frame/image cache using the frame position for \p object.
+ * Instead, use mlt_cache_put_frame() for that.
  *
  * \public \memberof mlt_cache_s
  * \param cache a cache object
@@ -441,13 +456,150 @@ mlt_cache_item mlt_cache_get( mlt_cache cache, void *object )
 		sprintf( key, "%p", *hit );
 		result = mlt_properties_get_data( cache->active, key, NULL );
 		if ( result && result->data )
+		{
 			result->refcount++;
-		mlt_log( NULL, MLT_LOG_DEBUG, "%s: get %d = %p, %p\n", __FUNCTION__, cache->count - 1, *hit, result->data );
+			mlt_log( NULL, MLT_LOG_DEBUG, "%s: get %d = %p, %p\n", __FUNCTION__, cache->count - 1, *hit, result->data );
+		}
 
 		// swap the current array
 		cache->current = alt;
 	}
 	pthread_mutex_unlock( &cache->mutex );
 	
+	return result;
+}
+
+/** Shuffle the cache entries between the two arrays and return the frame for a position.
+ *
+ * \private \memberof mlt_cache_s
+ * \param cache a cache object
+ * \param position the position of the frame that you want
+ * \return a frame if there was a hit or NULL for a miss
+ */
+
+static mlt_frame* shuffle_get_frame( mlt_cache cache, mlt_position position )
+{
+	int i = cache->count;
+	int j = cache->count - 1;
+	mlt_frame *hit = NULL;
+	mlt_frame *alt = (mlt_frame*) ( cache->current == cache->A ? cache->B : cache->A );
+
+	if ( cache->count > 0 && cache->count < cache->size )
+	{
+		// first determine if we have a hit
+		while ( i-- && !hit )
+		{
+			mlt_frame *o = (mlt_frame*) &cache->current[ i ];
+			if ( mlt_frame_original_position( *o ) == position )
+				hit = o;
+		}
+		// if there was no hit, we will not be shuffling out an entry
+		// and are still filling the cache
+		if ( !hit )
+			++j;
+		// reset these
+		i = cache->count;
+		hit = NULL;
+	}
+
+	// shuffle the existing entries to the alternate array
+	while ( i-- )
+	{
+		mlt_frame *o = (mlt_frame*) &cache->current[ i ];
+
+		if ( !hit && mlt_frame_original_position( *o ) == position )
+		{
+			hit = o;
+		}
+		else if ( j > 0 )
+		{
+			alt[ --j ] = *o;
+// 			mlt_log( NULL, MLT_LOG_DEBUG, "%s: shuffle %d = %p\n", __FUNCTION__, j, alt[j] );
+		}
+	}
+	return hit;
+}
+
+/** Put a frame in the cache.
+ *
+ * Unlike mlt_cache_put() this version is more suitable for caching frames
+ * and their data - like images. However, this version does not use reference
+ * counting and garbage collection. Rather, frames are cloned with deep copy
+ * to avoid those things.
+ *
+ * \public \memberof mlt_cache_s
+ * \param cache a cache object
+ * \param frame the frame to cache
+ * \see mlt_frame_get_frame
+ */
+
+void mlt_cache_put_frame( mlt_cache cache, mlt_frame frame )
+{
+	pthread_mutex_lock( &cache->mutex );
+	mlt_frame *hit = shuffle_get_frame( cache, mlt_frame_original_position( frame ) );
+	mlt_frame *alt = (mlt_frame*) ( cache->current == cache->A ? cache->B : cache->A );
+
+	// add the frame to the cache
+	if ( hit )
+	{
+		// release the old data
+		mlt_frame_close( *hit );
+		// the MRU end gets the updated data
+		hit = &alt[ cache->count - 1 ];
+	}
+	else if ( cache->count < cache->size )
+	{
+		// more room in cache, add it to MRU end
+		hit = &alt[ cache->count++ ];
+	}
+	else
+	{
+		// release the entry at the LRU end
+		mlt_frame_close( cache->current[0] );
+
+		// The MRU end gets the new item
+		hit = &alt[ cache->count - 1 ];
+	}
+	*hit = mlt_frame_clone( frame, 1 );
+	mlt_log( NULL, MLT_LOG_DEBUG, "%s: put %d = %p\n", __FUNCTION__, cache->count - 1, frame );
+
+	// swap the current array
+	cache->current = (void**) alt;
+	cache->is_frames = 1;
+	pthread_mutex_unlock( &cache->mutex );
+}
+
+/** Get a frame from the cache.
+ *
+ * You must call mlt_frame_close() on the frame you receive from this.
+ *
+ * \public \memberof mlt_cache_s
+ * \param cache a cache object
+ * \param position the position of the frame that you want
+ * \return a frame if found or NULL if not found or has been flushed from the cache
+ * \see mlt_frame_put_frame
+ */
+
+mlt_frame mlt_cache_get_frame( mlt_cache cache, mlt_position position )
+{
+	mlt_frame result = NULL;
+	pthread_mutex_lock( &cache->mutex );
+	mlt_frame *hit = shuffle_get_frame( cache, position );
+	mlt_frame *alt = (mlt_frame*) ( cache->current == cache->A ? cache->B : cache->A );
+
+	if ( hit )
+	{
+		// copy the hit to the MRU end
+		alt[ cache->count - 1 ] = *hit;
+		hit = &alt[ cache->count - 1 ];
+
+		result = mlt_frame_clone( *hit, 1 );
+		mlt_log( NULL, MLT_LOG_DEBUG, "%s: get %d = %p\n", __FUNCTION__, cache->count - 1, *hit );
+
+		// swap the current array
+		cache->current = (void**) alt;
+	}
+	pthread_mutex_unlock( &cache->mutex );
+
 	return result;
 }

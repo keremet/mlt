@@ -51,6 +51,7 @@
 #  include <libavutil/samplefmt.h>
 #else
 #  define AV_SAMPLE_FMT_NONE SAMPLE_FMT_NONE
+#  define AV_SAMPLE_FMT_U8  SAMPLE_FMT_U8
 #  define AV_SAMPLE_FMT_S16 SAMPLE_FMT_S16
 #  define AV_SAMPLE_FMT_S32 SAMPLE_FMT_S32
 #  define AV_SAMPLE_FMT_FLT SAMPLE_FMT_FLT
@@ -222,7 +223,9 @@ static int consumer_start( mlt_consumer consumer )
 			snprintf( key, sizeof(key), "%d", mlt_properties_count( formats ) );
 			mlt_properties_set( formats, key, format->name );
 		}
-		fprintf( stdout, "%s", mlt_properties_serialise_yaml( doc ) );
+		s = mlt_properties_serialise_yaml( doc );
+		fprintf( stdout, "%s", s );
+		free( s );
 		mlt_properties_close( doc );
 		error = 1;
 	}
@@ -237,12 +240,20 @@ static int consumer_start( mlt_consumer consumer )
 		mlt_properties_set_data( properties, "acodec", codecs, 0, (mlt_destructor) mlt_properties_close, NULL );
 		mlt_properties_set_data( doc, "audio_codecs", codecs, 0, NULL, NULL );
 		while ( ( codec = av_codec_next( codec ) ) )
+#if (defined(FFUDIV) && LIBAVCODEC_VERSION_INT >= ((54<<16)+(56<<8)+100)) || (LIBAVCODEC_VERSION_INT >= ((54<<16)+(27<<8)+0))
+			if ( codec->encode2 && codec->type == CODEC_TYPE_AUDIO )
+#elif LIBAVCODEC_VERSION_INT >= ((54<<16)+(0<<8)+0)
+			if ( ( codec->encode || codec->encode2 ) && codec->type == CODEC_TYPE_AUDIO )
+#else
 			if ( codec->encode && codec->type == CODEC_TYPE_AUDIO )
+#endif
 			{
 				snprintf( key, sizeof(key), "%d", mlt_properties_count( codecs ) );
 				mlt_properties_set( codecs, key, codec->name );
 			}
-		fprintf( stdout, "%s", mlt_properties_serialise_yaml( doc ) );
+		s = mlt_properties_serialise_yaml( doc );
+		fprintf( stdout, "%s", s );
+		free( s );
 		mlt_properties_close( doc );
 		error = 1;
 	}
@@ -257,7 +268,9 @@ static int consumer_start( mlt_consumer consumer )
 		mlt_properties_set_data( properties, "vcodec", codecs, 0, (mlt_destructor) mlt_properties_close, NULL );
 		mlt_properties_set_data( doc, "video_codecs", codecs, 0, NULL, NULL );
 		while ( ( codec = av_codec_next( codec ) ) )
-#if LIBAVCODEC_VERSION_INT >= ((53<<16)+(34<<8)+0)
+#if (defined(FFUDIV) && LIBAVCODEC_VERSION_INT >= ((54<<16)+(56<<8)+100)) || (LIBAVCODEC_VERSION_INT >= ((54<<16)+(27<<8)+0))
+			if ( codec->encode2 && codec->type == CODEC_TYPE_VIDEO )
+#elif LIBAVCODEC_VERSION_INT >= ((54<<16)+(0<<8)+0)
 			if ( (codec->encode || codec->encode2) && codec->type == CODEC_TYPE_VIDEO )
 #else
 			if ( codec->encode && codec->type == CODEC_TYPE_VIDEO )
@@ -266,7 +279,9 @@ static int consumer_start( mlt_consumer consumer )
 				snprintf( key, sizeof(key), "%d", mlt_properties_count( codecs ) );
 				mlt_properties_set( codecs, key, codec->name );
 			}
-		fprintf( stdout, "%s", mlt_properties_serialise_yaml( doc ) );
+		s = mlt_properties_serialise_yaml( doc );
+		fprintf( stdout, "%s", s );
+		free( s );
 		mlt_properties_close( doc );
 		error = 1;
 	}
@@ -312,6 +327,38 @@ static int consumer_start( mlt_consumer consumer )
 		{
 			profile->width = width;
 			profile->height = height;
+		}
+
+		if ( mlt_properties_get( properties, "aspect" ) )
+		{
+			// "-aspect" on ffmpeg command line is display aspect ratio
+			double ar = mlt_properties_get_double( properties, "aspect" );
+			AVRational rational = av_d2q( ar, 255 );
+
+			// Update the profile and properties as well since this is an alias
+			// for mlt properties that correspond to profile settings
+			mlt_properties_set_int( properties, "display_aspect_num", rational.num );
+			mlt_properties_set_int( properties, "display_aspect_den", rational.den );
+			if ( profile )
+			{
+				profile->display_aspect_num = rational.num;
+				profile->display_aspect_den = rational.den;
+				mlt_properties_set_double( properties, "display_ratio", mlt_profile_dar( profile ) );
+			}
+
+			// Now compute the sample aspect ratio
+			rational = av_d2q( ar * height / width, 255 );
+
+			// Update the profile and properties as well since this is an alias
+			// for mlt properties that correspond to profile settings
+			mlt_properties_set_int( properties, "sample_aspect_num", rational.num );
+			mlt_properties_set_int( properties, "sample_aspect_den", rational.den );
+			if ( profile )
+			{
+				profile->sample_aspect_num = rational.num;
+				profile->sample_aspect_den = rational.den;
+				mlt_properties_set_double( properties, "aspect_ratio", mlt_profile_sar( profile ) );
+			}
 		}
 
 		// Handle the ffmpeg command line "-r" property for frame rate
@@ -365,7 +412,7 @@ static int consumer_stop( mlt_consumer consumer )
 		// Wait for termination
 		pthread_join( *thread, NULL );
 
-		mlt_properties_set( properties, "thread", NULL );
+		mlt_properties_set_data( properties, "thread", NULL, 0, NULL, NULL );
 	}
 
 	return 0;
@@ -428,15 +475,19 @@ static int get_mlt_audio_format( int av_sample_fmt )
 {
 	switch ( av_sample_fmt )
 	{
+	case AV_SAMPLE_FMT_U8:
+		return mlt_audio_u8;
 	case AV_SAMPLE_FMT_S32:
 		return mlt_audio_s32le;
 	case AV_SAMPLE_FMT_FLT:
 		return mlt_audio_f32le;
 #if LIBAVUTIL_VERSION_INT >= ((51<<16)+(17<<8)+0)
+	case AV_SAMPLE_FMT_U8P:
+		return mlt_audio_u8;
 	case AV_SAMPLE_FMT_S32P:
-		return mlt_audio_s32;
+		return mlt_audio_s32le;
 	case AV_SAMPLE_FMT_FLTP:
-		return mlt_audio_float;
+		return mlt_audio_f32le;
 #endif
 	default:
 		return mlt_audio_s16;
@@ -456,6 +507,8 @@ static int pick_sample_fmt( mlt_properties properties, AVCodec *codec )
 			sample_fmt = AV_SAMPLE_FMT_S32;
 		else if ( !strcmp( format, "f32le" ) )
 			sample_fmt = AV_SAMPLE_FMT_FLT;
+		else if ( !strcmp( format, "u8" ) )
+			sample_fmt = AV_SAMPLE_FMT_U8;
 #if LIBAVUTIL_VERSION_INT >= ((51<<16)+(17<<8)+0)
 		else if ( !strcmp( format, "s32" ) )
 			sample_fmt = AV_SAMPLE_FMT_S32P;
@@ -474,10 +527,13 @@ static int pick_sample_fmt( mlt_properties properties, AVCodec *codec )
 	{
 		switch (*p)
 		{
+		case AV_SAMPLE_FMT_U8:
 		case AV_SAMPLE_FMT_S16:
 		case AV_SAMPLE_FMT_S32:
 		case AV_SAMPLE_FMT_FLT:
 #if LIBAVUTIL_VERSION_INT >= ((51<<16)+(17<<8)+0)
+		case AV_SAMPLE_FMT_U8P:
+		case AV_SAMPLE_FMT_S16P:
 		case AV_SAMPLE_FMT_S32P:
 		case AV_SAMPLE_FMT_FLTP:
 #endif
@@ -489,6 +545,28 @@ static int pick_sample_fmt( mlt_properties properties, AVCodec *codec )
 	mlt_log_error( properties, "audio codec sample_fmt not compatible" );
 
 	return AV_SAMPLE_FMT_NONE;
+}
+
+static uint8_t* interleaved_to_planar( int samples, int channels, uint8_t* audio, int bytes_per_sample )
+{
+	int size = samples * channels * bytes_per_sample;
+	uint8_t *buffer = mlt_pool_alloc( AUDIO_ENCODE_BUFFER_SIZE );
+	uint8_t *p = buffer;
+	int c;
+
+	memset( buffer, 0, AUDIO_ENCODE_BUFFER_SIZE );
+	for ( c = 0; c < channels; c++ )
+	{
+		uint8_t *q = audio + c * bytes_per_sample;
+		int i = samples + 1;
+		while ( --i )
+		{
+			memcpy( p, q, bytes_per_sample );
+			p += bytes_per_sample;
+			q += channels * bytes_per_sample;
+		}
+	}
+	return buffer;
 }
 
 /** Add an audio output stream
@@ -664,6 +742,7 @@ static int open_audio( mlt_properties properties, AVFormatContext *oc, AVStream 
 	else
 	{
 		mlt_log_warning( NULL, "%s: Unable to encode audio - disabling audio output.\n", __FILE__ );
+		audio_input_frame_size = 0;
 	}
 
 	return audio_input_frame_size;
@@ -792,33 +871,7 @@ static AVStream *add_video_stream( mlt_consumer consumer, AVFormatContext *oc, A
 		{
 			// "-aspect" on ffmpeg command line is display aspect ratio
 			double ar = mlt_properties_get_double( properties, "aspect" );
-			AVRational rational = av_d2q( ar, 255 );
-
-			// Update the profile and properties as well since this is an alias 
-			// for mlt properties that correspond to profile settings
-			mlt_properties_set_int( properties, "display_aspect_num", rational.num );
-			mlt_properties_set_int( properties, "display_aspect_den", rational.den );
-			mlt_profile profile = mlt_service_profile( MLT_CONSUMER_SERVICE( consumer ) );
-			if ( profile )
-			{
-				profile->display_aspect_num = rational.num;
-				profile->display_aspect_den = rational.den;
-				mlt_properties_set_double( properties, "display_ratio", mlt_profile_dar( profile ) );
-			}
-
-			// Now compute the sample aspect ratio
-			rational = av_d2q( ar * c->height / c->width, 255 );
-			c->sample_aspect_ratio = rational;
-			// Update the profile and properties as well since this is an alias 
-			// for mlt properties that correspond to profile settings
-			mlt_properties_set_int( properties, "sample_aspect_num", rational.num );
-			mlt_properties_set_int( properties, "sample_aspect_den", rational.den );
-			if ( profile )
-			{
-				profile->sample_aspect_num = rational.num;
-				profile->sample_aspect_den = rational.den;
-				mlt_properties_set_double( properties, "aspect_ratio", mlt_profile_sar( profile ) );
-			}
+			c->sample_aspect_ratio = av_d2q( ar * c->height / c->width, 255 );
 		}
 		else
 		{
@@ -936,11 +989,14 @@ static AVStream *add_video_stream( mlt_consumer consumer, AVFormatContext *oc, A
 						mlt_log_fatal( MLT_CONSUMER_SERVICE( consumer ), "Could not allocate log buffer\n" );
 					else
 					{
-						size = fread( logbuffer, 1, size, f );
-						fclose( f );
-						logbuffer[size] = '\0';
-						c->stats_in = logbuffer;
+						if ( size >= 0 )
+						{
+							size = fread( logbuffer, 1, size, f );
+							logbuffer[size] = '\0';
+							c->stats_in = logbuffer;
+						}
 					}
+					fclose( f );
 				}
 			}
 		}
@@ -1062,7 +1118,6 @@ static void write_transmitter( mlt_listener listener, mlt_properties owner, mlt_
 {
 	listener( owner, service, (uint8_t*) args[0], (int) args[1] );
 }
-
 
 /** The main thread - the argument is simply the consumer.
 */
@@ -1401,7 +1456,17 @@ static void *consumer_thread( void *arg )
 			audio_input_frame_size = open_audio( properties, oc, audio_st[i], audio_outbuf_size,
 				acodec? acodec : NULL );
 			if ( !audio_input_frame_size )
+			{
+				// Remove the audio stream from the output context
+				int j;
+				for ( j = 0; j < oc->nb_streams; j++ )
+				{
+					if ( oc->streams[j] == audio_st[i] )
+						av_freep( &oc->streams[j] );
+				}
+				--oc->nb_streams;
 				audio_st[i] = NULL;
+			}
 		}
 
 		// Setup custom I/O if redirecting
@@ -1575,7 +1640,23 @@ static void *consumer_thread( void *arg )
 						// Optimized for single track and no channel remap
 						if ( !audio_st[1] && !mlt_properties_count( frame_meta_properties ) )
 						{
-							pkt.size = avcodec_encode_audio( codec, audio_outbuf, audio_outbuf_size, (short*) audio_buf_1 );
+							void* p = audio_buf_1;
+#if LIBAVUTIL_VERSION_INT >= ((51<<16)+(17<<8)+0)
+							if ( codec->sample_fmt == AV_SAMPLE_FMT_FLTP )
+								p = interleaved_to_planar( samples, channels, p, sizeof( float ) );
+							else if ( codec->sample_fmt == AV_SAMPLE_FMT_S16P )
+								p = interleaved_to_planar( samples, channels, p, sizeof( int16_t ) );
+							else if ( codec->sample_fmt == AV_SAMPLE_FMT_S32P )
+								p = interleaved_to_planar( samples, channels, p, sizeof( int32_t ) );
+							else if ( codec->sample_fmt == AV_SAMPLE_FMT_U8P )
+								p = interleaved_to_planar( samples, channels, p, sizeof( uint8_t ) );
+#endif
+							pkt.size = avcodec_encode_audio( codec, audio_outbuf, audio_outbuf_size, p );
+
+#if LIBAVUTIL_VERSION_INT >= ((51<<16)+(17<<8)+0)
+							if ( p != audio_buf_1 )
+								mlt_pool_release( p );
+#endif
 						}
 						else
 						{
@@ -1763,6 +1844,10 @@ static void *consumer_thread( void *arg )
 						AVPacket pkt;
 						av_init_packet(&pkt);
 
+						// Set frame interlace hints
+						c->coded_frame->interlaced_frame = !mlt_properties_get_int( frame_properties, "progressive" );
+						c->coded_frame->top_field_first = mlt_properties_get_int( frame_properties, "top_field_first" );
+
 						pkt.flags |= PKT_FLAG_KEY;
 						pkt.stream_index= video_st->index;
 						pkt.data= (uint8_t *)output;
@@ -1868,7 +1953,22 @@ static void *consumer_thread( void *arg )
 				( channels * audio_input_frame_size < sample_fifo_used( fifo ) / sample_bytes ) )
 			{
 				sample_fifo_fetch( fifo, audio_buf_1, channels * audio_input_frame_size * sample_bytes );
-				pkt.size = avcodec_encode_audio( c, audio_outbuf, audio_outbuf_size, (short*) audio_buf_1 );
+				void* p = audio_buf_1;
+#if LIBAVUTIL_VERSION_INT >= ((51<<16)+(17<<8)+0)
+				if ( c->sample_fmt == AV_SAMPLE_FMT_FLTP )
+					p = interleaved_to_planar( audio_input_frame_size, channels, p, sizeof( float ) );
+				else if ( c->sample_fmt == AV_SAMPLE_FMT_S16P )
+					p = interleaved_to_planar( audio_input_frame_size, channels, p, sizeof( int16_t ) );
+				else if ( c->sample_fmt == AV_SAMPLE_FMT_S32P )
+					p = interleaved_to_planar( audio_input_frame_size, channels, p, sizeof( int32_t ) );
+				else if ( c->sample_fmt == AV_SAMPLE_FMT_U8P )
+					p = interleaved_to_planar( audio_input_frame_size, channels, p, sizeof( uint8_t ) );
+#endif
+				pkt.size = avcodec_encode_audio( c, audio_outbuf, audio_outbuf_size, p );
+#if LIBAVUTIL_VERSION_INT >= ((51<<16)+(17<<8)+0)
+				if ( p != audio_buf_1 )
+					mlt_pool_release( p );
+#endif
 			}
 			if ( pkt.size <= 0 )
 				pkt.size = avcodec_encode_audio( c, audio_outbuf, audio_outbuf_size, NULL );

@@ -156,6 +156,11 @@ mlt_producer mlt_producer_new( mlt_profile profile )
 			mlt_properties_set_data( MLT_PRODUCER_PROPERTIES( self ), "_profile", profile, 0, NULL, NULL );
 			mlt_properties_set_double( MLT_PRODUCER_PROPERTIES( self ), "aspect_ratio", mlt_profile_sar( profile ) );
 		}
+		else
+		{
+			free( self );
+			return NULL;
+		}
 	}
 	return self;
 }
@@ -287,6 +292,7 @@ mlt_properties mlt_producer_properties( mlt_producer self )
  * \param position set the "play head" position of the producer
  * \return false
  * \todo Document how the properties affect behavior.
+ * \see mlt_producer_seek_time
  */
 
 int mlt_producer_seek( mlt_producer self, mlt_position position )
@@ -311,7 +317,7 @@ int mlt_producer_seek( mlt_producer self, mlt_position position )
 		mlt_producer_set_speed( self, 0 );
 		position = mlt_producer_get_playtime( self ) - 1;
 	}
-	else if ( use_points && !strcmp( eof, "loop" ) && position >= mlt_producer_get_playtime( self ) )
+	else if ( use_points && eof && !strcmp( eof, "loop" ) && position >= mlt_producer_get_playtime( self ) )
 	{
 		position = (int)position % (int)mlt_producer_get_playtime( self );
 	}
@@ -323,6 +329,22 @@ int mlt_producer_seek( mlt_producer self, mlt_position position )
 	mlt_properties_set_position( MLT_PRODUCER_PROPERTIES( self ), "_frame", use_points * mlt_producer_get_in( self ) + position );
 
 	return 0;
+}
+
+/** Seek to a specified time string.
+ *
+ * \public \memberof mlt_producer_s
+ * \param self a producer
+ * \param time set the "play head" position of the producer to the time string
+ * \return false
+ * \see mlt_producer_seek
+ */
+
+int mlt_producer_seek_time( mlt_producer self, const char* time )
+{
+    mlt_properties_set( MLT_PRODUCER_PROPERTIES(self), "_seek_time", time );
+    mlt_position position = mlt_properties_get_position( MLT_PRODUCER_PROPERTIES(self), "_seek_time" );
+    return mlt_producer_seek( self, position );
 }
 
 /** Get the current position (relative to in point).
@@ -347,6 +369,19 @@ mlt_position mlt_producer_position( mlt_producer self )
 mlt_position mlt_producer_frame( mlt_producer self )
 {
 	return mlt_properties_get_position( MLT_PRODUCER_PROPERTIES( self ), "_frame" );
+}
+
+/** Get the current position (relative to start of producer) as a time string.
+ *
+ * \public \memberof mlt_producer_s
+ * \param self a producer
+ * \param format the time value format
+ * \return the position of the "play head" regardless of the in point
+ */
+
+char* mlt_producer_frame_time( mlt_producer self, mlt_time_format format )
+{
+    return mlt_properties_get_time( MLT_PRODUCER_PROPERTIES( self ), "_frame", format );
 }
 
 /** Set the playing speed.
@@ -507,6 +542,21 @@ mlt_position mlt_producer_get_playtime( mlt_producer self )
 mlt_position mlt_producer_get_length( mlt_producer self )
 {
 	return mlt_properties_get_position( MLT_PRODUCER_PROPERTIES( self ), "length" );
+}
+
+/** Get the total, unedited length of the producer as a time string.
+ *
+ * The value returned by a live streaming producer is unknown.
+ *
+ * \public \memberof mlt_producer_s
+ * \param self a producer
+ * \param format the time value format
+ * \return the duration of the producer regardless of in and out points
+ */
+
+char* mlt_producer_get_length_time( mlt_producer self, mlt_time_format format )
+{
+    return mlt_properties_get_time( MLT_PRODUCER_PROPERTIES( self ), "length", format );
 }
 
 /** Prepare for next frame.

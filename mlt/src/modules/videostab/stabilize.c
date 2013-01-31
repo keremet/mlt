@@ -667,8 +667,11 @@ Transform calcTransFields(StabData* sd, calcFieldTransFunc fieldfunc,
     t = null_transform();
     num_trans = index; // amount of transforms we actually have
     if (num_trans < 1) {
-        printf( "too low contrast! No field remains.\n \
-                    (no translations are detected in frame %i)", sd->t);
+        printf( "too low contrast! No field remains.\n"
+                "(no translations are detected in frame %i)", sd->t);
+        free(ts);
+        free(fs);
+        free(angles);
         return t;
     }
 
@@ -728,13 +731,16 @@ Transform calcTransFields(StabData* sd, calcFieldTransFunc fieldfunc,
 #ifdef STABVERBOSE
     fclose(f);
 #endif
+    free(ts);
+    free(fs);
+    free(angles);
     return t;
 }
 
 /** draws the field scanning area */
 void drawFieldScanArea(StabData* sd, const Field* field, const Transform* t)
 {
-    if (!sd->pixelformat == mlt_image_yuv420p) {
+	if (sd->pixelformat != mlt_image_yuv420p) {
 		mlt_log_warning (NULL, "format not usable\n");
         return;
 	}
@@ -745,7 +751,7 @@ void drawFieldScanArea(StabData* sd, const Field* field, const Transform* t)
 /** draws the field */
 void drawField(StabData* sd, const Field* field, const Transform* t)
 {
-    if (!sd->pixelformat == mlt_image_yuv420p){
+	if (sd->pixelformat != mlt_image_yuv420p){
 		mlt_log_warning (NULL, "format not usable\n");
         return;
 	}
@@ -756,7 +762,7 @@ void drawField(StabData* sd, const Field* field, const Transform* t)
 /** draws the transform data of this field */
 void drawFieldTrans(StabData* sd, const Field* field, const Transform* t)
 {
-    if (!sd->pixelformat == mlt_image_yuv420p){
+	if (sd->pixelformat != mlt_image_yuv420p){
 		mlt_log_warning (NULL, "format not usable\n");
         return;
 	}
@@ -795,20 +801,6 @@ struct iterdata {
 /* Module interface routines and data. */
 
 /*************************************************************************/
-
-/**
- * stabilize_init:  Initialize this instance of the module.  See
- * tcmodule-data.h for function details.
- */
-int stabilize_init(StabData* instance)
-{
-
-    instance = calloc(1,sizeof(StabData)); // allocation with zero values
-    if (!instance) {
-        return -1;
-    }
-    return 0;
-}
 
 /*
  * stabilize_configure:  Configure this instance of the module.  See

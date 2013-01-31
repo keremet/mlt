@@ -180,8 +180,36 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 	{
 		init_arrows( format, *width, *height );
 		draw_rectangle_outline(*image, boundry.x, boundry.y, boundry.w, boundry.h, 100);
-	}        
+	}
 
+	if( mlt_properties_get_int( filter_properties, "_serialize" ) == 1 )
+	{
+		// Add the vector change to the list
+		mlt_geometry key_frames = mlt_properties_get_data( filter_properties, "motion_vector_list", NULL );
+		if ( !key_frames )
+		{
+			key_frames = mlt_geometry_init();
+			mlt_properties_set_data( filter_properties, "motion_vector_list", key_frames, 0,
+			                         (mlt_destructor) mlt_geometry_close, (mlt_serialiser) mlt_geometry_serialise );
+			if ( key_frames )
+				mlt_geometry_set_length( key_frames, mlt_filter_get_length2( filter, frame ) );
+		}
+		if ( key_frames )
+		{
+			struct mlt_geometry_item_s item;
+			item.frame = (int) mlt_frame_get_position( frame );
+			item.key = 1;
+			item.x = boundry.x;
+			item.y = boundry.y;
+			item.w = boundry.w;
+			item.h = boundry.h;
+			item.mix = 0;
+			item.f[0] = item.f[1] = item.f[2] = item.f[3] = 1;
+			item.f[4] = 0;
+			mlt_geometry_insert( key_frames, &item );
+		}
+	}
+	
 	if( mlt_properties_get_int( filter_properties, "obscure" ) == 1 )
 	{
 		mlt_filter obscure = mlt_properties_get_data( filter_properties, "_obscure", NULL );
@@ -274,14 +302,13 @@ static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
         /* modify the frame with the current geometry */
 	mlt_frame_push_service( frame, this);
 	mlt_frame_push_get_image( frame, attach_boundry_to_frame );
-
-
+	mlt_properties properties = MLT_FILTER_PROPERTIES( this );
 
 	/* apply the motion estimation filter */
-	mlt_filter motion_est = mlt_properties_get_data( MLT_FILTER_PROPERTIES(this), "_motion_est", NULL ); 
+	mlt_filter motion_est = mlt_properties_get_data( properties, "_motion_est", NULL ); 
+	/* Pass motion_est properties */
+	mlt_properties_pass( MLT_FILTER_PROPERTIES( motion_est ), properties, "motion_est." );
 	mlt_filter_process( motion_est, frame);
-
-
 
 	/* calculate the new geometry based on the motion */
 	mlt_frame_push_service( frame, this);
@@ -291,12 +318,12 @@ static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
 	/* visualize the motion vectors */
 	if( mlt_properties_get_int( MLT_FILTER_PROPERTIES(this), "debug" ) == 1 )
 	{
-		mlt_filter vismv = mlt_properties_get_data( MLT_FILTER_PROPERTIES(this), "_vismv", NULL );
+		mlt_filter vismv = mlt_properties_get_data( properties, "_vismv", NULL );
 		if( vismv == NULL )
 		{
 			mlt_profile profile = mlt_service_profile( MLT_FILTER_SERVICE( this ) );
 			vismv = mlt_factory_filter( profile, "vismv", NULL );
-			mlt_properties_set_data( MLT_FILTER_PROPERTIES(this), "_vismv", vismv, 0, (mlt_destructor)mlt_filter_close, NULL );
+			mlt_properties_set_data( properties, "_vismv", vismv, 0, (mlt_destructor)mlt_filter_close, NULL );
 		}
 
 		mlt_filter_process( vismv, frame );
@@ -304,12 +331,12 @@ static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
 
 	if( mlt_properties_get_int( MLT_FILTER_PROPERTIES(this), "obscure" ) == 1 )
 	{
-		mlt_filter obscure = mlt_properties_get_data( MLT_FILTER_PROPERTIES(this), "_obscure", NULL );
+		mlt_filter obscure = mlt_properties_get_data( properties, "_obscure", NULL );
 		if( obscure == NULL )
 		{
 			mlt_profile profile = mlt_service_profile( MLT_FILTER_SERVICE( this ) );
 			obscure = mlt_factory_filter( profile, "obscure", NULL );
-			mlt_properties_set_data( MLT_FILTER_PROPERTIES(this), "_obscure", obscure, 0, (mlt_destructor)mlt_filter_close, NULL );
+			mlt_properties_set_data( properties, "_obscure", obscure, 0, (mlt_destructor)mlt_filter_close, NULL );
 		}
 
 		mlt_filter_process( obscure, frame );

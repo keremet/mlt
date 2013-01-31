@@ -138,7 +138,7 @@ static int producer_collect_info( producer_libdv this, mlt_profile profile );
 
 mlt_producer producer_libdv_init( mlt_profile profile, mlt_service_type type, const char *id, char *filename )
 {
-	producer_libdv this = calloc( sizeof( struct producer_libdv_s ), 1 );
+	producer_libdv this = calloc( 1, sizeof( struct producer_libdv_s ) );
 
 	if ( filename != NULL && this != NULL && mlt_producer_init( &this->parent, this ) == 0 )
 	{
@@ -279,7 +279,6 @@ static int producer_collect_info( producer_libdv this, mlt_profile profile )
 					aspect_ratio = 8 / 9;
 			}
 			mlt_properties_set_double( properties, "aspect_ratio", aspect_ratio);
-			mlt_properties_set_double( properties, "source_fps", this->is_pal ? 25 : ( 30000.0 / 1001.0 ) );
 			mlt_properties_set_int( properties, "meta.media.nb_streams", 2 );
 			mlt_properties_set_int( properties, "video_index", 0 );
 			mlt_properties_set( properties, "meta.media.0.stream.type", "video" );
@@ -289,6 +288,10 @@ static int producer_collect_info( producer_libdv this, mlt_profile profile )
 			mlt_properties_set( properties, "meta.media.1.stream.type", "audio" );
 			mlt_properties_set( properties, "meta.media.1.codec.name", "pcm_s16le" );
 			mlt_properties_set( properties, "meta.media.1.codec.long_name", "signed 16-bit little-endian PCM" );
+			mlt_properties_set_int( properties, "meta.media.width", 720 );
+			mlt_properties_set_int( properties, "meta.media.height", this->is_pal ? 576 : 480 );
+			mlt_properties_set_int( properties, "meta.media.frame_rate_num", this->is_pal? 25 : 30000 );
+			mlt_properties_set_int( properties, "meta.media.frame_rate_den", this->is_pal?  1 :  1001 );
 
 			// Return the decoder
 			dv_decoder_return( dv_decoder );
@@ -503,8 +506,6 @@ static int producer_get_frame( mlt_producer producer, mlt_frame_ptr frame, int i
 		// Update other info on the frame
 		mlt_properties_set_int( properties, "width", 720 );
 		mlt_properties_set_int( properties, "height", this->is_pal ? 576 : 480 );
-		mlt_properties_set_int( properties, "real_width", 720 );
-		mlt_properties_set_int( properties, "real_height", this->is_pal ? 576 : 480 );
 		mlt_properties_set_int( properties, "top_field_first", !this->is_pal ? 0 : ( data[ 5 ] & 0x07 ) == 0 ? 0 : 1 );
 		mlt_properties_set_int( properties, "colorspace", 601 );
 	
@@ -536,7 +537,8 @@ static int producer_get_frame( mlt_producer producer, mlt_frame_ptr frame, int i
 	}
 
 	// Update timecode on the frame we're creating
-	mlt_frame_set_position( *frame, mlt_producer_position( producer ) );
+	if ( *frame != NULL )
+		mlt_frame_set_position( *frame, mlt_producer_position( producer ) );
 
 	// Calculate the next timecode
 	mlt_producer_prepare_next( producer );

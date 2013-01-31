@@ -891,6 +891,23 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 	/* Check to see if somebody else has given us bounds */
 	struct mlt_geometry_item_s *bounds = mlt_properties_get_data( MLT_FRAME_PROPERTIES( frame ), "bounds", NULL );
 
+	if ( !bounds )
+	{
+		char *property = mlt_properties_get( MLT_FILTER_PROPERTIES( filter ), "bounding" );
+		if ( property )
+		{
+			mlt_geometry geometry = mlt_geometry_init( );
+			mlt_profile profile = mlt_service_profile( MLT_FILTER_SERVICE(filter) );
+			if ( geometry )
+			{
+				mlt_geometry_parse( geometry, property, 0, profile->width, profile->height );
+				bounds = calloc( 1, sizeof(*bounds) );
+				mlt_properties_set_data( MLT_FILTER_PROPERTIES(filter), "bounds", bounds, sizeof(*bounds), free, NULL );
+				mlt_geometry_fetch( geometry, bounds, 0 );
+			}
+		}
+	}
+
 	if( bounds != NULL ) {
 		// translate pixel units (from bounds) to macroblock units
 		// make sure whole macroblock stays within bounds
@@ -935,10 +952,30 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 		if( c->comparison_average > 10 * c->mb_w * c->mb_h &&
 		    c->comparison_average > c->previous_msad * 2 )
 		{
-			fprintf(stderr, " - SAD: %d   <<Shot change>>\n", c->comparison_average);
+			mlt_properties properties = MLT_FILTER_PROPERTIES( filter );
+			mlt_log_verbose( MLT_FILTER_SERVICE(filter), "shot change: %d\n", c->comparison_average);
 			mlt_properties_set_int( MLT_FRAME_PROPERTIES( frame ), "shot_change", 1);
-		//	c->former_vectors_valid = 0; // Invalidate the previous frame's predictors
 			c->shot_change = 1;
+
+			// Add the shot change to the list
+			mlt_geometry key_frames = mlt_properties_get_data( properties, "shot_change_list", NULL );
+			if ( !key_frames )
+			{
+				key_frames = mlt_geometry_init();
+				mlt_properties_set_data( properties, "shot_change_list", key_frames, 0,
+					(mlt_destructor) mlt_geometry_close, (mlt_serialiser) mlt_geometry_serialise );
+				if ( key_frames )
+					mlt_geometry_set_length( key_frames, mlt_filter_get_length2( filter, frame ) );
+			}
+			if ( key_frames )
+			{
+				struct mlt_geometry_item_s item;
+				item.frame = (int) c->current_frame_position;
+				item.x = c->comparison_average;
+				item.f[0] = 1;
+				item.f[1] = item.f[2] = item.f[3] = item.f[4] = 0;
+				mlt_geometry_insert( key_frames, &item );
+			}
 		}
 		else {
 			c->former_vectors_valid = 1;

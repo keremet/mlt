@@ -49,7 +49,7 @@ static void mlt_tractor_listener( mlt_multitrack tracks, mlt_tractor self );
 
 mlt_tractor mlt_tractor_init( )
 {
-	mlt_tractor self = calloc( sizeof( struct mlt_tractor_s ), 1 );
+	mlt_tractor self = calloc( 1, sizeof( struct mlt_tractor_s ) );
 	if ( self != NULL )
 	{
 		mlt_producer producer = &self->parent;
@@ -88,7 +88,7 @@ mlt_tractor mlt_tractor_init( )
 
 mlt_tractor mlt_tractor_new( )
 {
-	mlt_tractor self = calloc( sizeof( struct mlt_tractor_s ), 1 );
+	mlt_tractor self = calloc( 1, sizeof( struct mlt_tractor_s ) );
 	if ( self != NULL )
 	{
 		mlt_producer producer = &self->parent;
@@ -267,11 +267,8 @@ static int producer_get_image( mlt_frame self, uint8_t **buffer, mlt_image_forma
 	mlt_properties_set( frame_properties, "rescale.interp", mlt_properties_get( properties, "rescale.interp" ) );
 	mlt_properties_set_int( frame_properties, "resize_alpha", mlt_properties_get_int( properties, "resize_alpha" ) );
 	mlt_properties_set_int( frame_properties, "distort", mlt_properties_get_int( properties, "distort" ) );
-	mlt_properties_set_double( frame_properties, "consumer_aspect_ratio", mlt_properties_get_double( properties, "consumer_aspect_ratio" ) );
 	mlt_properties_set_int( frame_properties, "consumer_deinterlace", mlt_properties_get_int( properties, "consumer_deinterlace" ) );
 	mlt_properties_set( frame_properties, "deinterlace_method", mlt_properties_get( properties, "deinterlace_method" ) );
-	mlt_properties_set_int( frame_properties, "normalised_width", mlt_properties_get_int( properties, "normalised_width" ) );
-	mlt_properties_set_int( frame_properties, "normalised_height", mlt_properties_get_int( properties, "normalised_height" ) );
 	mlt_properties_set_int( frame_properties, "consumer_tff", mlt_properties_get_int( properties, "consumer_tff" ) );
 	mlt_frame_get_image( frame, buffer, format, width, height, writable );
 	mlt_frame_set_image( self, *buffer, 0, NULL );
@@ -351,15 +348,15 @@ static int producer_get_frame( mlt_producer parent, mlt_frame_ptr frame, int tra
 		// Or a specific producer
 		mlt_producer producer = mlt_properties_get_data( properties, "producer", NULL );
 
-		// The output frame will hold the 'global' data feeds (ie: those which are targetted for the final frame)
-		mlt_deque data_queue = mlt_deque_init( );
-
 		// Determine whether this tractor feeds to the consumer or stops here
 		int global_feed = mlt_properties_get_int( properties, "global_feed" );
 
 		// If we don't have one, we're in trouble...
 		if ( multitrack != NULL )
 		{
+			// The output frame will hold the 'global' data feeds (ie: those which are targetted for the final frame)
+			mlt_deque data_queue = mlt_deque_init( );
+
 			// Used to garbage collect all frames
 			char label[ 30 ];
 
@@ -481,10 +478,6 @@ static int producer_get_frame( mlt_producer parent, mlt_frame_ptr frame, int tra
 					if ( first_video == NULL )
 						first_video = temp;
 
-					// Ensure that all frames know the aspect ratio of the background
-					mlt_properties_set_double( temp_properties, "output_ratio",
-											   mlt_properties_get_double( MLT_FRAME_PROPERTIES( first_video ), "aspect_ratio" ) );
-
 					mlt_properties_set_int( MLT_FRAME_PROPERTIES( temp ), "image_count", ++ image_count );
 					image_count = 1;
 				}
@@ -507,8 +500,7 @@ static int producer_get_frame( mlt_producer parent, mlt_frame_ptr frame, int tra
 				mlt_properties_set_data( video_properties, "global_queue", data_queue, 0, destroy_data_queue, NULL );
 				mlt_properties_set_int( frame_properties, "width", mlt_properties_get_int( video_properties, "width" ) );
 				mlt_properties_set_int( frame_properties, "height", mlt_properties_get_int( video_properties, "height" ) );
-				mlt_properties_set_int( frame_properties, "real_width", mlt_properties_get_int( video_properties, "real_width" ) );
-				mlt_properties_set_int( frame_properties, "real_height", mlt_properties_get_int( video_properties, "real_height" ) );
+				mlt_properties_pass_list( frame_properties, video_properties, "meta.media.width, meta.media.height" );
 				mlt_properties_set_int( frame_properties, "progressive", mlt_properties_get_int( video_properties, "progressive" ) );
 				mlt_properties_set_double( frame_properties, "aspect_ratio", mlt_properties_get_double( video_properties, "aspect_ratio" ) );
 				mlt_properties_set_int( frame_properties, "image_count", image_count );

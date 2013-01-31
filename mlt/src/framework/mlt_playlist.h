@@ -63,6 +63,8 @@ typedef struct playlist_entry_s playlist_entry;
  * which is a way to add filters as a playlist entry - useful only in a multitrack. See FxCut on the wiki.
  * \properties \em mix_in
  * \properties \em mix_out
+ * \event \em playlist-next The playlist fires this when it moves to the next item in the list.
+ * The listener receives one argument that is the index of the entry that just completed.
  */
 
 struct mlt_playlist_s
@@ -80,6 +82,7 @@ struct mlt_playlist_s
 #define MLT_PLAYLIST_PROPERTIES( playlist )	MLT_SERVICE_PROPERTIES( MLT_PLAYLIST_SERVICE( playlist ) )
 
 extern mlt_playlist mlt_playlist_init( );
+extern mlt_playlist mlt_playlist_new( mlt_profile profile );
 extern mlt_producer mlt_playlist_producer( mlt_playlist self );
 extern mlt_service mlt_playlist_service( mlt_playlist self );
 extern mlt_properties mlt_playlist_properties( mlt_playlist self );
@@ -87,7 +90,8 @@ extern int mlt_playlist_count( mlt_playlist self );
 extern int mlt_playlist_clear( mlt_playlist self );
 extern int mlt_playlist_append( mlt_playlist self, mlt_producer producer );
 extern int mlt_playlist_append_io( mlt_playlist self, mlt_producer producer, mlt_position in, mlt_position out );
-extern int mlt_playlist_blank( mlt_playlist self, mlt_position length );
+extern int mlt_playlist_blank( mlt_playlist self, mlt_position out );
+extern int mlt_playlist_blank_time( mlt_playlist self, const char *length );
 extern mlt_position mlt_playlist_clip( mlt_playlist self, mlt_whence whence, int index );
 extern int mlt_playlist_current_clip( mlt_playlist self );
 extern mlt_producer mlt_playlist_current( mlt_playlist self );

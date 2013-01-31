@@ -20,6 +20,7 @@
 
 #include <framework/mlt_filter.h>
 #include <framework/mlt_frame.h>
+#include <framework/mlt_profile.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -213,11 +214,8 @@ static void obscure_render( uint8_t *image, int width, int height, struct geomet
 
 static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format *format, int *width, int *height, int writable )
 {
-	// Get the frame properties
-	mlt_properties frame_properties = MLT_FRAME_PROPERTIES( frame );
-
 	// Pop the top of stack now
-	mlt_filter this = mlt_frame_pop_service( frame );
+	mlt_filter filter = mlt_frame_pop_service( frame );
 
 	// Get the image from the frame
 	*format = mlt_image_yuv422;
@@ -226,14 +224,11 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 	// Get the image from the frame
 	if ( error == 0 )
 	{
-		if ( this != NULL )
+		if ( filter != NULL )
 		{
 			// Get the filter properties
-			mlt_properties properties = MLT_FILTER_PROPERTIES( this );
-
-			// Obtain the normalised width and height from the frame
-			int normalised_width = mlt_properties_get_int( frame_properties, "normalised_width" );
-			int normalised_height = mlt_properties_get_int( frame_properties, "normalised_height" );
+			mlt_properties properties = MLT_FILTER_PROPERTIES( filter );
+			mlt_profile profile = mlt_service_profile( MLT_FILTER_SERVICE( filter ) );
 
 			// Structures for geometry
 			struct geometry_s result;
@@ -241,11 +236,11 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 			struct geometry_s end;
 
 			// Retrieve the position
-			float position = mlt_filter_get_progress( this, frame );
+			float position = mlt_filter_get_progress( filter, frame );
 
 			// Now parse the geometries
-			geometry_parse( &start, NULL, mlt_properties_get( properties, "start" ), normalised_width, normalised_height );
-			geometry_parse( &end, &start, mlt_properties_get( properties, "end" ), normalised_width, normalised_height );
+			geometry_parse( &start, NULL, mlt_properties_get( properties, "start" ), profile->width, profile->height );
+			geometry_parse( &end, &start, mlt_properties_get( properties, "end" ), profile->width, profile->height );
 
 			// Do the calculation
 			geometry_calculate( &result, &start, &end, position, *width, *height );
@@ -261,10 +256,10 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 /** Filter processing.
 */
 
-static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
+static mlt_frame filter_process( mlt_filter filter, mlt_frame frame )
 {
 	// Push this on to the service stack
-	mlt_frame_push_service( frame, this );
+	mlt_frame_push_service( frame, filter );
 	
 	// Push the get image call
 	mlt_frame_push_get_image( frame, filter_get_image );
@@ -277,14 +272,14 @@ static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
 
 mlt_filter filter_obscure_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg )
 {
-	mlt_filter this = mlt_filter_new( );
-	if ( this != NULL )
+	mlt_filter filter = mlt_filter_new( );
+	if ( filter != NULL )
 	{
-		mlt_properties properties = MLT_FILTER_PROPERTIES( this );
-		this->process = filter_process;
+		mlt_properties properties = MLT_FILTER_PROPERTIES( filter );
+		filter->process = filter_process;
 		mlt_properties_set( properties, "start", arg != NULL ? arg : "0%/0%:100%x100%" );
 		mlt_properties_set( properties, "end", "" );
 	}
-	return this;
+	return filter;
 }
 

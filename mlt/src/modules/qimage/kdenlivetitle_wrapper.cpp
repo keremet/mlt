@@ -197,6 +197,7 @@ void loadFromXml( mlt_producer producer, QGraphicsScene *scene, const char *temp
 				}
 				QGraphicsTextItem *txt = scene->addText(text, font);
 				if (txtProperties.namedItem("font-outline").nodeValue().toDouble()>0.0){
+					qRegisterMetaType<QTextCursor>( "QTextCursor" );
 					QTextCursor cursor(txt->document());
 					cursor.select(QTextCursor::Document);
 					QTextCharFormat format;
@@ -218,6 +219,8 @@ void loadFromXml( mlt_producer producer, QGraphicsScene *scene, const char *temp
 					mlt_properties_set_int( producer_props, "_animated", 1 );
 					QStringList effetData = QStringList() << "typewriter" << text << txtProperties.namedItem( "typewriter" ).nodeValue();
 					txt->setData(0, effetData);
+					if ( !txtProperties.namedItem( "textwidth" ).isNull() )
+						txt->setData( 1, txtProperties.namedItem( "textwidth" ).nodeValue() );
 				}
 				
 				if ( txtProperties.namedItem( "alignment" ).isNull() == false )
@@ -391,7 +394,6 @@ void drawKdenliveTitle( producer_ktitle self, mlt_frame frame, int width, int he
 					{
 						mlt_log_panic( MLT_PRODUCER_SERVICE( producer ), "Error, cannot render titles without an X11 environment.\nPlease either run melt from an X session or use a fake X server like xvfb:\nxvfb-run -a melt (...)\n" );
 						pthread_mutex_unlock( &self->mutex );
-						exit(1);
 						return;
 					}
 #endif
@@ -440,15 +442,22 @@ void drawKdenliveTitle( producer_ktitle self, mlt_frame frame, int width, int he
 				    // the keystroke delay and a start offset, both in frames
 				    QStringList values = params.at( 2 ).split( ";" );
 				    int interval = qMax( 0, ( ( int ) position - values.at( 1 ).toInt()) / values.at( 0 ).toInt() );
+				    qRegisterMetaType<QTextCursor>( "QTextCursor" );
 				    QTextCursor cursor = titem->textCursor();
 				    cursor.movePosition(QTextCursor::EndOfBlock);
 				    // get the font format
 				    QTextCharFormat format = cursor.charFormat();
 				    cursor.select(QTextCursor::Document);
 				    QString txt = params.at( 1 ).left( interval );
-				    // If the string to insert is empty, insert a space so that we don't loose
+				    // If the string to insert is empty, insert a space / linebreak so that we don't loose
 				    // formatting infos for the next iterations
-				    cursor.insertText(txt.isEmpty() ? " " : txt, format);
+				    int lines = params.at( 1 ).count( '\n' );
+				    QString empty = " ";
+				    for (int i = 0; i < lines; i++)
+					    empty.append( "\n " );
+				    cursor.insertText( txt.isEmpty() ? empty : txt, format );
+				    if ( !titem->data( 1 ).isNull() )
+					  titem->setTextWidth( titem->data( 1 ).toInt() );
 			    }
 		    }
 		}
@@ -470,7 +479,9 @@ void drawKdenliveTitle( producer_ktitle self, mlt_frame frame, int width, int he
                         scene->render( &p1, source, end, Qt::IgnoreAspectRatio );
                 }
 		else {
-                        double percentage = position / anim_out;
+                        double percentage = 0;
+			if ( position && anim_out )
+				percentage = position / anim_out;
 			QPointF topleft = start.topLeft() + ( end.topLeft() - start.topLeft() ) * percentage;
 			QPointF bottomRight = start.bottomRight() + ( end.bottomRight() - start.bottomRight() ) * percentage;
 			const QRectF r1( topleft, bottomRight );

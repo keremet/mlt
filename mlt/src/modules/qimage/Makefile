@@ -9,14 +9,18 @@ TARGET = ../libmltqimage$(LIBSUF)
 
 OBJS = factory.o producer_qimage.o producer_kdenlivetitle.o
 CPPOBJS = qimage_wrapper.o \
-	kdenlivetitle_wrapper.o \
-	transition_vqm.o
+	kdenlivetitle_wrapper.o
 
-CXXFLAGS += $(CFLAGS) $(QTCXXFLAGS) $(EXIFCXXFLAGS) -Wno-deprecated
+ifdef GPL3
+	CPPOBJS += transition_vqm.o
+	CFLAGS += -DGPL3
+endif
 
-LDFLAGS += $(QTLIBS) $(EXIFLIBS)
+CXXFLAGS += $(CFLAGS) $(QTCXXFLAGS) $(EXIFCXXFLAGS) $(KDECXXFLAGS) -Wno-deprecated
 
-ifdef USE_KDE
+LDFLAGS += $(QTLIBS) $(EXIFLIBS) $(KDELIBS)
+
+ifdef USE_KDE3
 LDFLAGS += -lkio
 endif
 

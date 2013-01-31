@@ -111,6 +111,11 @@ int Producer::seek( int position )
 	return mlt_producer_seek( get_producer( ), position );
 }
 
+int Producer::seek( const char *time )
+{
+	return mlt_producer_seek_time( get_producer( ), time );
+}
+
 int Producer::position( )
 {
 	return mlt_producer_position( get_producer( ) );
@@ -119,6 +124,11 @@ int Producer::position( )
 int Producer::frame( )
 {
 	return mlt_producer_frame( get_producer( ) );
+}
+
+char* Producer::frame_time( mlt_time_format format )
+{
+	return mlt_producer_frame_time( get_producer(), format );
 }
 
 int Producer::set_speed( double speed )
@@ -172,6 +182,11 @@ int Producer::get_out( )
 int Producer::get_length( )
 {
 	return mlt_producer_get_length( get_producer( ) );
+}
+
+char* Producer::get_length_time( mlt_time_format format )
+{
+	return mlt_producer_get_length_time( get_producer( ), format );
 }
 
 int Producer::get_playtime( )

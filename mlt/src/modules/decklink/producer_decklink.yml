@@ -75,3 +75,24 @@ parameters:
     default: 0
     unit: lines
     widget: spinner
+
+  - identifier: preview
+    title: Enable preview
+    description: Support preview monitoring when paused (speed = 0).
+    type: integer
+    minimum: 0
+    maximum: 1
+    default: 0
+    widget: checkbox
+
+  - identifier: devices
+    title: Number of devices
+    type: integer
+    readonly: yes
+    minimum: 0
+
+  - identifier: device.*
+    title: Device model
+    description: The model name of each device that accepts input.
+    type: string
+    readonly: yes

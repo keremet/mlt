@@ -72,8 +72,8 @@ static void serialize_vectors( videostab self, mlt_position length )
 
 		// Put the analysis results in a property
 		mlt_geometry_set_length( g, length );
-		mlt_properties_set( MLT_FILTER_PROPERTIES( self->parent ), "vectors", mlt_geometry_serialise( g ) );
-		mlt_geometry_close( g );
+		mlt_properties_set_data( MLT_FILTER_PROPERTIES( self->parent ), "vectors", g, 0,
+			(mlt_destructor) mlt_geometry_close, (mlt_serialiser) mlt_geometry_serialise );
 	}
 }
 
@@ -82,7 +82,7 @@ static void deserialize_vectors( videostab self, char *vectors, mlt_position len
 	mlt_geometry g = mlt_geometry_init();
 
 	// Parse the property as a geometry
-	if ( !mlt_geometry_parse( g, vectors, length, -1, -1 ) )
+	if ( g && !mlt_geometry_parse( g, vectors, length, -1, -1 ) )
 	{
 		struct mlt_geometry_item_s item;
 		int i;
@@ -199,6 +199,11 @@ mlt_filter filter_videostab_init( mlt_profile profile, mlt_service_type type, co
 	if ( self )
 	{
 		mlt_filter parent = mlt_filter_new();
+		if ( !parent )
+		{
+			free( self );
+			return NULL;
+		}
 		parent->child = self;
 		parent->close = filter_close;
 		parent->process = filter_process;

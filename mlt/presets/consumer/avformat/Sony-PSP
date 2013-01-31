@@ -13,10 +13,12 @@ vcodec=libx264
 threads=0
 vpre=medium
 preset=medium
-profile=main
+vprofile=main
 flags2=-dct8x8
 vb=1M
 refs=1
 bf=1
 x264opts=ref=1:bframes=1
 
+meta.preset.extension=mp4
+meta.preset.note=for Sony PlayStation Portable

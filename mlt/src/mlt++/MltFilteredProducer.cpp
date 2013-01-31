@@ -19,9 +19,10 @@
  */
 
 #include "MltFilteredProducer.h"
+#include "MltProfile.h"
 using namespace Mlt;
 
-FilteredProducer::FilteredProducer( Profile& profile, char *id, char *arg ) :
+FilteredProducer::FilteredProducer( Profile& profile, const char *id, const char *arg ) :
 	Producer( profile, id, arg )
 {
 	// Create a reference to the last service
@@ -71,7 +72,8 @@ int FilteredProducer::detach( Filter &filter )
 			Service *consumer = it->consumer( );
 			if ( consumer->is_valid( ) )
 				consumer->connect_producer( *producer );
-			Producer dummy( *profile(), "colour" );
+			Profile p( get_profile() );
+			Producer dummy( p, "colour" );
 			dummy.connect_producer( *it );
 			if ( last->get_service( ) == it->get_service( ) )
 			{

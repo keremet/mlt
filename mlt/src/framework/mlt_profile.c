@@ -231,6 +231,8 @@ mlt_profile mlt_profile_load_properties( mlt_properties properties )
 mlt_profile mlt_profile_load_string( const char *string )
 {
 	mlt_properties properties = mlt_properties_new();
+	mlt_profile profile = NULL;
+
 	if ( properties )
 	{
 		const char *p = string;
@@ -241,8 +243,10 @@ mlt_profile mlt_profile_load_string( const char *string )
 			p = strchr( p, '\n' );
 			if ( p ) p++;
 		}
+		profile = mlt_profile_load_properties( properties );
+		mlt_properties_close( properties );
 	}
-	return mlt_profile_load_properties( properties );
+	return profile;
 }
 
 /** Get the video frame rate as a floating point value.
@@ -406,7 +410,6 @@ void mlt_profile_from_producer( mlt_profile profile, mlt_producer producer )
 
 	if ( ! mlt_service_get_frame( MLT_PRODUCER_SERVICE(producer), &fr, 0 ) && fr )
 	{
-		mlt_properties_set_double( MLT_FRAME_PROPERTIES( fr ), "consumer_aspect_ratio", mlt_profile_sar( profile ) );
 		if ( ! mlt_frame_get_image( fr, &buffer, &fmt, &w, &h, 0 ) )
 		{
 			// Some source properties are not exposed until after the first get_image call.

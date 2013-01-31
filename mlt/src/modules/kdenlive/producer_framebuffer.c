@@ -152,7 +152,6 @@ static int framebuffer_get_image( mlt_frame frame, uint8_t **image, mlt_image_fo
         uint8_t *first_alpha = mlt_properties_get_data( first_frame_properties, "alpha", NULL );
 	if ( !first_image )
 	{
-		mlt_properties_set_double( first_frame_properties, "consumer_aspect_ratio", mlt_properties_get_double( frame_properties, "consumer_aspect_ratio" ) );
 		mlt_properties_set( first_frame_properties, "rescale.interp", mlt_properties_get( frame_properties, "rescale.interp" ) );
 
 		int error = mlt_frame_get_image( first_frame, &first_image, format, width, height, writable );
@@ -200,10 +199,11 @@ static int framebuffer_get_image( mlt_frame frame, uint8_t **image, mlt_image_fo
 
 static int producer_get_frame( mlt_producer producer, mlt_frame_ptr frame, int index )
 {
-	// Construct a new frame
-	*frame = mlt_frame_init( MLT_PRODUCER_SERVICE( producer ) );
-	if( frame != NULL )
+	if ( frame )
 	{
+		// Construct a new frame
+		*frame = mlt_frame_init( MLT_PRODUCER_SERVICE( producer ) );
+
 		// Stack the producer and producer's get image
 		mlt_frame_push_service( *frame, (void*) index );
 		mlt_frame_push_service( *frame, producer );
@@ -238,8 +238,8 @@ static int producer_get_frame( mlt_producer producer, mlt_frame_ptr frame, int i
 		// Give the returned frame temporal identity
 		mlt_frame_set_position( *frame, mlt_producer_position( producer ) );
 
-		mlt_properties_set_int( frame_properties, "real_width", mlt_properties_get_int( properties, "width" ) );
-		mlt_properties_set_int( frame_properties, "real_height", mlt_properties_get_int( properties, "height" ) );
+		mlt_properties_set_int( frame_properties, "meta.media.width", mlt_properties_get_int( properties, "width" ) );
+		mlt_properties_set_int( frame_properties, "meta.media.height", mlt_properties_get_int( properties, "height" ) );
 		mlt_properties_pass_list( frame_properties, properties, "width, height" );
 	}
 
@@ -252,7 +252,14 @@ mlt_producer producer_framebuffer_init( mlt_profile profile, mlt_service_type ty
 	if ( !arg ) return NULL;
 	mlt_producer producer = NULL;
 	producer = calloc( 1, sizeof( struct mlt_producer_s ) );
-	mlt_producer_init( producer, NULL );
+	if ( !producer )
+		return NULL;
+
+	if ( mlt_producer_init( producer, NULL ) )
+	{
+		free( producer );
+		return NULL;
+	}
 
 	// Wrap loader
 	mlt_producer real_producer;
@@ -314,6 +321,28 @@ mlt_producer producer_framebuffer_init( mlt_profile profile, mlt_service_type ty
 		{
 			double real_length = ( (double)  mlt_producer_get_length( real_producer ) ) / speed;
 			mlt_properties_set_position( properties, "length", real_length );
+			mlt_properties real_properties = MLT_PRODUCER_PROPERTIES( real_producer );
+			const char* service = mlt_properties_get( real_properties, "mlt_service" );
+			if ( service && !strcmp( service, "avformat" ) )
+			{
+				int n = mlt_properties_count( real_properties );
+				int i;
+				for ( i = 0; i < n; i++ )
+				{
+					if ( strstr( mlt_properties_get_name( real_properties, i ), "stream.frame_rate" ) )
+					{
+						double source_fps = mlt_properties_get_double( real_properties, mlt_properties_get_name( real_properties, i ) );
+						if ( source_fps > mlt_profile_fps( profile ) )
+						{
+							mlt_properties_set_double( real_properties, "force_fps", source_fps * speed );
+							mlt_properties_set_position( real_properties, "length", real_length );
+							mlt_properties_set_position( real_properties, "out", real_length - 1 );
+							speed = 1.0;
+						}
+						break;
+					}
+				}
+			}
 		}
 		mlt_properties_set_position( properties, "out", mlt_producer_get_length( producer ) - 1 );
 

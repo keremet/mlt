@@ -24,12 +24,7 @@
 #include <unistd.h>
 #include <limits.h>
 #include <sys/time.h>
-#ifdef WIN32
-#include <objbase.h>
-#include "DeckLinkAPI_h.h"
-#else
-#include "DeckLinkAPI.h"
-#endif
+#include "common.h"
 
 class DeckLinkProducer
 	: public IDeckLinkInputCallback
@@ -51,8 +46,8 @@ private:
 
 	BMDDisplayMode getDisplayMode( mlt_profile profile, int vancLines )
 	{
-		IDeckLinkDisplayModeIterator* iter;
-		IDeckLinkDisplayMode* mode;
+		IDeckLinkDisplayModeIterator* iter = NULL;
+		IDeckLinkDisplayMode* mode = NULL;
 		BMDDisplayMode result = (BMDDisplayMode) bmdDisplayModeNotSupported;
 
 		if ( m_decklinkInput->GetDisplayModeIterator( &iter ) == S_OK )
@@ -72,9 +67,11 @@ private:
 
 				if ( width == profile->width && p == profile->progressive
 					 && ( height + vancLines == profile->height || ( height == 486 && profile->height == 480 + vancLines ) )
-					 && fps == mlt_profile_fps( profile ) )
+					 && (int) fps == (int) mlt_profile_fps( profile ) )
 					result = mode->GetDisplayMode();
+				SAFE_RELEASE( mode );
 			}
+			SAFE_RELEASE( iter );
 		}
 
 		return result;
@@ -88,6 +85,13 @@ public:
 	mlt_producer getProducer() const
 		{ return m_producer; }
 
+	DeckLinkProducer()
+	{
+		m_producer = NULL;
+		m_decklink = NULL;
+		m_decklinkInput = NULL;
+	}
+
 	~DeckLinkProducer()
 	{
 		if ( m_queue )
@@ -98,10 +102,8 @@ public:
 			pthread_cond_destroy( &m_condition );
 			mlt_cache_close( m_cache );
 		}
-		if ( m_decklinkInput )
-			m_decklinkInput->Release();
-		if ( m_decklink )
-			m_decklink->Release();
+		SAFE_RELEASE( m_decklinkInput );
+		SAFE_RELEASE( m_decklink );
 	}
 
 	bool open( unsigned card =  0 )
@@ -121,14 +123,17 @@ public:
 			if ( !decklinkIterator )
 				throw "The DeckLink drivers are not installed.";
 #endif
-
 			// Connect to the Nth DeckLink instance
-			unsigned i = 0;
-			do {
-				if ( decklinkIterator->Next( &m_decklink ) != S_OK )
-					throw "DeckLink card not found.";
-			} while ( ++i <= card );
-			decklinkIterator->Release();
+			for ( unsigned i = 0; decklinkIterator->Next( &m_decklink ) == S_OK ; i++)
+			{
+				if ( i == card )
+					break;
+				else
+					SAFE_RELEASE( m_decklink );
+			}
+			SAFE_RELEASE( decklinkIterator );
+			if ( !m_decklink )
+				throw "DeckLink card not found.";
 
 			// Get the input interface
 			if ( m_decklink->QueryInterface( IID_IDeckLinkInput, (void**) &m_decklinkInput ) != S_OK )
@@ -151,8 +156,8 @@ public:
 		}
 		catch ( const char *error )
 		{
-			if ( decklinkIterator )
-				decklinkIterator->Release();
+			SAFE_RELEASE( m_decklinkInput );
+			SAFE_RELEASE( m_decklink );
 			mlt_log_error( getProducer(), "%s\n", error );
 			return false;
 		}
@@ -193,7 +198,7 @@ public:
 			{
 				if ( decklinkAttributes->GetFlag( BMDDeckLinkSupportsInputFormatDetection, &doesDetectFormat ) != S_OK )
 					doesDetectFormat = false;
-				decklinkAttributes->Release();
+				SAFE_RELEASE( decklinkAttributes );
 			}
 			mlt_log_verbose( getProducer(), "%s format detection\n", doesDetectFormat ? "supports" : "does not support" );
 
@@ -238,6 +243,8 @@ public:
 		pthread_mutex_unlock( &m_mutex );
 
 		m_decklinkInput->StopStreams();
+		m_decklinkInput->DisableVideoInput();
+		m_decklinkInput->DisableAudioInput();
 
 		// Cleanup queue
 		pthread_mutex_lock( &m_mutex );
@@ -248,12 +255,11 @@ public:
 
 	mlt_frame getFrame()
 	{
-		mlt_frame frame = NULL;
 		struct timeval now;
 		struct timespec tm;
 		double fps = mlt_producer_get_fps( getProducer() );
 		mlt_position position = mlt_producer_position( getProducer() );
-		mlt_cache_item cached = mlt_cache_get( m_cache, (void*) position );
+		mlt_frame frame = mlt_cache_get_frame( m_cache, position );
 
 		// Allow the buffer to fill to the requested initial buffer level.
 		if ( m_isBuffering )
@@ -278,13 +284,7 @@ public:
 			pthread_mutex_unlock( &m_mutex );
 		}
 
-		if ( cached )
-		{
-			// Copy cached frame instead of pulling from queue
-			frame = mlt_frame_clone( (mlt_frame) mlt_cache_item_data( cached, NULL ), 0 );
-			mlt_cache_item_close( cached );
-		}
-		else
+		if ( !frame )
 		{
 			// Wait if queue is empty
 			pthread_mutex_lock( &m_mutex );
@@ -305,8 +305,10 @@ public:
 
 			// add to cache
 			if ( frame )
-				mlt_cache_put( m_cache, (void*) position, mlt_frame_clone( frame, 1 ), 0,
-					(mlt_destructor) mlt_frame_close );
+			{
+				mlt_frame_set_position( frame, position );
+				mlt_cache_put_frame( m_cache, frame );
+			}
 		}
 
 		// Set frame timestamp and properties
@@ -323,10 +325,8 @@ public:
 			mlt_properties_set_int( properties, "meta.media.frame_rate_num", profile->frame_rate_num );
 			mlt_properties_set_int( properties, "meta.media.frame_rate_den", profile->frame_rate_den );
 			mlt_properties_set_int( properties, "width", profile->width );
-			mlt_properties_set_int( properties, "real_width", profile->width );
 			mlt_properties_set_int( properties, "meta.media.width", profile->width );
 			mlt_properties_set_int( properties, "height", profile->height );
-			mlt_properties_set_int( properties, "real_height", profile->height );
 			mlt_properties_set_int( properties, "meta.media.height", profile->height );
 			mlt_properties_set_int( properties, "format", mlt_image_yuv422 );
 			mlt_properties_set_int( properties, "colorspace", m_colorspace );
@@ -357,6 +357,13 @@ public:
 			IDeckLinkVideoInputFrame* video,
 			IDeckLinkAudioInputPacket* audio )
 	{
+		if ( mlt_properties_get_int( MLT_PRODUCER_PROPERTIES( getProducer() ), "preview" ) &&
+			mlt_producer_get_speed( getProducer() ) == 0.0 && !mlt_deque_count( m_queue ))
+		{
+			pthread_cond_broadcast( &m_condition );
+			return S_OK;
+		}
+
 		// Create mlt_frame
 		mlt_frame frame = mlt_frame_init( MLT_PRODUCER_SERVICE( getProducer() ) );
 
@@ -391,7 +398,7 @@ public:
 							else
 								mlt_log_debug( getProducer(), "failed capture vanc line %d\n", i );
 						}
-						vanc->Release();
+						SAFE_RELEASE(vanc);
 					}
 				}
 
@@ -420,20 +427,17 @@ public:
 			IDeckLinkTimecode* timecode = 0;
 			if ( video->GetTimecode( bmdTimecodeVITC, &timecode ) == S_OK && timecode )
 			{
-				const char* timecodeString = 0;
+				DLString timecodeString = 0;
 
-#ifdef WIN32
-				if ( timecode->GetString( (BSTR*) &timecodeString ) == S_OK )
-#else
 				if ( timecode->GetString( &timecodeString ) == S_OK )
-#endif
 				{
-					mlt_properties_set( MLT_FRAME_PROPERTIES( frame ), "meta.attr.vitc.markup", timecodeString );
-					mlt_log_debug( getProducer(), "timecode %s\n", timecodeString );
+					char* s = getCString( timecodeString );
+					mlt_properties_set( MLT_FRAME_PROPERTIES( frame ), "meta.attr.vitc.markup", s );
+					mlt_log_debug( getProducer(), "timecode %s\n", s );
+					freeCString( s );
 				}
-				if ( timecodeString )
-					free( (void*) timecodeString );
-				timecode->Release();
+				freeDLString( timecodeString );
+				SAFE_RELEASE( timecode );
 			}
 		}
 		else
@@ -593,7 +597,6 @@ static int get_frame( mlt_producer producer, mlt_frame_ptr frame, int index )
 		*frame = mlt_frame_init( MLT_PRODUCER_SERVICE(producer) );
 
 	// Calculate the next timecode
-	mlt_frame_set_position( *frame, mlt_producer_position( producer ) );
 	mlt_producer_prepare_next( producer );
 
 	// Close DeckLink if at end
@@ -615,6 +618,53 @@ static void producer_close( mlt_producer producer )
 }
 
 extern "C" {
+
+// Listen for the list_devices property to be set
+static void on_property_changed( void*, mlt_properties properties, const char *name )
+{
+	IDeckLinkIterator* decklinkIterator = NULL;
+	IDeckLink* decklink = NULL;
+	IDeckLinkInput* decklinkInput = NULL;
+	int i = 0;
+
+	if ( name && !strcmp( name, "list_devices" ) )
+		mlt_event_block( (mlt_event) mlt_properties_get_data( properties, "list-devices-event", NULL ) );
+	else
+		return;
+
+#ifdef WIN32
+	if ( FAILED( CoInitialize( NULL ) ) )
+		return;
+	if ( FAILED( CoCreateInstance( CLSID_CDeckLinkIterator, NULL, CLSCTX_ALL, IID_IDeckLinkIterator, (void**) &decklinkIterator ) ) )
+		return;
+#else
+	if ( !( decklinkIterator = CreateDeckLinkIteratorInstance() ) )
+		return;
+#endif
+	for ( ; decklinkIterator->Next( &decklink ) == S_OK; i++ )
+	{
+		if ( decklink->QueryInterface( IID_IDeckLinkInput, (void**) &decklinkInput ) == S_OK )
+		{
+			DLString name = NULL;
+			if ( decklink->GetModelName( &name ) == S_OK )
+			{
+				char *name_cstr = getCString( name );
+				const char *format = "device.%d";
+				char *key = (char*) calloc( 1, strlen( format ) + 1 );
+
+				sprintf( key, format, i );
+				mlt_properties_set( properties, key, name_cstr );
+				free( key );
+				freeDLString( name );
+				freeCString( name_cstr );
+			}
+			SAFE_RELEASE( decklinkInput );
+		}
+		SAFE_RELEASE( decklink );
+	}
+	SAFE_RELEASE( decklinkIterator );
+	mlt_properties_set_int( properties, "devices", i );
+}
 
 /** Initialise the producer.
  */
@@ -650,6 +700,9 @@ mlt_producer producer_decklink_init( mlt_profile profile, mlt_service_type type,
 			mlt_properties_set_int( properties, "length", INT_MAX );
 			mlt_properties_set_int( properties, "out", INT_MAX - 1 );
 			mlt_properties_set( properties, "eof", "loop" );
+
+			mlt_event event = mlt_events_listen( properties, properties, "property-changed", (mlt_listener) on_property_changed );
+			mlt_properties_set_data( properties, "list-devices-event", event, 0, NULL, NULL );
 		}
 	}
 

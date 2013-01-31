@@ -3,8 +3,8 @@
 # Determine whether to recommend/use the HEAD revision of FFmpeg (unreleased)
 # or a specific revision based upon whether the last digit of our version
 # is even or odd. An odd MLT version number always represents unreleased.
-ffmpeg_ver="0.8"
-libav_ver="0.7"
+ffmpeg_ver="1.0"
+libav_ver="0.8.4"
 micro_version=$(echo $version | cut -d . -f 3)
 odd_version=$(($micro_version % 2))
 [ "$odd_version" -eq "1" ] && ffmpeg_ver="HEAD" && libav_ver="HEAD"
@@ -54,7 +54,7 @@ else
 	echo > config.mak
 
 	export static_ffmpeg=
-	export shared_ffmpeg=$(pkg-config --variable=prefix libavformat)
+	export shared_ffmpeg=
 	export extra_libs=
 	export avformat_suffix=
 	export swscale=
@@ -82,6 +82,8 @@ else
 		esac
 	done
 
+	: ${shared_ffmpeg:=$(pkg-config --variable=prefix libavformat${avformat_suffix})}
+
 	if [ "$static_ffmpeg" != "" ]
 	then 
 		if [ -d "$static_ffmpeg" ]
@@ -105,7 +107,7 @@ else
 			
 			if [ "$vdpau" = "true" ]
 			then
-				printf "#include <libavcodec/vdpau.h>\n int main(){ VdpBitstreamBuffer test; test.struct_version; return 0;}" | gcc -I"$static_ffmpeg" $CFLAGS -c -x c -  >/dev/null 2>&1
+				printf "#include <libavcodec/vdpau.h>\n int main(){ VdpBitstreamBuffer test; test.struct_version; return 0;}" | $CC -I"$static_ffmpeg" $CFLAGS -c -x c -  >/dev/null 2>&1
 				[ "$x11" = "0" -a "$?" = "0" ] && echo "VDPAU=1" >> config.mak
 			fi
 		else
@@ -121,27 +123,27 @@ else
 				echo "CFLAGS+=-DAVDATADIR=\\\"share/ffmpeg/\\\"" >> config.mak
 			;;
 			*)
-				echo "CFLAGS+=-DAVDATADIR=\\\"${shared_ffmpeg}/share/ffmpeg/\\\"" >> config.mak
+				echo "CFLAGS+=-DAVDATADIR=\\\"${shared_ffmpeg}/share/ffmpeg${avformat_suffix}/\\\"" >> config.mak
 			;;
 		esac
-		echo "CFLAGS+=$(pkg-config --cflags libavformat)" >> config.mak
-		echo "LDFLAGS+=$(pkg-config --libs-only-L libavformat)" >> config.mak
+		echo "CFLAGS+=$(pkg-config --cflags libavformat${avformat_suffix})" >> config.mak
+		echo "LDFLAGS+=$(pkg-config --libs-only-L libavformat${avformat_suffix})" >> config.mak
 		if [ "$devices" = "true" ]
 		then
-			echo "CFLAGS+=$(pkg-config --cflags libavdevice)" >> config.mak
-			echo "LDFLAGS+=$(pkg-config --libs-only-L libavdevice)" >> config.mak
+			echo "CFLAGS+=$(pkg-config --cflags libavdevice${avformat_suffix})" >> config.mak
+			echo "LDFLAGS+=$(pkg-config --libs-only-L libavdevice${avformat_suffix})" >> config.mak
 		fi
-		avcodec_version=$(pkg-config --modversion libavcodec)
+		avcodec_version=$(pkg-config --modversion libavcodec${avformat_suffix})
 		if [ "$swscale" != "" ] || [ $(echo $avcodec_version | cut -d. -f1) -gt 52 ] || ( [ $(echo $avcodec_version | cut -d. -f1) -ge 52 ] && [ $(echo $avcodec_version | cut -d. -f2) -ge 21 ] )
 		then
-			echo "CFLAGS+=$(pkg-config --cflags libswscale)" >> config.mak
-			echo "LDFLAGS+=$(pkg-config --libs-only-L libswscale)" >> config.mak
+			echo "CFLAGS+=$(pkg-config --cflags libswscale${avformat_suffix})" >> config.mak
+			echo "LDFLAGS+=$(pkg-config --libs-only-L libswscale${avformat_suffix})" >> config.mak
 			echo "SWSCALE=1" >> config.mak
 		fi
 		
 		if [ "$vdpau" = "true" ]
 		then
-			printf "#include <libavcodec/vdpau.h>\n int main(){ VdpBitstreamBuffer test; test.struct_version; return 0;}" | gcc -I"$(pkg-config --cflags libavformat)" -I"$shared_ffmpeg/include" $CFLAGS -c -x c -  >/dev/null 2>&1
+			printf "#include <libavcodec/vdpau.h>\n int main(){ VdpBitstreamBuffer test; test.struct_version; return 0;}" | $CC $(pkg-config --cflags libavformat${avformat_suffix}) -I"$shared_ffmpeg/include" $CFLAGS -c -x c -  >/dev/null 2>&1
 			[ "$x11" = "0" -a "$?" = "0" ] && echo "VDPAU=1" >> config.mak
 		fi
 	else

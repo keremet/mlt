@@ -48,8 +48,8 @@ static void serialize_vectors( videostab2_data* self, mlt_position length )
 		mlt_position i;
 
 		// Initialize geometry item
-		item.key = item.f[0] = item.f[1] = 1;
-		item.f[2] = item.f[3] = item.f[4] = 1;
+		item.key = item.f[0] = item.f[1] = item.f[2] = item.f[3] = 1;
+		item.f[4] = 0;
 
 		tlist* transform_data =self->stab->transs;
 		for ( i = 0; i < length; i++ )
@@ -72,8 +72,8 @@ static void serialize_vectors( videostab2_data* self, mlt_position length )
 
 		// Put the analysis results in a property
 		mlt_geometry_set_length( g, length );
-		mlt_properties_set( MLT_FILTER_PROPERTIES( (mlt_filter) self->parent ), "vectors", mlt_geometry_serialise( g ) );
-		mlt_geometry_close( g );
+		mlt_properties_set_data( MLT_FILTER_PROPERTIES( (mlt_filter) self->parent ), "vectors", g, 0,
+			(mlt_destructor) mlt_geometry_close, (mlt_serialiser) mlt_geometry_serialise );
 	}
 }
 // scale zoom implements the factor that the vetcors must be scaled since the vector is calulated for real with, now we need it for (scaled)width
@@ -82,7 +82,7 @@ Transform* deserialize_vectors( char *vectors, mlt_position length ,float scale_
 	mlt_geometry g = mlt_geometry_init();
 	Transform* tx=NULL;
 	// Parse the property as a geometry
-	if ( !mlt_geometry_parse( g, vectors, length, -1, -1 ) )
+	if ( g && !mlt_geometry_parse( g, vectors, length, -1, -1 ) )
 	{
 		struct mlt_geometry_item_s item;
 		int i;
@@ -174,8 +174,8 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 
 					int interp = 2;
 					float scale_zoom=1.0;
-					if (*width!=mlt_properties_get_int( MLT_FRAME_PROPERTIES( frame ), "real_width" ))
-						scale_zoom=(float)*width/(float)mlt_properties_get_int( MLT_FRAME_PROPERTIES( frame ), "real_width" );
+					if ( *width != mlt_properties_get_int( MLT_FRAME_PROPERTIES( frame ), "meta.media.width" ) )
+						scale_zoom = (float) *width / (float) mlt_properties_get_int( MLT_FRAME_PROPERTIES( frame ), "meta.media.width" );
 					if ( strcmp( interps, "nearest" ) == 0 || strcmp( interps, "neighbor" ) == 0 )
 						interp = 0;
 					else if ( strcmp( interps, "tiles" ) == 0 || strcmp( interps, "fast_bilinear" ) == 0 )
@@ -241,11 +241,31 @@ static void filter_close( mlt_filter parent )
 mlt_filter filter_videostab2_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg )
 {
 	videostab2_data* data= calloc( 1, sizeof(videostab2_data));
-	data->stab = calloc( 1, sizeof(StabData) );
-	data->trans = calloc( 1, sizeof (TransformData) ) ;
 	if ( data )
 	{
+		data->stab = calloc( 1, sizeof(StabData) );
+		if ( !data->stab )
+		{
+			free( data );
+			return NULL;
+		}
+
+		data->trans = calloc( 1, sizeof (TransformData) ) ;
+		if ( !data->trans )
+		{
+			free( data->stab );
+			free( data );
+			return NULL;
+		}
+
 		mlt_filter parent = mlt_filter_new();
+		if ( !parent )
+		{
+			free( data->trans );
+			free( data->stab );
+			free( data );
+			return NULL;
+		}
 
 		parent->child = data;
 		parent->close = filter_close;
