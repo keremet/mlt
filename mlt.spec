@@ -34,12 +34,14 @@ Source: %name-%version.tar
 Source1: mlt++-config.h
 Patch1: mlt-0.5.4-alt-configure-mmx.patch
 Patch2: mlt-0.8.8-alt-fix-compile.patch
+# SuSE
+Patch10: libmlt-0.8.2-vdpau.patch
 
 BuildRequires: ImageMagick-tools gcc-c++ jackit-devel ladspa_sdk libSDL-devel
 BuildRequires: libSDL_image-devel libX11-devel libavdevice-devel libavformat-devel
 BuildRequires: libquicktime-devel libsamplerate-devel libsox-devel libswscale-devel
 BuildRequires: libxml2-devel kde4libs-devel libqt4-devel swig python-devel
-BuildRequires: frei0r-devel libalsa-devel
+BuildRequires: frei0r-devel libalsa-devel libvdpau-devel
 
 %description
 %Name is a multimedia framework designed for television broadcasting.
@@ -95,8 +97,13 @@ This module allows to work with MLT using python..
 %setup -q
 %patch1 -p1
 %patch2 -p1
+%patch10 -p0
 
-install -m 0644 %SOURCE1 src/mlt++/config.h
+[ -f src/mlt++/config.h ] || \
+    install -m 0644 %SOURCE1 src/mlt++/config.h
+
+VDPAU_SONAME=`readelf -a %_libdir/libvdpau.so | grep SONAME| sed 's/.*\[//'| sed 's/\].*//'`
+sed -i "s/__VDPAU_SONAME__/${VDPAU_SONAME}/" src/modules/avformat/vdpau.c
 
 %build
 export CC=gcc CXX=g++ CFLAGS="%optflags" QTDIR=%_qt4dir
@@ -107,6 +114,7 @@ export CC=gcc CXX=g++ CFLAGS="%optflags" QTDIR=%_qt4dir
 %endif
 	--enable-gpl \
 	--enable-gpl3 \
+	--luma-compress \
 	--enable-motion-est \
 	--avformat-swscale \
 	--avformat-vdpau \
@@ -114,7 +122,6 @@ export CC=gcc CXX=g++ CFLAGS="%optflags" QTDIR=%_qt4dir
 	%{subst_enable sse} \
 	%{subst_enable sse2} \
 	%{subst_enable debug} \
-	--luma-compress \
 	--without-kde \
 	--kde-includedir=%_K4includedir \
         --kde-libdir=%_K4lib \
