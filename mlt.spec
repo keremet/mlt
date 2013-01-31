@@ -1,9 +1,7 @@
 %define set_disable() %{expand:%%force_disable %{1}} %{expand:%%undefine _enable_%{1}}
 %define set_enable() %{expand:%%force_enable %{1}} %{expand:%%undefine _disable_%{1}}
 
-%define _unpackaged_files_terminate_build 1
 %def_disable debug
-%def_disable luma16bpp #if enabled produce 16bpp lumas instead of 8bpp
 
 %def_disable mmx
 %def_disable sse
@@ -26,7 +24,7 @@ Name: mlt
 Version: 0.8.8
 Release: alt1
 Summary: Multimedia framework designed for television broadcasting
-License: GPL
+License: GPLv3
 Group: Video
 URL: http://sourceforge.net/projects/%name
 
@@ -35,6 +33,7 @@ Packager: Maxim Ivanov <redbaron@altlinux.org>
 Source: %name-%version.tar
 Source1: mlt++-config.h
 Patch1: mlt-0.5.4-alt-configure-mmx.patch
+Patch2: mlt-0.8.8-alt-fix-compile.patch
 
 BuildRequires: ImageMagick-tools gcc-c++ jackit-devel ladspa_sdk libSDL-devel
 BuildRequires: libSDL_image-devel libX11-devel libavdevice-devel libavformat-devel
@@ -95,23 +94,28 @@ This module allows to work with MLT using python..
 %prep
 %setup -q
 %patch1 -p1
+%patch2 -p1
 
 install -m 0644 %SOURCE1 src/mlt++/config.h
 
 %build
-export CC=gcc CXX=g++ CFLAGS="%optflags"
+export CC=gcc CXX=g++ CFLAGS="%optflags" QTDIR=%_qt4dir
 %configure \
+	--target-os=Linux \
+%ifarch x86_64
+	--target-arch=%_target_cpu \
+%endif
 	--enable-gpl \
+	--enable-gpl3 \
 	--enable-motion-est \
 	--avformat-swscale \
+	--avformat-vdpau \
 	%{subst_enable mmx} \
 	%{subst_enable sse} \
 	%{subst_enable sse2} \
 	%{subst_enable debug} \
 	--luma-compress \
-        %if_disabled luma16bpp
-	--luma-8bpp \
-        %endif
+	--without-kde \
 	--kde-includedir=%_K4includedir \
         --kde-libdir=%_K4lib \
         --swig-languages=python
