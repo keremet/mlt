@@ -22,8 +22,8 @@
 %define lname lib%name
 
 Name: mlt
-Version: 0.8.8
-Release: alt3
+Version: 0.9.0
+Release: alt1
 Summary: Multimedia framework designed for television broadcasting
 License: GPLv3
 Group: Video
@@ -171,6 +171,9 @@ install -pm 0755 src/swig/python/_%name.so %buildroot%python_sitelibdir/
 %python_sitelibdir/*
 
 %changelog
+* Mon May 26 2014 Sergey V Turchin <zerg@altlinux.org> 0.9.0-alt1
+- new version
+
 * Tue Oct 08 2013 Sergey V Turchin <zerg@altlinux.org> 0.8.8-alt3
 - rebuilt with new libav
 
