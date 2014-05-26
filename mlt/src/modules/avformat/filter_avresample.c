@@ -28,13 +28,12 @@
 
 // ffmpeg Header files
 #include <libavformat/avformat.h>
-#if LIBAVUTIL_VERSION_INT >= ((50<<16)+(38<<8)+0)
-#  include <libavutil/samplefmt.h>
-#else
-#  define AV_SAMPLE_FMT_S16 SAMPLE_FMT_S16
-#endif
+#include <libavutil/samplefmt.h>
 
-#if LIBAVCODEC_VERSION_INT < ((54<<16)+(26<<8)+0)
+#if defined(FFUDIV) || (LIBAVCODEC_VERSION_INT < ((54<<16)+(26<<8)+0))
+
+#define MAX_AUDIO_FRAME_SIZE (192000) // 1 second of 48khz 32bit audio
+
 
 /** Get the audio.
 */
@@ -84,12 +83,8 @@ static int resample_get_audio( mlt_frame frame, void **buffer, mlt_audio_format 
 		if ( resample == NULL || *frequency != mlt_properties_get_int( filter_properties, "last_frequency" ) )
 		{
 			// Create the resampler
-#if (LIBAVCODEC_VERSION_INT >= ((52<<16)+(15<<8)+0))
 			resample = av_audio_resample_init( *channels, *channels, output_rate, *frequency,
 				AV_SAMPLE_FMT_S16, AV_SAMPLE_FMT_S16, 16, 10, 0, 0.8 );
-#else
-			resample = audio_resample_init( *channels, *channels, output_rate, *frequency );
-#endif
 
 			// And store it on properties
 			mlt_properties_set_data( filter_properties, "audio_resample", resample, 0, ( mlt_destructor )audio_resample_close, NULL );
@@ -156,7 +151,7 @@ mlt_filter filter_avresample_init( char *arg )
 	if ( filter != NULL )
 	{
 		// Calculate size of the buffer
-		int size = AVCODEC_MAX_AUDIO_FRAME_SIZE * sizeof( int16_t );
+		int size = MAX_AUDIO_FRAME_SIZE * sizeof( int16_t );
 
 		// Allocate the buffer
 		int16_t *buffer = mlt_pool_alloc( size );
@@ -178,4 +173,4 @@ mlt_filter filter_avresample_init( char *arg )
 	return filter;
 }
 
-#endif // LIBAVCODEC_VERSION_INT < ((54<<16)+(26<<8)+0)
+#endif // defined(FFUDIV) || (LIBAVCODEC_VERSION_INT < ((54<<16)+(26<<8)+0))

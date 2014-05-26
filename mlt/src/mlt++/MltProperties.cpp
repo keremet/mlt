@@ -336,3 +336,69 @@ char *Properties::get_time( const char *name, mlt_time_format format )
 {
 	return mlt_properties_get_time( get_properties(), name, format );
 }
+
+mlt_color Properties::get_color( const char *name )
+{
+	return mlt_properties_get_color( get_properties(), name );
+}
+
+int Properties::set( const char *name, mlt_color value )
+{
+	return mlt_properties_set_color( get_properties(), name, value );
+}
+
+char *Properties::anim_get( const char *name, int position, int length )
+{
+	return mlt_properties_anim_get( get_properties(), name, position, length );
+}
+
+int Properties::anim_set( const char *name, const char *value, int position, int length )
+{
+	return mlt_properties_anim_set( get_properties(), name, value, position, length );
+}
+
+int Properties::anim_get_int( const char *name, int position, int length )
+{
+	return mlt_properties_anim_get_int( get_properties(), name, position, length );
+}
+
+int Properties::anim_set( const char *name, int value, int position, int length, mlt_keyframe_type keyframe_type )
+{
+	return mlt_properties_anim_set_int( get_properties(), name, value, position, length, keyframe_type );
+}
+
+double Properties::anim_get_double(const char *name, int position, int length)
+{
+	return mlt_properties_anim_get_double( get_properties(), name, position, length );
+}
+
+int Properties::anim_set( const char *name, double value, int position, int length, mlt_keyframe_type keyframe_type )
+{
+	return mlt_properties_anim_set_double( get_properties(), name, value, position, length, keyframe_type );
+}
+
+int Properties::set( const char *name, mlt_rect value )
+{
+	return mlt_properties_set_rect( get_properties(), name, value );
+}
+
+int Properties::set( const char *name, double x, double y, double w, double h, double opacity )
+{
+	mlt_rect value = { x, y, w, h, opacity };
+	return mlt_properties_set_rect( get_properties(), name, value );
+}
+
+mlt_rect Properties::get_rect( const char *name )
+{
+	return mlt_properties_get_rect( get_properties(), name );
+}
+
+int Properties::anim_set( const char *name, mlt_rect value, int position, int length, mlt_keyframe_type keyframe_type )
+{
+	return mlt_properties_anim_set_rect( get_properties(), name, value, position, length, keyframe_type );
+}
+
+mlt_rect Properties::anim_get_rect(const char *name, int position, int length)
+{
+	return mlt_properties_anim_get_rect( get_properties(), name, position, length );
+}

@@ -19,9 +19,12 @@ SONAME = $(NAME).$(soversion)
 LIBFLAGS += -Wl,-soname,$(SONAME)
 endif
 
-CXXFLAGS += -I.. $(RDYNAMIC) -DVERSION=\"$(version)\"
+CXXFLAGS += -I.. $(RDYNAMIC) -DVERSION=\"$(version)\" -fvisibility=hidden
 
 LDFLAGS += -L../framework -lmlt
+ifeq ($(targetos), Linux)
+LDFLAGS += -Wl,--version-script=mlt++.vers
+endif
 
 OBJS = MltConsumer.o \
 	   MltDeque.o \

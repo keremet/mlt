@@ -50,6 +50,15 @@ static void stop_handler(int signum)
 	}
 }
 
+static void abnormal_exit_handler(int signum)
+{
+	// The process is going down hard. Restore the terminal first.
+	term_exit();
+	// Reset the default handler so the core gets dumped.
+	signal( signum, SIG_DFL );
+	raise( signum );
+}
+
 static void transport_action( mlt_producer producer, char *value )
 {
 	mlt_properties properties = MLT_PRODUCER_PROPERTIES( producer );
@@ -91,6 +100,7 @@ static void transport_action( mlt_producer producer, char *value )
 			case '5':
 				mlt_producer_set_speed( producer, 0 );
 				mlt_consumer_purge( consumer );
+				mlt_producer_seek( producer, mlt_consumer_position( consumer ) + 1 );
 				mlt_events_fire( jack, "jack-stop", NULL );
 				break;
 			case '6':
@@ -275,11 +285,21 @@ static void load_consumer( mlt_consumer *consumer, mlt_profile profile, int argc
 {
 	int i;
 	int multi = 0;
+	int qglsl = 0;
 
-	for ( i = 1; i < argc; i ++ )
-		multi += !strcmp( argv[ i ], "-consumer" );
+	for ( i = 1; i < argc; i ++ ) {
+		// See if we need multi consumer.
+		multi += !strcmp( argv[i], "-consumer" );
+		// Seee if we need the qglsl variant of multi consumer.
+		if ( !strncmp( argv[i], "glsl.", 5 ) || !strncmp( argv[i], "movit.", 6 ) )
+			qglsl = 1;
+	}
+	// Disable qglsl if xgl is being used!
+	for ( i = 1; qglsl && i < argc; i ++ )
+		if ( !strcmp( argv[i], "xgl" ) )
+			qglsl = 0;
 
-	if ( multi > 1 )
+	if ( multi > 1 || qglsl )
 	{
 		// If there is more than one -consumer use the 'multi' consumer.
 		int k = 0;
@@ -287,7 +307,7 @@ static void load_consumer( mlt_consumer *consumer, mlt_profile profile, int argc
 
 		if ( *consumer )
 			mlt_consumer_close( *consumer );
-		*consumer = create_consumer( profile, "multi" );
+		*consumer = create_consumer( profile, ( qglsl? "qglsl" : "multi" ) );
 		mlt_properties properties = MLT_CONSUMER_PROPERTIES( *consumer );
 		for ( i = 1; i < argc; i ++ )
 		{
@@ -681,6 +701,11 @@ int main( int argc, char **argv )
 	int is_silent = 0;
 	mlt_profile backup_profile;
 
+	// Handle abnormal exit situations.
+	signal( SIGSEGV, abnormal_exit_handler );
+	signal( SIGILL, abnormal_exit_handler );
+	signal( SIGABRT, abnormal_exit_handler );
+
 	// Construct the factory
 	mlt_repository repo = mlt_factory_init( NULL );
 
@@ -946,7 +971,10 @@ query_all:
 
 	// Disconnect producer from consumer to prevent ref cycles from closing services
 	if ( consumer )
+	{
 		mlt_consumer_connect( consumer, NULL );
+		mlt_events_fire( MLT_CONSUMER_PROPERTIES(consumer), "consumer-cleanup", NULL);
+	}
 
 	// Close the producer
 	if ( melt != NULL )

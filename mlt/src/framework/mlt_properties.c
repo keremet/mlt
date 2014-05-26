@@ -3,7 +3,7 @@
  * \brief Properties class definition
  * \see mlt_properties_s
  *
- * Copyright (C) 2003-2009 Ushodaya Enterprises Limited
+ * Copyright (C) 2003-2013 Ushodaya Enterprises Limited
  * \author Charles Yates <charles.yates@pandora.be>
  * \author Dan Dennedy <dan@dennedy.org>
  *
@@ -22,6 +22,11 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+// For strtod_l
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include "mlt_properties.h"
 #include "mlt_property.h"
 #include "mlt_deque.h"
@@ -39,6 +44,7 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <locale.h>
+#include <float.h>
 
 #define PRESETS_DIR "/presets"
 
@@ -341,6 +347,7 @@ static inline int generate_hash( const char *name )
 
 static inline void mlt_properties_do_mirror( mlt_properties self, const char *name )
 {
+	if ( !self ) return;
 	property_list *list = self->local;
 	if ( list->mirror != NULL )
 	{
@@ -418,6 +425,7 @@ int mlt_properties_ref_count( mlt_properties self )
 
 void mlt_properties_mirror( mlt_properties self, mlt_properties that )
 {
+	if ( !self ) return;
 	property_list *list = self->local;
 	list->mirror = that;
 }
@@ -427,11 +435,12 @@ void mlt_properties_mirror( mlt_properties self, mlt_properties that )
  * \public \memberof mlt_properties_s
  * \param self The properties to copy to
  * \param that The properties to copy from
- * \return false
+ * \return true if error
  */
 
 int mlt_properties_inherit( mlt_properties self, mlt_properties that )
 {
+	if ( !self || !that ) return 1;
 	int count = mlt_properties_count( that );
 	int i = 0;
 	for ( i = 0; i < count; i ++ )
@@ -448,15 +457,19 @@ int mlt_properties_inherit( mlt_properties self, mlt_properties that )
 
 /** Pass all serializable properties that match a prefix to another properties object
  *
+ * \warning The prefix is stripped from the name when it is set on the \p self properties list!
+ * For example a property named "foo.bar" will match prefix "foo.", but the property
+ * will be named simply "bar" on the receiving properties object.
  * \public \memberof mlt_properties_s
  * \param self the properties to copy to
  * \param that The properties to copy from
  * \param prefix the property names to match (required)
- * \return false
+ * \return true if error
  */
 
 int mlt_properties_pass( mlt_properties self, mlt_properties that, const char *prefix )
 {
+	if ( !self || !that ) return 1;
 	int count = mlt_properties_count( that );
 	int length = strlen( prefix );
 	int i = 0;
@@ -483,7 +496,7 @@ int mlt_properties_pass( mlt_properties self, mlt_properties that, const char *p
 
 static inline mlt_property mlt_properties_find( mlt_properties self, const char *name )
 {
-	if ( !name ) return NULL;
+	if ( !self || !name ) return NULL;
 	property_list *list = self->local;
 	mlt_property value = NULL;
 	int key = generate_hash( name );
@@ -597,12 +610,13 @@ void mlt_properties_pass_property( mlt_properties self, mlt_properties that, con
  * \param self the properties to copy to
  * \param that the properties to copy from
  * \param list a delimited list of property names
- * \return false
+ * \return true if error
  */
 
 
 int mlt_properties_pass_list( mlt_properties self, mlt_properties that, const char *list )
 {
+	if ( !self || !that || !list ) return 1;
 	char *props = strdup( list );
 	char *ptr = props;
 	const char *delim = " ,\t\n";	// Any combination of spaces, commas, tabs, and newlines
@@ -649,6 +663,8 @@ int mlt_properties_set( mlt_properties self, const char *name, const char *value
 {
 	int error = 1;
 
+	if ( !self || !name ) return error;
+
 	// Fetch the property to work with
 	mlt_property property = mlt_properties_fetch( self, name );
 
@@ -689,9 +705,19 @@ int mlt_properties_set( mlt_properties self, const char *name, const char *value
 
 			// Determine the value
 			if ( isdigit( id[ 0 ] ) )
-				current = atof( id );
+			{
+#if defined(__GLIBC__) || defined(__DARWIN__)
+				property_list *list = self->local;
+				if ( list->locale )
+					current = strtod_l( id, NULL, list->locale );
+                else
+#endif
+					current = strtod( id, NULL );
+			}
 			else
+			{
 				current = mlt_properties_get_double( self, id );
+			}
 
 			// Apply the operation
 			switch( op )
@@ -751,9 +777,14 @@ int mlt_properties_set_or_default( mlt_properties self, const char *name, const 
 
 char *mlt_properties_get( mlt_properties self, const char *name )
 {
+	char *result = NULL;
 	mlt_property value = mlt_properties_find( self, name );
-	property_list *list = self->local;
-	return value == NULL ? NULL : mlt_property_get_string_l( value, list->locale );
+	if ( value )
+	{
+		property_list *list = self->local;
+		result = mlt_property_get_string_l( value, list->locale );
+	}
+	return result;
 }
 
 /** Get a property name by index.
@@ -767,6 +798,7 @@ char *mlt_properties_get( mlt_properties self, const char *name )
 
 char *mlt_properties_get_name( mlt_properties self, int index )
 {
+	if ( !self ) return NULL;
 	property_list *list = self->local;
 	if ( index >= 0 && index < list->count )
 		return list->name[ index ];
@@ -784,6 +816,7 @@ char *mlt_properties_get_name( mlt_properties self, int index )
 
 char *mlt_properties_get_value( mlt_properties self, int index )
 {
+	if ( !self ) return NULL;
 	property_list *list = self->local;
 	if ( index >= 0 && index < list->count )
 		return mlt_property_get_string_l( list->value[ index ], list->locale );
@@ -802,6 +835,7 @@ char *mlt_properties_get_value( mlt_properties self, int index )
 
 void *mlt_properties_get_data_at( mlt_properties self, int index, int *size )
 {
+	if ( !self ) return NULL;
 	property_list *list = self->local;
 	if ( index >= 0 && index < list->count )
 		return mlt_property_get_data( list->value[ index ], size );
@@ -812,11 +846,12 @@ void *mlt_properties_get_data_at( mlt_properties self, int index, int *size )
  *
  * \public \memberof mlt_properties_s
  * \param self a properties list
- * \return the number of property objects
+ * \return the number of property objects or -1 if error
  */
 
 int mlt_properties_count( mlt_properties self )
 {
+	if ( !self ) return -1;
 	property_list *list = self->local;
 	return list->count;
 }
@@ -831,6 +866,7 @@ int mlt_properties_count( mlt_properties self )
 
 int mlt_properties_parse( mlt_properties self, const char *namevalue )
 {
+	if ( !self ) return 1;
 	char *name = strdup( namevalue );
 	char *value = NULL;
 	int error = 0;
@@ -875,11 +911,16 @@ int mlt_properties_parse( mlt_properties self, const char *namevalue )
 
 int mlt_properties_get_int( mlt_properties self, const char *name )
 {
-	mlt_profile profile = mlt_properties_get_data( self, "_profile", NULL );
-	double fps = mlt_profile_fps( profile );
-	property_list *list = self->local;
+	int result = 0;
 	mlt_property value = mlt_properties_find( self, name );
-	return value == NULL ? 0 : mlt_property_get_int( value, fps, list->locale );
+	if ( value )
+	{
+		mlt_profile profile = mlt_properties_get_data( self, "_profile", NULL );
+		double fps = mlt_profile_fps( profile );
+		property_list *list = self->local;
+		result = mlt_property_get_int( value, fps, list->locale );
+	}
+	return result;
 }
 
 /** Set a property to an integer value.
@@ -894,6 +935,8 @@ int mlt_properties_get_int( mlt_properties self, const char *name )
 int mlt_properties_set_int( mlt_properties self, const char *name, int value )
 {
 	int error = 1;
+
+	if ( !self || !name ) return error;
 
 	// Fetch the property to work with
 	mlt_property property = mlt_properties_fetch( self, name );
@@ -937,6 +980,8 @@ int mlt_properties_set_int64( mlt_properties self, const char *name, int64_t val
 {
 	int error = 1;
 
+	if ( !self || !name ) return error;
+
 	// Fetch the property to work with
 	mlt_property property = mlt_properties_fetch( self, name );
 
@@ -962,11 +1007,16 @@ int mlt_properties_set_int64( mlt_properties self, const char *name, int64_t val
 
 double mlt_properties_get_double( mlt_properties self, const char *name )
 {
-	mlt_profile profile = mlt_properties_get_data( self, "_profile", NULL );
-	double fps = mlt_profile_fps( profile );
+	double result = 0;
 	mlt_property value = mlt_properties_find( self, name );
-	property_list *list = self->local;
-	return value == NULL ? 0 : mlt_property_get_double( value, fps, list->locale );
+	if ( value )
+	{
+		mlt_profile profile = mlt_properties_get_data( self, "_profile", NULL );
+		double fps = mlt_profile_fps( profile );
+		property_list *list = self->local;
+		result = mlt_property_get_double( value, fps, list->locale );
+	}
+	return result;
 }
 
 /** Set a property to a floating point value.
@@ -981,6 +1031,8 @@ double mlt_properties_get_double( mlt_properties self, const char *name )
 int mlt_properties_set_double( mlt_properties self, const char *name, double value )
 {
 	int error = 1;
+
+	if ( !self || !name ) return error;
 
 	// Fetch the property to work with
 	mlt_property property = mlt_properties_fetch( self, name );
@@ -1007,11 +1059,16 @@ int mlt_properties_set_double( mlt_properties self, const char *name, double val
 
 mlt_position mlt_properties_get_position( mlt_properties self, const char *name )
 {
-	mlt_profile profile = mlt_properties_get_data( self, "_profile", NULL );
-	double fps = mlt_profile_fps( profile );
-	property_list *list = self->local;
+	mlt_position result = 0;
 	mlt_property value = mlt_properties_find( self, name );
-	return value == NULL ? 0 : mlt_property_get_position( value, fps, list->locale );
+	if ( value )
+	{
+		mlt_profile profile = mlt_properties_get_data( self, "_profile", NULL );
+		double fps = mlt_profile_fps( profile );
+		property_list *list = self->local;
+		result = mlt_property_get_position( value, fps, list->locale );
+	}
+	return result;
 }
 
 /** Set a property to a position value.
@@ -1026,6 +1083,8 @@ mlt_position mlt_properties_get_position( mlt_properties self, const char *name 
 int mlt_properties_set_position( mlt_properties self, const char *name, mlt_position value )
 {
 	int error = 1;
+
+	if ( !self || !name ) return error;
 
 	// Fetch the property to work with
 	mlt_property property = mlt_properties_fetch( self, name );
@@ -1073,6 +1132,8 @@ void *mlt_properties_get_data( mlt_properties self, const char *name, int *lengt
 int mlt_properties_set_data( mlt_properties self, const char *name, void *value, int length, mlt_destructor destroy, mlt_serialiser serialise )
 {
 	int error = 1;
+
+	if ( !self || !name ) return error;
 
 	// Fetch the property to work with
 	mlt_property property = mlt_properties_fetch( self, name );
@@ -1131,6 +1192,7 @@ int mlt_properties_rename( mlt_properties self, const char *source, const char *
 
 void mlt_properties_dump( mlt_properties self, FILE *output )
 {
+	if ( !self || !output ) return;
 	property_list *list = self->local;
 	int i = 0;
 	for ( i = 0; i < list->count; i ++ )
@@ -1148,6 +1210,7 @@ void mlt_properties_dump( mlt_properties self, FILE *output )
  */
 void mlt_properties_debug( mlt_properties self, const char *title, FILE *output )
 {
+	if ( !self || !output ) return;
 	if ( output == NULL ) output = stderr;
 	fprintf( output, "%s: ", title );
 	if ( self != NULL )
@@ -1177,6 +1240,7 @@ void mlt_properties_debug( mlt_properties self, const char *title, FILE *output 
 int mlt_properties_save( mlt_properties self, const char *filename )
 {
 	int error = 1;
+	if ( !self || !filename ) return error;
 	FILE *f = fopen( filename, "w" );
 	if ( f != NULL )
 	{
@@ -1385,7 +1449,8 @@ struct yaml_parser_context
 {
 	mlt_deque stack;
 	unsigned int level;
-	unsigned int index;
+	int index;
+	mlt_deque index_stack;
 	char block;
 	char *block_name;
 	unsigned int block_indent;
@@ -1441,7 +1506,7 @@ static int parse_yaml( yaml_parser context, const char *namevalue )
 	int error = 0;
 	char *ptr = strchr( name, ':' );
 	unsigned int indent = ltrim( &name );
-	mlt_properties properties = mlt_deque_peek_front( context->stack );
+	mlt_properties properties = mlt_deque_peek_back( context->stack );
 
 	// Ascending one more levels in the tree
 	if ( indent < context->level )
@@ -1449,8 +1514,11 @@ static int parse_yaml( yaml_parser context, const char *namevalue )
 		unsigned int i;
 		unsigned int n = ( context->level - indent ) / 2;
 		for ( i = 0; i < n; i++ )
-			mlt_deque_pop_front( context->stack );
-		properties = mlt_deque_peek_front( context->stack );
+		{
+			mlt_deque_pop_back( context->stack );
+			context->index = mlt_deque_pop_back_int( context->index_stack );
+		}
+		properties = mlt_deque_peek_back( context->stack );
 		context->level = indent;
 	}
 
@@ -1492,7 +1560,8 @@ static int parse_yaml( yaml_parser context, const char *namevalue )
 			mlt_properties_set_lcnumeric( child, mlt_properties_get_lcnumeric( properties ) );
 			mlt_properties_set_data( properties, name, child, 0,
 				( mlt_destructor )mlt_properties_close, NULL );
-			mlt_deque_push_front( context->stack, child );
+			mlt_deque_push_back( context->stack, child );
+			mlt_deque_push_back_int( context->index_stack, context->index );
 			context->index = 0;
 			free( name_ );
 			return error;
@@ -1508,7 +1577,8 @@ static int parse_yaml( yaml_parser context, const char *namevalue )
 			snprintf( key, sizeof(key), "%d", context->index++ );
 			mlt_properties_set_data( properties, key, child, 0,
 				( mlt_destructor )mlt_properties_close, NULL );
-			mlt_deque_push_front( context->stack, child );
+			mlt_deque_push_back( context->stack, child );
+			mlt_deque_push_back_int( context->index_stack, context->index );
 
 			name ++;
 			context->level += ltrim( &name ) + 1;
@@ -1682,7 +1752,9 @@ mlt_properties mlt_properties_parse_yaml( const char *filename )
 			// Parser context
 			yaml_parser context = calloc( 1, sizeof( struct yaml_parser_context ) );
 			context->stack = mlt_deque_init();
-			mlt_deque_push_front( context->stack, self );
+			context->index_stack = mlt_deque_init();
+			mlt_deque_push_back( context->stack, self );
+			mlt_deque_push_back_int( context->index_stack, 0 );
 
 			// Read each string from the file
 			while( fgets( temp, 1024, file ) )
@@ -1703,6 +1775,7 @@ mlt_properties mlt_properties_parse_yaml( const char *filename )
 			// Close the file
 			fclose( file );
 			mlt_deque_close( context->stack );
+			mlt_deque_close( context->index_stack );
 			if ( context->block_name )
 				free( context->block_name );
 			free( context );
@@ -1959,6 +2032,7 @@ static void serialise_yaml( mlt_properties self, strbuf output, int indent, int 
 
 char *mlt_properties_serialise_yaml( mlt_properties self )
 {
+	if ( !self ) return NULL;
 	const char *lc_numeric = mlt_properties_get_lcnumeric( self );
 	strbuf b = strbuf_new();
 	strbuf_printf( b, "---\n" );
@@ -2016,4 +2090,390 @@ char *mlt_properties_get_time( mlt_properties self, const char* name, mlt_time_f
 		return value == NULL ? NULL : mlt_property_get_time( value, format, fps, list->locale );
 	}
 	return NULL;
+}
+
+/** Convert a numeric property to a tuple of color components.
+ *
+ * If the property's string is red, green, blue, white, or black, then it
+ * is converted to the corresponding opaque color tuple. Otherwise, the property
+ * is fetched as an integer and then converted.
+ * \public \memberof mlt_properties_s
+ * \param self a properties list
+ * \param name the property to get
+ * \return a color structure
+ */
+
+mlt_color mlt_properties_get_color( mlt_properties self, const char* name )
+{
+	mlt_profile profile = mlt_properties_get_data( self, "_profile", NULL );
+	double fps = mlt_profile_fps( profile );
+	property_list *list = self->local;
+	mlt_property value = mlt_properties_find( self, name );
+	mlt_color result = { 0xff, 0xff, 0xff, 0xff };
+	if ( value )
+	{
+		const char *color = mlt_property_get_string_l( value, list->locale );
+		unsigned int color_int = mlt_property_get_int( value, fps, list->locale );
+
+		if ( !strcmp( color, "red" ) )
+		{
+			result.r = 0xff;
+			result.g = 0x00;
+			result.b = 0x00;
+		}
+		else if ( !strcmp( color, "green" ) )
+		{
+			result.r = 0x00;
+			result.g = 0xff;
+			result.b = 0x00;
+		}
+		else if ( !strcmp( color, "blue" ) )
+		{
+			result.r = 0x00;
+			result.g = 0x00;
+			result.b = 0xff;
+		}
+		else if ( !strcmp( color, "black" ) )
+		{
+			result.r = 0x00;
+			result.g = 0x00;
+			result.b = 0x00;
+		}
+		else if ( strcmp( color, "white" ) )
+		{
+			result.r = ( color_int >> 24 ) & 0xff;
+			result.g = ( color_int >> 16 ) & 0xff;
+			result.b = ( color_int >> 8 ) & 0xff;
+			result.a = ( color_int ) & 0xff;
+		}
+	}
+	return result;
+}
+
+/** Set a property to an integer value by color.
+ *
+ * \public \memberof mlt_properties_s
+ * \param self a properties list
+ * \param name the property to set
+ * \param color the color
+ * \return true if error
+ */
+
+int mlt_properties_set_color( mlt_properties self, const char *name, mlt_color color )
+{
+	int error = 1;
+
+	if ( !self || !name ) return error;
+
+	// Fetch the property to work with
+	mlt_property property = mlt_properties_fetch( self, name );
+
+	// Set it if not NULL
+	if ( property != NULL )
+	{
+		uint32_t value = ( color.r << 24 ) | ( color.g << 16 ) | ( color.b << 8 ) | color.a;
+		error = mlt_property_set_int( property, value );
+		mlt_properties_do_mirror( self, name );
+	}
+
+	mlt_events_fire( self, "property-changed", name, NULL );
+
+	return error;
+}
+
+/** Get a string value by name at a frame position.
+ *
+ * Do not free the returned string. It's lifetime is controlled by the property
+ * and this properties object.
+ * \public \memberof mlt_properties_s
+ * \param self a properties list
+ * \param name the property to get
+ * \param position the frame number
+ * \param length the maximum number of frames when interpreting negative keyframe times,
+ *  <=0 if you don't care or need that
+ * \return the property's string value or NULL if it does not exist
+ */
+
+char* mlt_properties_anim_get( mlt_properties self, const char *name, int position, int length )
+{
+	mlt_profile profile = mlt_properties_get_data( self, "_profile", NULL );
+	double fps = mlt_profile_fps( profile );
+	mlt_property value = mlt_properties_find( self, name );
+	property_list *list = self->local;
+	return value == NULL ? NULL : mlt_property_anim_get_string( value, fps, list->locale, position, length );
+}
+
+/** Set a property to a string at a frame position.
+ *
+ * The event "property-changed" is fired after the property has been set.
+ *
+ * This makes a copy of the string value you supply.
+ * \public \memberof mlt_properties_s
+ * \param self a properties list
+ * \param name the property to set
+ * \param value the property's new value
+ * \param position the frame number
+ * \param length the maximum number of frames when interpreting negative keyframe times,
+ *  <=0 if you don't care or need that
+ * \return true if error
+ */
+
+int mlt_properties_anim_set( mlt_properties self, const char *name, const char *value, int position, int length )
+{
+	int error = 1;
+
+	if ( !self || !name ) return error;
+
+	// Fetch the property to work with
+	mlt_property property = mlt_properties_fetch( self, name );
+
+	// Set it if not NULL
+	if ( property )
+	{
+		mlt_profile profile = mlt_properties_get_data( self, "_profile", NULL );
+		double fps = mlt_profile_fps( profile );
+		property_list *list = self->local;
+		error = mlt_property_anim_set_string( property, value,
+			fps, list->locale, position, length );
+		mlt_properties_do_mirror( self, name );
+	}
+
+	mlt_events_fire( self, "property-changed", name, NULL );
+
+	return error;
+}
+
+/** Get an integer associated to the name at a frame position.
+ *
+ * \public \memberof mlt_properties_s
+ * \param self a properties list
+ * \param name the property to get
+ * \param position the frame number
+ * \param length the maximum number of frames when interpreting negative keyframe times,
+ *  <=0 if you don't care or need that
+ * \return the integer value, 0 if not found (which may also be a legitimate value)
+ */
+
+int mlt_properties_anim_get_int( mlt_properties self, const char *name, int position, int length )
+{
+	mlt_profile profile = mlt_properties_get_data( self, "_profile", NULL );
+	double fps = mlt_profile_fps( profile );
+	property_list *list = self->local;
+	mlt_property value = mlt_properties_find( self, name );
+	return value == NULL ? 0 : mlt_property_anim_get_int( value, fps, list->locale, position, length );
+}
+
+/** Set a property to an integer value at a frame position.
+ *
+ * \public \memberof mlt_properties_s
+ * \param self a properties list
+ * \param name the property to set
+ * \param value the integer
+ * \param position the frame number
+ * \param length the maximum number of frames when interpreting negative keyframe times,
+ *  <=0 if you don't care or need that
+ * \param keyframe_type the interpolation method for this keyframe
+ * \return true if error
+ */
+
+int mlt_properties_anim_set_int( mlt_properties self, const char *name, int value,
+	int position, int length, mlt_keyframe_type keyframe_type )
+{
+	int error = 1;
+
+	if ( !self || !name ) return error;
+
+	// Fetch the property to work with
+	mlt_property property = mlt_properties_fetch( self, name );
+
+	// Set it if not NULL
+	if ( property != NULL )
+	{
+		mlt_profile profile = mlt_properties_get_data( self, "_profile", NULL );
+		double fps = mlt_profile_fps( profile );
+		property_list *list = self->local;
+		error = mlt_property_anim_set_int( property, value, fps, list->locale, position, length, keyframe_type );
+		mlt_properties_do_mirror( self, name );
+	}
+
+	mlt_events_fire( self, "property-changed", name, NULL );
+
+	return error;
+}
+
+/** Get a real number associated to the name at a frame position.
+ *
+ * \public \memberof mlt_properties_s
+ * \param self a properties list
+ * \param name the property to get
+ * \param position the frame number
+ * \param length the maximum number of frames when interpreting negative keyframe times,
+ *  <=0 if you don't care or need that
+ * \return the real number, 0 if not found (which may also be a legitimate value)
+ */
+
+double mlt_properties_anim_get_double( mlt_properties self, const char *name, int position, int length )
+{
+	mlt_profile profile = mlt_properties_get_data( self, "_profile", NULL );
+	double fps = mlt_profile_fps( profile );
+	property_list *list = self->local;
+	mlt_property value = mlt_properties_find( self, name );
+	return value == NULL ? 0.0 : mlt_property_anim_get_double( value, fps, list->locale, position, length );
+}
+
+/** Set a property to a real number at a frame position.
+ *
+ * \public \memberof mlt_properties_s
+ * \param self a properties list
+ * \param name the property to set
+ * \param value the real number
+ * \param position the frame number
+ * \param length the maximum number of frames when interpreting negative keyframe times,
+ *  <=0 if you don't care or need that
+ * \param keyframe_type the interpolation method for this keyframe
+ * \return true if error
+ */
+
+int mlt_properties_anim_set_double( mlt_properties self, const char *name, double value,
+	int position, int length, mlt_keyframe_type keyframe_type )
+{
+	int error = 1;
+
+	if ( !self || !name ) return error;
+
+	// Fetch the property to work with
+	mlt_property property = mlt_properties_fetch( self, name );
+
+	// Set it if not NULL
+	if ( property != NULL )
+	{
+		mlt_profile profile = mlt_properties_get_data( self, "_profile", NULL );
+		double fps = mlt_profile_fps( profile );
+		property_list *list = self->local;
+		error = mlt_property_anim_set_double( property, value, fps, list->locale, position, length, keyframe_type );
+		mlt_properties_do_mirror( self, name );
+	}
+
+	mlt_events_fire( self, "property-changed", name, NULL );
+
+	return error;
+}
+
+/** Get the animation associated to the name.
+ *
+ * \public \memberof mlt_properties_s
+ * \param self a properties list
+ * \param name the property to get
+ * \return The animation object or NULL if the property has no animation
+ */
+
+mlt_animation mlt_properties_get_animation( mlt_properties self, const char *name )
+{
+	mlt_property value = mlt_properties_find( self, name );
+	return value == NULL ? NULL : mlt_property_get_animation( value );
+}
+
+/** Set a property to a rectangle value.
+ *
+ * \public \memberof mlt_properties_s
+ * \param self a properties list
+ * \param name the property to set
+ * \param value the rectangle
+ * \return true if error
+ */
+
+extern int mlt_properties_set_rect( mlt_properties self, const char *name, mlt_rect value )
+{
+	int error = 1;
+
+	if ( !self || !name ) return error;
+
+	// Fetch the property to work with
+	mlt_property property = mlt_properties_fetch( self, name );
+
+	// Set it if not NULL
+	if ( property != NULL )
+	{
+		error = mlt_property_set_rect( property, value );
+		mlt_properties_do_mirror( self, name );
+	}
+
+	mlt_events_fire( self, "property-changed", name, NULL );
+
+	return error;
+}
+
+/** Get a rectangle associated to the name.
+ *
+ * \public \memberof mlt_properties_s
+ * \param self a properties list
+ * \param name the property to get
+ * \return the rectangle value, the rectangle fields will be DBL_MIN if not found
+ */
+
+extern mlt_rect mlt_properties_get_rect( mlt_properties self, const char* name )
+{
+	property_list *list = self->local;
+	mlt_property value = mlt_properties_find( self, name );
+	mlt_rect rect = { DBL_MIN, DBL_MIN, DBL_MIN, DBL_MIN, DBL_MIN };
+	return value == NULL ? rect : mlt_property_get_rect( value, list->locale );
+}
+
+/** Set a property to a rectangle value at a frame position.
+ *
+ * \public \memberof mlt_properties_s
+ * \param self a properties list
+ * \param name the property to set
+ * \param value the rectangle
+ * \param position the frame number
+ * \param length the maximum number of frames when interpreting negative keyframe times,
+ *  <=0 if you don't care or need that
+ * \param keyframe_type the interpolation method for this keyframe
+ * \return true if error
+ */
+
+extern int mlt_properties_anim_set_rect( mlt_properties self, const char *name, mlt_rect value,
+	int position, int length , mlt_keyframe_type keyframe_type )
+{
+	int error = 1;
+
+	if ( !self || !name ) return error;
+
+	// Fetch the property to work with
+	mlt_property property = mlt_properties_fetch( self, name );
+
+	// Set it if not NULL
+	if ( property != NULL )
+	{
+		mlt_profile profile = mlt_properties_get_data( self, "_profile", NULL );
+		double fps = mlt_profile_fps( profile );
+		property_list *list = self->local;
+		error = mlt_property_anim_set_rect( property, value, fps, list->locale, position, length, keyframe_type );
+		mlt_properties_do_mirror( self, name );
+	}
+
+	mlt_events_fire( self, "property-changed", name, NULL );
+
+	return error;
+}
+
+/** Get a rectangle associated to the name at a frame position.
+ *
+ * \public \memberof mlt_properties_s
+ * \param self a properties list
+ * \param name the property to get
+ * \param position the frame number
+ * \param length the maximum number of frames when interpreting negative keyframe times,
+ *  <=0 if you don't care or need that
+ * \return the rectangle value, the rectangle fields will be DBL_MIN if not found
+ */
+
+extern mlt_rect mlt_properties_anim_get_rect( mlt_properties self, const char *name, int position, int length )
+{
+	mlt_profile profile = mlt_properties_get_data( self, "_profile", NULL );
+	double fps = mlt_profile_fps( profile );
+	property_list *list = self->local;
+	mlt_property value = mlt_properties_find( self, name );
+	mlt_rect rect = { DBL_MIN, DBL_MIN, DBL_MIN, DBL_MIN, DBL_MIN };
+	return value == NULL ? rect : mlt_property_anim_get_rect( value, fps, list->locale, position, length );
 }

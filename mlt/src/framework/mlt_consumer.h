@@ -50,9 +50,12 @@
  * \properties \em test_card the name of a resource to use as the test card, defaults to
  * environment variable MLT_TEST_CARD. If undefined, the hard-coded default test card is
  * white silence. A test card is what appears when nothing is produced.
- * \event \em consumer-frame-show Subclass implementations should fire this.
- * \event \em consumer-frame-render The abstract class fires this.
- * \event \em consumer-stopped
+ * \event \em consumer-frame-show Subclass implementations fire this immediately after showing a frame
+ * or when a frame should be shown (if audio-only consumer).
+ * \event \em consumer-frame-render The base class fires this immediately before rendering a frame.
+ * \event \em consumer-thread-started The base class fires when beginning execution of a rendering thread.
+ * \event \em consumer-thread-stopped The base class fires when a rendering thread has ended.
+ * \event \em consumer-stopped This is fired when the subclass implementation calls mlt_consumer_stopped().
  * \properties \em fps video frames per second as floating point (read only)
  * \properties \em frame_rate_num the numerator of the video frame rate, overrides \p mlt_profile_s
  * \properties \em frame_rate_den the denominator of the video frame rate, overrides \p mlt_profile_s
@@ -99,6 +102,12 @@ struct mlt_consumer_s
 	 */
 	int ( *is_stopped )( mlt_consumer );
 
+	/** Purge the consumer of buffered data (virtual function).
+	 *
+	 * \param mlt_consumer a consumer
+	 */
+	void ( *purge )( mlt_consumer );
+
 	/** The destructor virtual function
 	 *
 	 * \param mlt_consumer a consumer
@@ -107,30 +116,6 @@ struct mlt_consumer_s
 
 	void *local; /**< \private instance object */
 	void *child; /**< \private the object of a subclass */
-
-	int real_time;
-	int ahead;
-	mlt_image_format format;
-	mlt_deque queue;
-	pthread_t ahead_thread;
-	pthread_mutex_t queue_mutex;
-	pthread_cond_t queue_cond;
-	pthread_mutex_t put_mutex;
-	pthread_cond_t put_cond;
-	mlt_frame put;
-	int put_active;
-	mlt_event event_listener;
-	mlt_position position;
-
-	/* additional fields added for the parallel work queue */
-	mlt_deque worker_threads;
-	pthread_mutex_t done_mutex;
-	pthread_cond_t done_cond;
-	int consecutive_dropped;
-	int consecutive_rendered;
-	int process_head;
-	int started;
-	pthread_t *threads; /**< \private used to deallocate all threads */
 };
 
 #define MLT_CONSUMER_SERVICE( consumer )	( &( consumer )->parent )

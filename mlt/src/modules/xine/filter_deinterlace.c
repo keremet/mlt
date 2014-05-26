@@ -111,7 +111,7 @@ static int deinterlace_yadif( mlt_frame frame, mlt_filter filter, uint8_t **imag
 	int next_width = *width;
 	int next_height = *height;
 	
-	mlt_log_debug( MLT_FILTER_SERVICE(filter), "previous %d current %d next %d\n",
+	mlt_log_debug( MLT_FILTER_SERVICE(filter), "previous " MLT_POSITION_FMT " current " MLT_POSITION_FMT " next " MLT_POSITION_FMT "\n",
 		previous_frame? mlt_frame_original_position(previous_frame) : -1,
 		mlt_frame_original_position(frame),
 		next_frame?  mlt_frame_original_position(next_frame) : -1);
@@ -195,7 +195,7 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 	// At this point - before image was requested - (progressive == 0) cannot be trusted because
 	// some producers (avformat) do not yet know.
 
-	if ( deinterlace )
+	if ( deinterlace && !mlt_properties_get_int( properties, "test_image" ) )
 	{
 		// Determine deinterlace method
 		char *method_str = mlt_properties_get( MLT_FILTER_PROPERTIES( filter ), "method" );

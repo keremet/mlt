@@ -40,7 +40,23 @@ static mlt_producer create_from( mlt_profile profile, char *file, char *services
 		char *p = strchr( service, ',' );
 		if ( p != NULL )
 			*p ++ = '\0';
-		producer = mlt_factory_producer( profile, service, file );
+
+		// If  the service name has a colon as field delimiter, then treat the
+		// second field as a prefix for the file/url.
+		char *prefix = strchr( service, ':' );
+		if ( prefix )
+		{
+			*prefix ++ = '\0';
+			char* prefix_file = calloc( 1, strlen( file ) + strlen( prefix ) + 1 );
+			strcpy( prefix_file, prefix );
+			strcat( prefix_file, file );
+			producer = mlt_factory_producer( profile, service, prefix_file );
+			free( prefix_file );
+		}
+		else
+		{
+			producer = mlt_factory_producer( profile, service, file );
+		}
 		service = p;
 	}
 	while ( producer == NULL && service != NULL );
@@ -146,6 +162,7 @@ static mlt_producer create_producer( mlt_profile profile, char *file )
 
 static void create_filter( mlt_profile profile, mlt_producer producer, char *effect, int *created )
 {
+	mlt_filter filter;
 	char *id = strdup( effect );
 	char *arg = strchr( id, ':' );
 	if ( arg != NULL )
@@ -153,10 +170,15 @@ static void create_filter( mlt_profile profile, mlt_producer producer, char *eff
 
 	// The swscale and avcolor_space filters require resolution as arg to test compatibility
 	if ( strncmp( effect, "swscale", 7 ) == 0 || strncmp( effect, "avcolo", 6 ) == 0 )
-		arg = (char*) mlt_properties_get_int( MLT_PRODUCER_PROPERTIES( producer ), "meta.media.width" );
-
-	mlt_filter filter = mlt_factory_filter( profile, id, arg );
-	if ( filter != NULL )
+	{
+		int width = mlt_properties_get_int( MLT_PRODUCER_PROPERTIES( producer ), "meta.media.width" );
+		filter = mlt_factory_filter( profile, id, &width );
+	}
+	else
+	{
+		filter = mlt_factory_filter( profile, id, arg );
+	}
+	if ( filter )
 	{
 		mlt_properties_set_int( MLT_FILTER_PROPERTIES( filter ), "_loader", 1 );
 		mlt_producer_attach( producer, filter );
@@ -222,6 +244,9 @@ mlt_producer producer_loader_init( mlt_profile profile, mlt_service_type type, c
 	{
 		// Always let the image and audio be converted
 		int created = 0;
+		// movit.convert skips setting the frame->convert_image pointer if GLSL cannot be used.
+		create_filter( profile, producer, "movit.convert", &created );
+		// avcolor_space and imageconvert only set frame->convert_image if it has not been set.
 		create_filter( profile, producer, "avcolor_space", &created );
 		if ( !created )
 			create_filter( profile, producer, "imageconvert", &created );

@@ -3,7 +3,7 @@
  * \brief Properties class declaration
  * \see mlt_properties_s
  *
- * Copyright (C) 2003-2011 Ushodaya Enterprises Limited
+ * Copyright (C) 2003-2013 Ushodaya Enterprises Limited
  * \author Charles Yates <charles.yates@pandora.be>
  * \author Dan Dennedy <dan@dennedy.org>
  *
@@ -89,5 +89,20 @@ extern char *mlt_properties_serialise_yaml( mlt_properties self );
 extern void mlt_properties_lock( mlt_properties self );
 extern void mlt_properties_unlock( mlt_properties self );
 extern char *mlt_properties_get_time( mlt_properties, const char* name, mlt_time_format );
+extern mlt_color mlt_properties_get_color( mlt_properties, const char* name );
+extern int mlt_properties_set_color( mlt_properties, const char* name, mlt_color value );
+
+extern char* mlt_properties_anim_get( mlt_properties self, const char *name, int position, int length );
+extern int mlt_properties_anim_set( mlt_properties self, const char *name, const char *value, int position, int length );
+extern int mlt_properties_anim_get_int( mlt_properties self, const char *name, int position, int length );
+extern int mlt_properties_anim_set_int( mlt_properties self, const char *name, int value, int position, int length, mlt_keyframe_type keyframe_type );
+extern double mlt_properties_anim_get_double( mlt_properties self, const char *name, int position, int length );
+extern int mlt_properties_anim_set_double( mlt_properties self, const char *name, double value, int position, int length, mlt_keyframe_type keyframe_type );
+extern mlt_animation mlt_properties_get_animation( mlt_properties self, const char *name );
+
+extern int mlt_properties_set_rect( mlt_properties self, const char *name, mlt_rect value );
+extern mlt_rect mlt_properties_get_rect( mlt_properties self, const char *name );
+extern int mlt_properties_anim_set_rect( mlt_properties self, const char *name, mlt_rect value, int position, int length, mlt_keyframe_type keyframe_type );
+extern mlt_rect mlt_properties_anim_get_rect( mlt_properties self, const char *name, int position, int length );
 
 #endif

@@ -45,6 +45,8 @@
 
 #define GET_FREI0R_PATH (getenv("FREI0R_PATH") ? getenv("FREI0R_PATH") : getenv("MLT_FREI0R_PLUGIN_PATH") ? getenv("MLT_FREI0R_PLUGIN_PATH") : FREI0R_PLUGIN_PATH)
 
+#define CLAMP( x, min, max ) ((x) < (min) ? (min) : (x) > (max) ? (max) : (x))
+
 extern mlt_filter filter_frei0r_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
 extern mlt_frame filter_process( mlt_filter this, mlt_frame frame );
 extern void filter_close( mlt_filter this );
@@ -122,6 +124,9 @@ static mlt_properties fill_param_info ( mlt_service_type type, const char *servi
 	void (*param_info)(f0r_param_info_t*,int param_index)=dlsym(handle,"f0r_get_param_info");
 	void (*f0r_init)(void)=dlsym(handle,"f0r_init");
 	void (*f0r_deinit)(void)=dlsym(handle,"f0r_deinit");
+	f0r_instance_t (*f0r_construct)(unsigned int , unsigned int)=dlsym(handle, "f0r_construct");
+	void (*f0r_destruct)(f0r_instance_t)=dlsym(handle, "f0r_destruct");
+	void (*f0r_get_param_value)(f0r_instance_t instance, f0r_param_t param, int param_index)=dlsym(handle,"f0r_get_param_value" );
 	if (!plginfo || !param_info) {
 		dlclose(handle);
 		return NULL;
@@ -132,6 +137,13 @@ static mlt_properties fill_param_info ( mlt_service_type type, const char *servi
 	int j=0;
 
 	f0r_init();
+	f0r_instance_t instance = f0r_construct(720, 576);
+	if (!instance) {
+		f0r_deinit();
+		dlclose(handle);
+		mlt_properties_close(metadata);
+		return NULL;
+	}
 	plginfo(&info);
 	snprintf ( string, sizeof(string) , "%d" , info.minor_version );
 	mlt_properties_set_double ( metadata, "schema_version" , 0.1 );
@@ -155,11 +167,12 @@ static mlt_properties fill_param_info ( mlt_service_type type, const char *servi
 			break;
 	}
 
-	mlt_properties parameter = mlt_properties_new ( );
-	mlt_properties_set_data ( metadata , "parameters" , parameter , 0 , ( mlt_destructor )mlt_properties_close, NULL );
 	mlt_properties tags = mlt_properties_new ( );
 	mlt_properties_set_data ( metadata , "tags" , tags , 0 , ( mlt_destructor )mlt_properties_close, NULL );
 	mlt_properties_set ( tags , "0" , "Video" );
+
+	mlt_properties parameter = mlt_properties_new ( );
+	mlt_properties_set_data ( metadata , "parameters" , parameter , 0 , ( mlt_destructor )mlt_properties_close, NULL );
 
 	for (j=0;j<info.num_params;j++){
 		snprintf ( string , sizeof(string), "%d" , j );
@@ -167,31 +180,52 @@ static mlt_properties fill_param_info ( mlt_service_type type, const char *servi
 		mlt_properties_set_data ( parameter , string , pnum , 0 , ( mlt_destructor )mlt_properties_close, NULL );
 		f0r_param_info_t paraminfo;
 		param_info(&paraminfo,j);
-		mlt_properties_set ( pnum , "identifier" , paraminfo.name );
+		mlt_properties_set ( pnum , "identifier" , string );
 		mlt_properties_set ( pnum , "title" , paraminfo.name );
 		mlt_properties_set ( pnum , "description" , paraminfo.explanation);
 		if ( paraminfo.type == F0R_PARAM_DOUBLE ){
+			double deflt = 0;
 			mlt_properties_set ( pnum , "type" , "float" );
 			mlt_properties_set ( pnum , "minimum" , "0" );
 			mlt_properties_set ( pnum , "maximum" , "1" );
-			mlt_properties_set ( pnum , "readonly" , "no" );
+			f0r_get_param_value( instance, &deflt, j);
+			mlt_properties_set_double ( pnum, "default", CLAMP(deflt, 0.0, 1.0) );
+			mlt_properties_set ( pnum , "mutable" , "yes" );
 			mlt_properties_set ( pnum , "widget" , "spinner" );
 		}else
 		if ( paraminfo.type == F0R_PARAM_BOOL ){
+			double deflt = 0;
 			mlt_properties_set ( pnum , "type" , "boolean" );
 			mlt_properties_set ( pnum , "minimum" , "0" );
 			mlt_properties_set ( pnum , "maximum" , "1" );
-			mlt_properties_set ( pnum , "readonly" , "no" );
+			f0r_get_param_value( instance, &deflt, j);
+			mlt_properties_set_int ( pnum, "default", deflt != 0.0 );
+			mlt_properties_set ( pnum , "mutable" , "yes" );
+			mlt_properties_set ( pnum , "widget" , "checkbox" );
 		}else
 		if ( paraminfo.type == F0R_PARAM_COLOR ){
+			char colorstr[8];
+			f0r_param_color_t deflt = {0, 0, 0};
+
 			mlt_properties_set ( pnum , "type" , "color" );
-			mlt_properties_set ( pnum , "readonly" , "no" );
+			f0r_get_param_value( instance, &deflt, j);
+			sprintf( colorstr, "#%02x%02x%02x", (unsigned) CLAMP(deflt.r * 255, 0 , 255),
+				(unsigned) CLAMP(deflt.g * 255, 0 , 255), (unsigned) CLAMP(deflt.b * 255, 0 , 255));
+			colorstr[7] = 0;
+			mlt_properties_set ( pnum , "default", colorstr );
+			mlt_properties_set ( pnum , "mutable" , "yes" );
+			mlt_properties_set ( pnum , "widget" , "color" );
 		}else
 		if ( paraminfo.type == F0R_PARAM_STRING ){
+			char *deflt = NULL;
 			mlt_properties_set ( pnum , "type" , "string" );
-			mlt_properties_set ( pnum , "readonly" , "no" );
+			f0r_get_param_value( instance, &deflt, j );
+			mlt_properties_set ( pnum , "default", deflt );
+			mlt_properties_set ( pnum , "mutable" , "yes" );
+			mlt_properties_set ( pnum , "widget" , "text" );
 		}
 	}
+	f0r_destruct(instance);
 	f0r_deinit();
 	dlclose(handle);
 	free(name);
@@ -294,6 +328,15 @@ static void * load_lib( mlt_profile profile, mlt_service_type type , void* handl
 		snprintf( minor, sizeof( minor ), "%d", info.minor_version );
 		mlt_properties_set_double( properties, "version", info.major_version +  info.minor_version / pow( 10, strlen( minor ) ) );
 
+		// Use the global param name map for backwards compatibility when
+		// param names change and setting frei0r params by name instead of index.
+		mlt_properties param_name_map = mlt_properties_get_data( mlt_global_properties(), "frei0r.param_name_map", NULL );
+		if ( param_name_map ) {
+			// Lookup my plugin in the map
+			param_name_map = mlt_properties_get_data( param_name_map, name, NULL );
+			mlt_properties_set_data( properties, "_param_name_map", param_name_map, 0, NULL, NULL );
+		}
+
 		return ret;
 	}else{
 		mlt_log_error( NULL, "frei0r plugin \"%s\" is missing a function\n", name );
@@ -365,6 +408,12 @@ MLT_REPOSITORY
 	char dirname[PATH_MAX];
 	snprintf( dirname, PATH_MAX, "%s/frei0r/blacklist.txt", mlt_environment( "MLT_DATA" ) );
 	mlt_properties blacklist = mlt_properties_load( dirname );
+
+	// Load a param name map into global properties for backwards compatibility when
+	// param names change and setting frei0r params by name instead of index.
+	snprintf( dirname, PATH_MAX, "%s/frei0r/param_name_map.yaml", mlt_environment( "MLT_DATA" ) );
+	mlt_properties_set_data( mlt_global_properties(), "frei0r.param_name_map",
+		mlt_properties_parse_yaml( dirname ), 0, (mlt_destructor) mlt_properties_close, NULL );
 
 	while (dircount--){
 

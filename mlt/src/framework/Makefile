@@ -20,6 +20,10 @@ SONAME = $(NAME).$(soversion)
 SHFLAGS += -Wl,-soname,$(SONAME)
 endif
 
+ifeq ($(targetos), Linux)
+SHFLAGS += -Wl,--version-script=mlt.vers
+endif
+
 OBJS = mlt_frame.o \
 	   mlt_version.o \
 	   mlt_geometry.o \
@@ -43,7 +47,8 @@ OBJS = mlt_frame.o \
 	   mlt_tokeniser.o \
 	   mlt_profile.o \
 	   mlt_log.o \
-	   mlt_cache.o
+	   mlt_cache.o \
+	   mlt_animation.o
 
 INCS = mlt_consumer.h \
 	   mlt_version.h \
@@ -70,7 +75,8 @@ INCS = mlt_consumer.h \
 	   mlt_tokeniser.h \
 	   mlt_profile.h \
 	   mlt_log.h \
-	   mlt_cache.h
+	   mlt_cache.h \
+	   mlt_animation.h
 
 SRCS := $(OBJS:.o=.c)
 
@@ -79,9 +85,9 @@ OBJS += ../win32/win32.o
 SRCS += ../win32/win32.c
 endif
 
-CFLAGS += $(RDYNAMIC) -DPREFIX="\"$(prefix)\"" -DLIBDIR="\"$(libdir)\"" -DMLTDATADIR="\"$(datadir)\""
+CFLAGS += $(RDYNAMIC) -DPREFIX_DATA="\"$(mltdatadir)\"" -DPREFIX_LIB="\"$(moduledir)\""
 
-LDFLAGS += $(LIBDL) -lpthread
+LDFLAGS += $(LIBDL) -lpthread -lm
 
 all:	$(TARGET)
 
@@ -114,8 +120,8 @@ install:
 	fi
 	install -d "$(DESTDIR)$(prefix)/include/mlt/framework"
 	install -m 644 $(INCS) "$(DESTDIR)$(prefix)/include/mlt/framework"
-	install -d "$(DESTDIR)$(datadir)/mlt"
-	install -m 644 metaschema.yaml "$(DESTDIR)$(datadir)/mlt/"
+	install -d "$(DESTDIR)$(mltdatadir)"
+	install -m 644 metaschema.yaml "$(DESTDIR)$(mltdatadir)"
 
 uninstall:
 	rm -f "$(DESTDIR)$(libdir)/$(TARGET)"
@@ -124,7 +130,7 @@ uninstall:
 		rm -f "$(DESTDIR)$(libdir)/$(NAME)" ; \
 	fi
 	rm -rf "$(DESTDIR)$(prefix)/include/mlt/framework"
-	rm -f "$(DESTDIR)$(datadir)/mlt/metaschema.yaml"
+	rm -f "$(DESTDIR)$(mltdatadir)/metaschema.yaml"
 
 ifneq ($(wildcard .depend),)
 include .depend

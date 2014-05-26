@@ -3,8 +3,9 @@
  * \brief Property class definition
  * \see mlt_property_s
  *
- * Copyright (C) 2003-2009 Ushodaya Enterprises Limited
+ * Copyright (C) 2003-2013 Ushodaya Enterprises Limited
  * \author Charles Yates <charles.yates@pandora.be>
+ * \author Dan Dennedy <dan@dennedy.org>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -27,12 +28,15 @@
 #endif
 
 #include "mlt_property.h"
+#include "mlt_animation.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <locale.h>
 #include <pthread.h>
+#include <float.h>
+#include <math.h>
 
 
 /** Bit pattern used internally to indicated representations available.
@@ -46,7 +50,8 @@ typedef enum
 	mlt_prop_position = 4,//!< set as a position
 	mlt_prop_double = 8,  //!< set as a floating point
 	mlt_prop_data = 16,   //!< set as opaque binary
-	mlt_prop_int64 = 32   //!< set as a 64-bit integer
+	mlt_prop_int64 = 32,  //!< set as a 64-bit integer
+	mlt_prop_rect = 64    //!< set as a mlt_rect
 }
 mlt_property_type;
 
@@ -77,6 +82,7 @@ struct mlt_property_s
 	mlt_serialiser serialiser;
 
 	pthread_mutex_t mutex;
+	mlt_animation animation;
 };
 
 /** Construct a property and initialize it
@@ -85,21 +91,9 @@ struct mlt_property_s
 
 mlt_property mlt_property_init( )
 {
-	mlt_property self = malloc( sizeof( struct mlt_property_s ) );
-	if ( self != NULL )
-	{
-		self->types = 0;
-		self->prop_int = 0;
-		self->prop_position = 0;
-		self->prop_double = 0;
-		self->prop_int64 = 0;
-		self->prop_string = NULL;
-		self->data = NULL;
-		self->length = 0;
-		self->destructor = NULL;
-		self->serialiser = NULL;
+	mlt_property self = calloc( 1, sizeof( *self ) );
+	if ( self )
 		pthread_mutex_init( &self->mutex, NULL );
-	}
 	return self;
 }
 
@@ -120,6 +114,9 @@ static inline void mlt_property_clear( mlt_property self )
 	if ( self->types & mlt_prop_string )
 		free( self->prop_string );
 
+	if ( self->animation )
+		mlt_animation_close( self->animation );
+
 	// Wipe stuff
 	self->types = 0;
 	self->prop_int = 0;
@@ -131,6 +128,7 @@ static inline void mlt_property_clear( mlt_property self )
 	self->length = 0;
 	self->destructor = NULL;
 	self->serialiser = NULL;
+	self->animation = NULL;
 }
 
 /** Set the property to an integer value.
@@ -309,7 +307,7 @@ static int time_clock_to_frames( const char *s, double fps, locale_t locale )
 	}
 	free( copy );
 
-	return fps * ( (hours * 3600) + (minutes * 60) + seconds ) + 0.5;
+	return lrint( fps * ( (hours * 3600) + (minutes * 60) + seconds ) );
 }
 
 /** Parse a SMPTE timecode string.
@@ -355,7 +353,7 @@ static int time_code_to_frames( const char *s, double fps )
 	}
 	free( copy );
 
-	return frames + ( fps * ( (hours * 3600) + (minutes * 60) + seconds ) + 0.5 );
+	return lrint( fps * ( (hours * 3600) + (minutes * 60) + seconds ) + frames );
 }
 
 /** Convert a string to an integer.
@@ -428,6 +426,8 @@ int mlt_property_get_int( mlt_property self, double fps, locale_t locale )
 		return ( int )self->prop_position;
 	else if ( self->types & mlt_prop_int64 )
 		return ( int )self->prop_int64;
+	else if ( self->types & mlt_prop_rect && self->data )
+		return ( int ) ( (mlt_rect*) self->data )->x;
 	else if ( ( self->types & mlt_prop_string ) && self->prop_string )
 		return mlt_property_atoi( self->prop_string, fps, locale );
 	return 0;
@@ -438,6 +438,8 @@ int mlt_property_get_int( mlt_property self, double fps, locale_t locale )
  * If the string contains a colon it is interpreted as a time value. If it also
  * contains a period or comma character, the string is parsed as a clock value:
  * HH:MM:SS. Otherwise, the time value is parsed as a SMPTE timecode: HH:MM:SS:FF.
+ * If the numeric string ends with '%' then the value is divided by 100 to convert
+ * it into a ratio.
  * \private \memberof mlt_property_s
  * \param value the string to convert
  * \param fps frames per second, used when converting from time value
@@ -455,11 +457,17 @@ static double mlt_property_atof( const char *value, double fps, locale_t locale 
 	}
 	else
 	{
+		char *end = NULL;
+		double result;
 #if defined(__GLIBC__) || defined(__DARWIN__)
 		if ( locale )
-			return strtod_l( value, NULL, locale );
+			result = strtod_l( value, &end, locale );
+        else
 #endif
-		return strtod( value, NULL );
+			result = strtod( value, &end );
+		if ( end && end[0] == '%' )
+			result /= 100.0;
+		return result;
 	}
 }
 
@@ -482,6 +490,8 @@ double mlt_property_get_double( mlt_property self, double fps, locale_t locale )
 		return ( double )self->prop_position;
 	else if ( self->types & mlt_prop_int64 )
 		return ( double )self->prop_int64;
+	else if ( self->types & mlt_prop_rect && self->data )
+		return ( (mlt_rect*) self->data )->x;
 	else if ( ( self->types & mlt_prop_string ) && self->prop_string )
 		return mlt_property_atof( self->prop_string, fps, locale );
 	return 0;
@@ -507,6 +517,8 @@ mlt_position mlt_property_get_position( mlt_property self, double fps, locale_t 
 		return ( mlt_position )self->prop_double;
 	else if ( self->types & mlt_prop_int64 )
 		return ( mlt_position )self->prop_int64;
+	else if ( self->types & mlt_prop_rect && self->data )
+		return ( mlt_position ) ( (mlt_rect*) self->data )->x;
 	else if ( ( self->types & mlt_prop_string ) && self->prop_string )
 		return ( mlt_position )mlt_property_atoi( self->prop_string, fps, locale );
 	return 0;
@@ -547,6 +559,8 @@ int64_t mlt_property_get_int64( mlt_property self )
 		return ( int64_t )self->prop_double;
 	else if ( self->types & mlt_prop_position )
 		return ( int64_t )self->prop_position;
+	else if ( self->types & mlt_prop_rect && self->data )
+		return ( int64_t ) ( (mlt_rect*) self->data )->x;
 	else if ( ( self->types & mlt_prop_string ) && self->prop_string )
 		return mlt_property_atoll( self->prop_string );
 	return 0;
@@ -579,7 +593,7 @@ char *mlt_property_get_string( mlt_property self )
 		{
 			self->types |= mlt_prop_string;
 			self->prop_string = malloc( 32 );
-			sprintf( self->prop_string, "%f", self->prop_double );
+			sprintf( self->prop_string, "%g", self->prop_double );
 		}
 		else if ( self->types & mlt_prop_position )
 		{
@@ -655,7 +669,7 @@ char *mlt_property_get_string_l( mlt_property self, locale_t locale )
 		{
 			self->types |= mlt_prop_string;
 			self->prop_string = malloc( 32 );
-			sprintf( self->prop_string, "%f", self->prop_double );
+			sprintf( self->prop_string, "%g", self->prop_double );
 		}
 		else if ( self->types & mlt_prop_position )
 		{
@@ -749,6 +763,16 @@ void mlt_property_pass( mlt_property self, mlt_property that )
 	{
 		if ( that->prop_string != NULL )
 			self->prop_string = strdup( that->prop_string );
+	}
+	else if ( that->types & mlt_prop_rect )
+	{
+		mlt_property_clear( self );
+		self->types = mlt_prop_rect | mlt_prop_data;
+		self->length = that->length;
+		self->data = calloc( 1, self->length );
+		memcpy( self->data, that->data, self->length );
+		self->destructor = free;
+		self->serialiser = that->serialiser;
 	}
 	else if ( self->types & mlt_prop_data && self->serialiser != NULL )
 	{
@@ -923,4 +947,596 @@ char *mlt_property_get_time( mlt_property self, mlt_time_format format, double f
 
 	// Return the string (may be NULL)
 	return self->prop_string;
+}
+
+/** Determine if the property holds a numeric or numeric string value.
+ *
+ * \private \memberof mlt_property_s
+ * \param self a property
+ * \param locale the locale to use for string evaluation
+ * \return true if it is numeric
+ */
+
+static int is_property_numeric( mlt_property self, locale_t locale )
+{
+	int result = ( self->types & mlt_prop_int ) ||
+			( self->types & mlt_prop_int64 ) ||
+			( self->types & mlt_prop_double ) ||
+			( self->types & mlt_prop_position ) ||
+			( self->types & mlt_prop_rect );
+
+	// If not already numeric but string is numeric.
+	if ( ( !result && self->types & mlt_prop_string ) && self->prop_string )
+	{
+		double temp;
+		char *p = NULL;
+#if defined(__GLIBC__) || defined(__DARWIN__)
+		if ( locale )
+			temp = strtod_l( self->prop_string, &p, locale );
+		else
+#endif
+		temp = strtod( self->prop_string, &p );
+		result = ( p != self->prop_string );
+	}
+	return result;
+}
+
+/** A linear interpolation function for animation.
+ *
+ * \private \memberof mlt_property_s
+ */
+
+static inline double linear_interpolate( double y1, double y2, double t )
+{
+	return y1 + ( y2 - y1 ) * t;
+}
+
+/** A smooth spline interpolation for animation.
+ *
+ * For non-closed curves, you need to also supply the tangent vector at the first and last control point.
+ * This is commonly done: T(P[0]) = P[1] - P[0] and T(P[n]) = P[n] - P[n-1].
+ * \private \memberof mlt_property_s
+ */
+
+static inline double catmull_rom_interpolate( double y0, double y1, double y2, double y3, double t )
+{
+	double t2 = t * t;
+	double a0 = -0.5 * y0 + 1.5 * y1 - 1.5 * y2 + 0.5 * y3;
+	double a1 = y0 - 2.5 * y1 + 2 * y2 - 0.5 * y3;
+	double a2 = -0.5 * y0 + 0.5 * y2;
+	double a3 = y1;
+	return a0 * t * t2 + a1 * t2 + a2 * t + a3;
+}
+
+/** Interpolate a new property value given a set of other properties.
+ *
+ * \public \memberof mlt_property_s
+ * \param self the property onto which to set the computed value
+ * \param p an array of at least 1 value in p[1] if \p interp is discrete,
+ *  2 values in p[1] and p[2] if \p interp is linear, or
+ *  4 values in p[0] - p[3] if \p interp is smooth
+ * \param progress a ratio in the range [0, 1] to indicate how far between p[1] and p[2]
+ * \param fps the frame rate, which may be needed for converting a time string to frame units
+ * \param locale the locale, which may be needed for converting a string to a real number
+ * \param interp the interpolation method to use
+ * \return true if there was an error
+ */
+
+int mlt_property_interpolate( mlt_property self, mlt_property p[],
+	double progress, double fps, locale_t locale, mlt_keyframe_type interp )
+{
+	int error = 0;
+	if ( interp != mlt_keyframe_discrete &&
+		is_property_numeric( p[1], locale ) && is_property_numeric( p[2], locale ) )
+	{
+		if ( self->types & mlt_prop_rect )
+		{
+			mlt_rect value = { DBL_MIN, DBL_MIN, DBL_MIN, DBL_MIN, DBL_MIN };
+			if ( interp == mlt_keyframe_linear )
+			{
+				mlt_rect points[2];
+				mlt_rect zero = {0, 0, 0, 0, 0};
+				points[0] = p[1]? mlt_property_get_rect( p[1], locale ) : zero;
+				if ( p[2] )
+				{
+					points[1] = mlt_property_get_rect( p[2], locale );
+					value.x = linear_interpolate( points[0].x, points[1].x, progress );
+					value.y = linear_interpolate( points[0].y, points[1].y, progress );
+					value.w = linear_interpolate( points[0].w, points[1].w, progress );
+					value.h = linear_interpolate( points[0].h, points[1].h, progress );
+					value.o = linear_interpolate( points[0].o, points[1].o, progress );
+				}
+				else
+				{
+					value = points[0];
+				}
+			}
+			else if ( interp == mlt_keyframe_smooth )
+			{
+				mlt_rect points[4];
+				mlt_rect zero = {0, 0, 0, 0, 0};
+				points[1] = p[1]? mlt_property_get_rect( p[1], locale ) : zero;
+				if ( p[2] )
+				{
+					points[0] = p[0]? mlt_property_get_rect( p[0], locale ) : zero;
+					points[2] = p[2]? mlt_property_get_rect( p[2], locale ) : zero;
+					points[3] = p[3]? mlt_property_get_rect( p[3], locale ) : zero;
+					value.x = catmull_rom_interpolate( points[0].x, points[1].x, points[2].x, points[3].x, progress );
+					value.y = catmull_rom_interpolate( points[0].y, points[1].y, points[2].y, points[3].y, progress );
+					value.w = catmull_rom_interpolate( points[0].w, points[1].w, points[2].w, points[3].w, progress );
+					value.h = catmull_rom_interpolate( points[0].h, points[1].h, points[2].h, points[3].h, progress );
+					value.o = catmull_rom_interpolate( points[0].o, points[1].o, points[2].o, points[3].o, progress );
+				}
+				else
+				{
+					value = points[1];
+				}
+			}
+			error = mlt_property_set_rect( self, value );
+		}
+		else
+		{
+			double value;
+			if ( interp == mlt_keyframe_linear )
+			{
+				double points[2];
+				points[0] = p[1]? mlt_property_get_double( p[1], fps, locale ) : 0;
+				points[1] = p[2]? mlt_property_get_double( p[2], fps, locale ) : 0;
+				value = p[2]? linear_interpolate( points[0], points[1], progress ) : points[0];
+			}
+			else if ( interp == mlt_keyframe_smooth )
+			{
+				double points[4];
+				points[0] = p[0]? mlt_property_get_double( p[0], fps, locale ) : 0;
+				points[1] = p[1]? mlt_property_get_double( p[1], fps, locale ) : 0;
+				points[2] = p[2]? mlt_property_get_double( p[2], fps, locale ) : 0;
+				points[3] = p[3]? mlt_property_get_double( p[3], fps, locale ) : 0;
+				value = p[2]? catmull_rom_interpolate( points[0], points[1], points[2], points[3], progress ) : points[1];
+			}
+			error = mlt_property_set_double( self, value );
+		}
+	}
+	else
+	{
+		mlt_property_pass( self, p[1] );
+	}
+	return error;
+}
+
+/** Create a new animation or refresh an existing one.
+ *
+ * \private \memberof mlt_property_s
+ * \param self a property
+ * \param fps the frame rate, which may be needed for converting a time string to frame units
+ * \param locale the locale, which may be needed for converting a string to a real number
+ * \param length the maximum number of frames when interpreting negative keyframe times,
+ *  <=0 if you don't care or need that
+ */
+
+static void refresh_animation( mlt_property self, double fps, locale_t locale, int length  )
+{
+	if ( !self->animation )
+	{
+		self->animation = mlt_animation_new();
+		if ( self->prop_string )
+		{
+			mlt_animation_parse( self->animation, self->prop_string, length, fps, locale );
+		}
+		else
+		{
+			mlt_animation_set_length( self->animation, length );
+			pthread_mutex_lock( &self->mutex );
+			self->types |= mlt_prop_data;
+			self->data = self->animation;
+			self->serialiser = (mlt_serialiser) mlt_animation_serialize;
+			pthread_mutex_unlock( &self->mutex );
+		}
+	}
+	else if ( self->prop_string )
+	{
+		mlt_animation_refresh( self->animation, self->prop_string, length );
+	}
+}
+
+/** Get the real number at a frame position.
+ *
+ * \public \memberof mlt_property_s
+ * \param self a property
+ * \param fps the frame rate, which may be needed for converting a time string to frame units
+ * \param locale the locale, which may be needed for converting a string to a real number
+ * \param position the frame number
+ * \param length the maximum number of frames when interpreting negative keyframe times,
+ *  <=0 if you don't care or need that
+ * \return the real number
+ */
+
+double mlt_property_anim_get_double( mlt_property self, double fps, locale_t locale, int position, int length )
+{
+	double result;
+	if ( self->animation || ( ( self->types & mlt_prop_string ) && self->prop_string ) )
+	{
+		struct mlt_animation_item_s item;
+		item.property = mlt_property_init();
+
+		refresh_animation( self, fps, locale, length );
+		mlt_animation_get_item( self->animation, &item, position );
+		result = mlt_property_get_double( item.property, fps, locale );
+
+		mlt_property_close( item.property );
+	}
+	else
+	{
+		result = mlt_property_get_double( self, fps, locale );
+	}
+	return result;
+}
+
+/** Get the property as an integer number at a frame position.
+ *
+ * \public \memberof mlt_property_s
+ * \param self a property
+ * \param fps the frame rate, which may be needed for converting a time string to frame units
+ * \param locale the locale, which may be needed for converting a string to a real number
+ * \param position the frame number
+ * \param length the maximum number of frames when interpreting negative keyframe times,
+ *  <=0 if you don't care or need that
+ * \return an integer value
+ */
+
+int mlt_property_anim_get_int( mlt_property self, double fps, locale_t locale, int position, int length )
+{
+	int result;
+	if ( self->animation || ( ( self->types & mlt_prop_string ) && self->prop_string ) )
+	{
+		struct mlt_animation_item_s item;
+		item.property = mlt_property_init();
+
+		refresh_animation( self, fps, locale, length );
+		mlt_animation_get_item( self->animation, &item, position );
+		result = mlt_property_get_int( item.property, fps, locale );
+
+		mlt_property_close( item.property );
+	}
+	else
+	{
+		result = mlt_property_get_int( self, fps, locale );
+	}
+	return result;
+}
+
+/** Get the string at certain a frame position.
+ *
+ * \public \memberof mlt_property_s
+ * \param self a property
+ * \param fps the frame rate, which may be needed for converting a time string to frame units
+ * \param locale the locale, which may be needed for converting a string to a real number
+ * \param position the frame number
+ * \param length the maximum number of frames when interpreting negative keyframe times,
+ *  <=0 if you don't care or need that
+ * \return the string representation of the property or NULL if failed
+ */
+
+char* mlt_property_anim_get_string( mlt_property self, double fps, locale_t locale, int position, int length )
+{
+	char *result;
+	if ( self->animation || ( ( self->types & mlt_prop_string ) && self->prop_string ) )
+	{
+		struct mlt_animation_item_s item;
+		item.property = mlt_property_init();
+
+		if ( !self->animation )
+			refresh_animation( self, fps, locale, length );
+		mlt_animation_get_item( self->animation, &item, position );
+
+		pthread_mutex_lock( &self->mutex );
+		if ( self->prop_string )
+			free( self->prop_string );
+		self->prop_string = mlt_property_get_string_l( item.property, locale );
+		if ( self->prop_string )
+			self->prop_string = strdup( self->prop_string );
+		self->types |= mlt_prop_string;
+		pthread_mutex_unlock( &self->mutex );
+
+		result = self->prop_string;
+		mlt_property_close( item.property );
+	}
+	else
+	{
+		result = mlt_property_get_string_l( self, locale );
+	}
+	return result;
+}
+
+/** Set a property animation keyframe to a real number.
+ *
+ * \public \memberof mlt_property_s
+ * \param self a property
+ * \param value a double precision floating point value
+ * \param fps the frame rate, which may be needed for converting a time string to frame units
+ * \param locale the locale, which may be needed for converting a string to a real number
+ * \param position the frame number
+ * \param length the maximum number of frames when interpreting negative keyframe times,
+ *  <=0 if you don't care or need that
+ * \param keyframe_type the interpolation method for this keyframe
+ * \return false if successful, true to indicate error
+ */
+
+int mlt_property_anim_set_double( mlt_property self, double value, double fps, locale_t locale,
+	int position, int length, mlt_keyframe_type keyframe_type )
+{
+	int result;
+	struct mlt_animation_item_s item;
+
+	item.property = mlt_property_init();
+	item.frame = position;
+	item.keyframe_type = keyframe_type;
+	mlt_property_set_double( item.property, value );
+
+	refresh_animation( self, fps, locale, length );
+	result = mlt_animation_insert( self->animation, &item );
+	mlt_animation_interpolate( self->animation );
+	mlt_property_close( item.property );
+
+	return result;
+}
+
+/** Set a property animation keyframe to an integer value.
+ *
+ * \public \memberof mlt_property_s
+ * \param self a property
+ * \param value an integer
+ * \param fps the frame rate, which may be needed for converting a time string to frame units
+ * \param locale the locale, which may be needed for converting a string to a real number
+ * \param position the frame number
+ * \param length the maximum number of frames when interpreting negative keyframe times,
+ *  <=0 if you don't care or need that
+ * \param keyframe_type the interpolation method for this keyframe
+ * \return false if successful, true to indicate error
+ */
+
+int mlt_property_anim_set_int( mlt_property self, int value, double fps, locale_t locale,
+	int position, int length, mlt_keyframe_type keyframe_type )
+{
+	int result;
+	struct mlt_animation_item_s item;
+
+	item.property = mlt_property_init();
+	item.frame = position;
+	item.keyframe_type = keyframe_type;
+	mlt_property_set_int( item.property, value );
+
+	refresh_animation( self, fps, locale, length );
+	result = mlt_animation_insert( self->animation, &item );
+	mlt_animation_interpolate( self->animation );
+	mlt_property_close( item.property );
+
+	return result;
+}
+
+/** Set a property animation keyframe to a string.
+ *
+ * Strings only support discrete animation. Do not use this to set a property's
+ * animation string that contains a semicolon-delimited set of values; use
+ * mlt_property_set() for that.
+ * \public \memberof mlt_property_s
+ * \param self a property
+ * \param value a string
+ * \param fps the frame rate, which may be needed for converting a time string to frame units
+ * \param locale the locale, which may be needed for converting a string to a real number
+ * \param position the frame number
+ * \param length the maximum number of frames when interpreting negative keyframe times,
+ *  <=0 if you don't care or need that
+ * \return false if successful, true to indicate error
+ */
+
+int mlt_property_anim_set_string( mlt_property self, const char *value, double fps, locale_t locale, int position, int length )
+{
+	int result;
+	struct mlt_animation_item_s item;
+
+	item.property = mlt_property_init();
+	item.frame = position;
+	item.keyframe_type = mlt_keyframe_discrete;
+	mlt_property_set_string( item.property, value );
+
+	refresh_animation( self, fps, locale, length );
+	result = mlt_animation_insert( self->animation, &item );
+	mlt_animation_interpolate( self->animation );
+	mlt_property_close( item.property );
+
+	return result;
+}
+
+/** Get an object's animation object.
+ *
+ * You might need to call another mlt_property_anim_ function to actually construct
+ * the animation, as this is a simple accessor function.
+ * \public \memberof mlt_property_s
+ * \param self a property
+ * \return the animation object or NULL if there is no animation
+ */
+
+mlt_animation mlt_property_get_animation( mlt_property self )
+{
+    return self->animation;
+}
+
+/** Convert a rectangle value into a string.
+ *
+ * Unlike the deprecated mlt_geometry API, the canonical form of a mlt_rect
+ * is a space delimited "x y w h o" even though many kinds of field delimiters
+ * may be used to convert a string to a rectangle.
+ * \private \memberof mlt_property_s
+ * \param rect the rectangle to convert
+ * \param length not used
+ * \return the string representation of a rectangle
+ */
+
+static char* serialise_mlt_rect( mlt_rect *rect, int length )
+{
+	char* result = calloc( 1, 100 );
+	if ( rect->x != DBL_MIN )
+		sprintf( result + strlen( result ), "%g", rect->x );
+	if ( rect->y != DBL_MIN )
+		sprintf( result + strlen( result ), " %g", rect->y );
+	if ( rect->w != DBL_MIN )
+		sprintf( result + strlen( result ), " %g", rect->w );
+	if ( rect->h != DBL_MIN )
+		sprintf( result + strlen( result ), " %g", rect->h );
+	if ( rect->o != DBL_MIN )
+		sprintf( result + strlen( result ), " %g", rect->o );
+	return result;
+}
+
+/** Set a property to a mlt_rect rectangle.
+ *
+ * \public \memberof mlt_property_s
+ * \param self a property
+ * \param value a rectangle
+ * \return false
+ */
+
+int mlt_property_set_rect( mlt_property self, mlt_rect value )
+{
+	pthread_mutex_lock( &self->mutex );
+	mlt_property_clear( self );
+	self->types = mlt_prop_rect | mlt_prop_data;
+	self->length = sizeof(value);
+	self->data = calloc( 1, self->length );
+	memcpy( self->data, &value, self->length );
+	self->destructor = free;
+	self->serialiser = (mlt_serialiser) serialise_mlt_rect;
+	pthread_mutex_unlock( &self->mutex );
+	return 0;
+}
+
+/** Get the property as a rectangle.
+ *
+ * You can use any non-numeric character(s) as a field delimiter.
+ * If the number has a '%' immediately following it, the number is divided by
+ * 100 to convert it into a real number.
+ * \public \memberof mlt_property_s
+ * \param self a property
+ * \param locale the locale to use for when converting from a string
+ * \return a rectangle value
+ */
+
+mlt_rect mlt_property_get_rect( mlt_property self, locale_t locale )
+{
+	mlt_rect rect = { DBL_MIN, DBL_MIN, DBL_MIN, DBL_MIN, DBL_MIN };
+	if ( self->types & mlt_prop_rect )
+		rect = *( (mlt_rect*) self->data );
+	else if ( self->types & mlt_prop_double )
+		rect.x = self->prop_double;
+	else if ( self->types & mlt_prop_int )
+		rect.x = ( double )self->prop_int;
+	else if ( self->types & mlt_prop_position )
+		rect.x = ( double )self->prop_position;
+	else if ( self->types & mlt_prop_int64 )
+		rect.x = ( double )self->prop_int64;
+	else if ( ( self->types & mlt_prop_string ) && self->prop_string )
+	{
+		//return mlt_property_atof( self->prop_string, fps, locale );
+		char *value = self->prop_string;
+		char *p = NULL;
+		int count = 0;
+		while ( *value )
+		{
+			double temp;
+#if defined(__GLIBC__) || defined(__DARWIN__)
+			if ( locale )
+				temp = strtod_l( value, &p, locale );
+            else
+#endif
+				temp = strtod( value, &p );
+			if ( p != value )
+			{
+				if ( p[0] == '%' )
+					temp /= 100.0;
+				if ( *p ) p ++;
+				switch( count )
+				{
+					case 0: rect.x = temp; break;
+					case 1: rect.y = temp; break;
+					case 2: rect.w = temp; break;
+					case 3: rect.h = temp; break;
+					case 4: rect.o = temp; break;
+				}
+			}
+			else
+			{
+				p++;
+			}
+			value = p;
+			count ++;
+		}
+	}
+	return rect;
+}
+
+/** Set a property animation keyframe to a rectangle.
+ *
+ * \public \memberof mlt_property_s
+ * \param self a property
+ * \param value a rectangle
+ * \param fps the frame rate, which may be needed for converting a time string to frame units
+ * \param locale the locale, which may be needed for converting a string to a real number
+ * \param position the frame number
+ * \param length the maximum number of frames when interpreting negative keyframe times,
+ *  <=0 if you don't care or need that
+ * \param keyframe_type the interpolation method for this keyframe
+ * \return false if successful, true to indicate error
+ */
+
+int mlt_property_anim_set_rect( mlt_property self, mlt_rect value, double fps, locale_t locale,
+	int position, int length, mlt_keyframe_type keyframe_type )
+{
+	int result;
+	struct mlt_animation_item_s item;
+
+	item.property = mlt_property_init();
+	item.frame = position;
+	item.keyframe_type = keyframe_type;
+	mlt_property_set_rect( item.property, value );
+
+	refresh_animation( self, fps, locale, length );
+	result = mlt_animation_insert( self->animation, &item );
+	mlt_animation_interpolate( self->animation );
+	mlt_property_close( item.property );
+
+	return result;
+}
+
+/** Get a rectangle at a frame position.
+ *
+ * \public \memberof mlt_property_s
+ * \param self a property
+ * \param fps the frame rate, which may be needed for converting a time string to frame units
+ * \param locale the locale, which may be needed for converting a string to a real number
+ * \param position the frame number
+ * \param length the maximum number of frames when interpreting negative keyframe times,
+ *  <=0 if you don't care or need that
+ * \return the rectangle
+ */
+
+mlt_rect mlt_property_anim_get_rect( mlt_property self, double fps, locale_t locale, int position, int length )
+{
+	mlt_rect result;
+	if ( self->animation || ( ( self->types & mlt_prop_string ) && self->prop_string ) )
+	{
+		struct mlt_animation_item_s item;
+		item.property = mlt_property_init();
+		item.property->types = mlt_prop_rect;
+
+		refresh_animation( self, fps, locale, length );
+		mlt_animation_get_item( self->animation, &item, position );
+		result = mlt_property_get_rect( item.property, locale );
+
+		mlt_property_close( item.property );
+	}
+	else
+	{
+		result = mlt_property_get_rect( self, locale );
+	}
+	return result;
 }

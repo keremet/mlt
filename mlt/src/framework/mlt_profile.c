@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <libgen.h>
+#include <math.h>
 
 
 /** the default subdirectory of the datadir for holding profiles */
@@ -402,8 +403,8 @@ mlt_properties mlt_profile_list( )
 void mlt_profile_from_producer( mlt_profile profile, mlt_producer producer )
 {
 	mlt_frame fr = NULL;
-	uint8_t *buffer;
-	mlt_image_format fmt = mlt_image_yuv422;
+	uint8_t *buffer = NULL;
+	mlt_image_format fmt = mlt_image_none;
 	mlt_properties p;
 	int w = profile->width;
 	int h = profile->height;
@@ -417,7 +418,8 @@ void mlt_profile_from_producer( mlt_profile profile, mlt_producer producer )
 			mlt_service_get_frame( MLT_PRODUCER_SERVICE(producer), &fr, 0 );
 			p = MLT_FRAME_PROPERTIES( fr );
 //			mlt_properties_dump(p, stderr);
-			if ( mlt_properties_get_int( p, "meta.media.frame_rate_den" ) && mlt_properties_get_int( p, "meta.media.sample_aspect_den" ) )
+			if ( mlt_properties_get_int( p, "meta.media.frame_rate_den" ) &&
+				 mlt_properties_get_int( p, "meta.media.sample_aspect_den" ) )
 			{
 				profile->width = mlt_properties_get_int( p, "meta.media.width" );
 				profile->height = mlt_properties_get_int( p, "meta.media.height" );
@@ -432,7 +434,8 @@ void mlt_profile_from_producer( mlt_profile profile, mlt_producer producer )
 				profile->sample_aspect_num = mlt_properties_get_int( p, "meta.media.sample_aspect_num" );
 				profile->sample_aspect_den = mlt_properties_get_int( p, "meta.media.sample_aspect_den" );
 				profile->colorspace = mlt_properties_get_int( p, "meta.media.colorspace" );
-				profile->display_aspect_num = (int) ( (double) profile->sample_aspect_num * profile->width / profile->sample_aspect_den + 0.5 );
+				profile->display_aspect_num = lrint( (double) profile->sample_aspect_num * profile->width
+					/ profile->sample_aspect_den );
 				profile->display_aspect_den = profile->height;
 				free( profile->description );
 				profile->description = strdup( "automatic" );

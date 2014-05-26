@@ -66,21 +66,31 @@ static int avformat_lockmgr(void **mutex, enum AVLockOp op)
    {
    case AV_LOCK_CREATE:
       *pmutex = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
+       if (!*pmutex) return -1;
        pthread_mutex_init(*pmutex, NULL);
        break;
    case AV_LOCK_OBTAIN:
+       if (!*pmutex) return -1;
        pthread_mutex_lock(*pmutex);
        break;
    case AV_LOCK_RELEASE:
+       if (!*pmutex) return -1;
        pthread_mutex_unlock(*pmutex);
        break;
    case AV_LOCK_DESTROY:
+       if (!*pmutex) return -1;
        pthread_mutex_destroy(*pmutex);
        free(*pmutex);
+       *pmutex = NULL;
        break;
    }
 
    return 0;
+}
+
+static void unregister_lockmgr( void *p )
+{
+	av_lockmgr_register( NULL );
 }
 
 static void avformat_init( )
@@ -90,6 +100,7 @@ static void avformat_init( )
 	{
 		avformat_initialised = 1;
 		av_lockmgr_register( &avformat_lockmgr );
+		mlt_factory_register_for_clean_up( &avformat_lockmgr, unregister_lockmgr );
 		av_register_all( );
 #ifdef AVDEVICE
 		avdevice_register_all();
@@ -120,14 +131,12 @@ static void *create_service( mlt_profile profile, mlt_service_type type, const c
 		return filter_avcolour_space_init( arg );
 	if ( !strcmp( id, "avdeinterlace" ) )
 		return filter_avdeinterlace_init( arg );
-#if LIBAVCODEC_VERSION_INT < ((54<<16)+(26<<8)+0)
+#if defined(FFUDIV) || (LIBAVCODEC_VERSION_INT < ((54<<16)+(26<<8)+0))
 	if ( !strcmp( id, "avresample" ) )
 		return filter_avresample_init( arg );
 #endif
-#ifdef SWSCALE
 	if ( !strcmp( id, "swscale" ) )
 		return filter_swscale_init( profile, arg );
-#endif
 #endif
 	return NULL;
 }
@@ -364,11 +373,9 @@ MLT_REPOSITORY
 	MLT_REGISTER( filter_type, "avcolour_space", create_service );
 	MLT_REGISTER( filter_type, "avcolor_space", create_service );
 	MLT_REGISTER( filter_type, "avdeinterlace", create_service );
-#if LIBAVCODEC_VERSION_INT < ((54<<16)+(26<<8)+0)
+#if defined(FFUDIV) || (LIBAVCODEC_VERSION_INT < ((54<<16)+(26<<8)+0))
 	MLT_REGISTER( filter_type, "avresample", create_service );
 #endif
-#ifdef SWSCALE
 	MLT_REGISTER( filter_type, "swscale", create_service );
-#endif
 #endif
 }

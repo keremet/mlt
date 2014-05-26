@@ -25,13 +25,7 @@
 
 // ffmpeg Header files
 #include <libavformat/avformat.h>
-#ifdef SWSCALE
 #include <libswscale/swscale.h>
-#endif
-
-#if LIBAVUTIL_VERSION_INT < (50<<16)
-#define PIX_FMT_YUYV422 PIX_FMT_YUV422
-#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -65,8 +59,9 @@ static int convert_mlt_to_av_cs( mlt_image_format format )
 		case mlt_image_yuv420p:
 			value = PIX_FMT_YUV420P;
 			break;
-		case mlt_image_none:
-			mlt_log_error( NULL, "[filter avcolor_space] Invalid format\n" );
+		default:
+			mlt_log_error( NULL, "[filter avcolor_space] Invalid format %s\n",
+				mlt_image_format_name( format ) );
 			break;
 	}
 
@@ -75,7 +70,6 @@ static int convert_mlt_to_av_cs( mlt_image_format format )
 
 static void set_luma_transfer( struct SwsContext *context, int colorspace, int use_full_range )
 {
-#if defined(SWSCALE) && (LIBSWSCALE_VERSION_INT >= ((0<<16)+(7<<8)+2))
 	int *coefficients;
 	const int *new_coefficients;
 	int full_range;
@@ -108,7 +102,6 @@ static void set_luma_transfer( struct SwsContext *context, int colorspace, int u
 		sws_setColorspaceDetails( context, new_coefficients, full_range, new_coefficients, full_range,
 			brightness, contrast, saturation );
 	}
-#endif
 }
 
 static void av_convert_image( uint8_t *out, uint8_t *in, int out_fmt, int in_fmt,
@@ -116,7 +109,6 @@ static void av_convert_image( uint8_t *out, uint8_t *in, int out_fmt, int in_fmt
 {
 	AVPicture input;
 	AVPicture output;
-#ifdef SWSCALE
 	int flags = SWS_BICUBIC | SWS_ACCURATE_RND;
 
 	if ( out_fmt == PIX_FMT_YUYV422 )
@@ -129,11 +121,9 @@ static void av_convert_image( uint8_t *out, uint8_t *in, int out_fmt, int in_fmt
 #ifdef USE_SSE
 	flags |= SWS_CPU_CAPS_MMX2;
 #endif
-#endif /* SWSCALE */
 
 	avpicture_fill( &input, in, in_fmt, width, height );
 	avpicture_fill( &output, out, out_fmt, width, height );
-#ifdef SWSCALE
 	struct SwsContext *context = sws_getContext( width, height, in_fmt,
 		width, height, out_fmt, flags, NULL, NULL, NULL);
 	if ( context )
@@ -143,9 +133,6 @@ static void av_convert_image( uint8_t *out, uint8_t *in, int out_fmt, int in_fmt
 			output.data, output.linesize);
 		sws_freeContext( context );
 	}
-#else
-	img_convert( &output, out_fmt, &input, in_fmt, width, height );
-#endif
 }
 
 /** Do it :-).
@@ -303,8 +290,9 @@ static mlt_frame filter_process( mlt_filter filter, mlt_frame frame )
 	if ( mlt_properties_get_int( properties, "colorspace" ) <= 0 )
 		mlt_properties_set_int( properties, "colorspace", mlt_service_profile( MLT_FILTER_SERVICE(filter) )->colorspace );
 
-	frame->convert_image = convert_image;
-    
+	if ( !frame->convert_image )
+		frame->convert_image = convert_image;
+
 //	Not working yet - see comment for get_image() above.
 //	mlt_frame_push_service( frame, mlt_service_profile( MLT_FILTER_SERVICE( filter ) ) );
 //	mlt_frame_push_get_image( frame, get_image );
@@ -317,22 +305,19 @@ static mlt_frame filter_process( mlt_filter filter, mlt_frame frame )
 
 mlt_filter filter_avcolour_space_init( void *arg )
 {
-#ifdef SWSCALE
-#if (LIBSWSCALE_VERSION_INT >= ((0<<16)+(7<<8)+2))
 	// Test to see if swscale accepts the arg as resolution
 	if ( arg )
 	{
-		int width = (int) arg;
-		struct SwsContext *context = sws_getContext( width, width, PIX_FMT_RGB32, 64, 64, PIX_FMT_RGB32, SWS_BILINEAR, NULL, NULL, NULL);
-		if ( context )
-			sws_freeContext( context );
-		else
-			return NULL;
-	}		
-#else
-	return NULL;
-#endif
-#endif
+		int *width = (int*) arg;
+		if ( *width > 0 )
+		{
+			struct SwsContext *context = sws_getContext( *width, *width, PIX_FMT_RGB32, 64, 64, PIX_FMT_RGB32, SWS_BILINEAR, NULL, NULL, NULL);
+			if ( context )
+				sws_freeContext( context );
+			else
+				return NULL;
+		}
+	}
 	mlt_filter filter = mlt_filter_new( );
 	if ( filter != NULL )
 		filter->process = filter_process;

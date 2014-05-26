@@ -1,6 +1,6 @@
 CFLAGS += -I../..
 
-LDFLAGS += -L../../framework -lmlt -lpthread -lm
+LDFLAGS += -L../../framework -lmlt -lpthread -lm -L../../mlt++ -lmlt++
 
 include ../../../config.mak
 include config.mak
@@ -9,7 +9,8 @@ TARGET = ../libmltqimage$(LIBSUF)
 
 OBJS = factory.o producer_qimage.o producer_kdenlivetitle.o
 CPPOBJS = qimage_wrapper.o \
-	kdenlivetitle_wrapper.o
+	kdenlivetitle_wrapper.o \
+	consumer_qglsl.o
 
 ifdef GPL3
 	CPPOBJS += transition_vqm.o
@@ -41,9 +42,9 @@ clean:
 		rm -f $(OBJS) $(TARGET) $(CPPOBJS)
 
 install: all
-	install -m 755 $(TARGET) "$(DESTDIR)$(libdir)/mlt"
-	install -d "$(DESTDIR)$(datadir)/mlt/qimage"
-	install -m 644 *.yml "$(DESTDIR)$(datadir)/mlt/qimage"
+	install -m 755 $(TARGET) "$(DESTDIR)$(moduledir)"
+	install -d "$(DESTDIR)$(mltdatadir)/qimage"
+	install -m 644 *.yml "$(DESTDIR)$(mltdatadir)/qimage"
 
 ifneq ($(wildcard .depend),)
 include .depend

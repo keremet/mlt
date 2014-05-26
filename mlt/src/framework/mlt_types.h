@@ -44,7 +44,9 @@ typedef enum
 	mlt_image_rgb24a,  /**< 8-bit RGB with alpha channel */
 	mlt_image_yuv422,  /**< 8-bit YUV 4:2:2 packed */
 	mlt_image_yuv420p, /**< 8-bit YUV 4:2:0 planar */
-	mlt_image_opengl  /**< (deprecated) suitable for OpenGL texture */
+	mlt_image_opengl,  /**< (deprecated) suitable for OpenGL texture */
+	mlt_image_glsl,    /**< for opengl module internal use only */
+	mlt_image_glsl_texture /**< an OpenGL texture name */
 }
 mlt_image_format;
 
@@ -73,13 +75,22 @@ typedef enum
 }
 mlt_time_format;
 
+/** Interpolation methods for animation keyframes */
+
+typedef enum {
+	mlt_keyframe_discrete = 0, /**< non-interpolated; value changes instantaneously at the key frame */
+	mlt_keyframe_linear,       /**< simple, constant pace from this key frame to the next */
+	mlt_keyframe_smooth        /**< eased pacing from this keyframe to the next using a Catmull-Rom spline */
+}
+mlt_keyframe_type;
+
 /** The relative time qualifiers */
 
 typedef enum
 {
-	mlt_whence_relative_start,  /**< relative to the beginning */
-	mlt_whence_relative_current,/**< relative to the current position */
-	mlt_whence_relative_end     /**< relative to the end */
+	mlt_whence_relative_start = 0, /**< relative to the beginning */
+	mlt_whence_relative_current,   /**< relative to the current position */
+	mlt_whence_relative_end        /**< relative to the end */
 }
 mlt_whence;
 
@@ -87,7 +98,7 @@ mlt_whence;
 
 typedef enum
 {
-	invalid_type,               /**< invalid service */
+	invalid_type = 0,           /**< invalid service */
 	unknown_type,               /**< unknown class */
 	producer_type,              /**< Producer class */
 	tractor_type,               /**< Tractor class */
@@ -103,10 +114,35 @@ mlt_service_type;
 /* I don't want to break anyone's applications without warning. -Zach */
 #undef DOUBLE_MLT_POSITION
 #ifdef DOUBLE_MLT_POSITION
+#define MLT_POSITION_FMT "%f"
+#define MLT_POSITION_MOD(A, B) (A - B * ((int)(A / B)))
 typedef double mlt_position;
 #else
+#define MLT_POSITION_MOD(A, B) A % B
+#define MLT_POSITION_FMT "%d"
 typedef int32_t mlt_position;
 #endif
+
+/** A rectangle type with coordinates, size, and opacity */
+
+typedef struct {
+	double x; /**< X coordinate */
+	double y; /**< Y coordinate */
+	double w; /**< width */
+	double h; /**< height */
+	double o; /**< opacity / mix-level */
+}
+mlt_rect;
+
+/** A tuple of color components */
+
+typedef struct {
+	uint8_t r; /**< red */
+	uint8_t g; /**< green */
+	uint8_t b; /**< blue */
+	uint8_t a; /**< alpha */
+}
+mlt_color;
 
 typedef struct mlt_frame_s *mlt_frame, **mlt_frame_ptr; /**< pointer to Frame object */
 typedef struct mlt_property_s *mlt_property;            /**< pointer to Property object */
@@ -129,6 +165,7 @@ typedef struct mlt_profile_s *mlt_profile;              /**< pointer to Profile 
 typedef struct mlt_repository_s *mlt_repository;        /**< pointer to Repository object */
 typedef struct mlt_cache_s *mlt_cache;                  /**< pointer to Cache object */
 typedef struct mlt_cache_item_s *mlt_cache_item;        /**< pointer to CacheItem object */
+typedef struct mlt_animation_s *mlt_animation;          /**< pointer to Property Animation object */
 
 typedef void ( *mlt_destructor )( void * );             /**< pointer to destructor function */
 typedef char *( *mlt_serialiser )( void *, int length );/**< pointer to serialization function */

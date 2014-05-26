@@ -31,11 +31,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if LIBAVUTIL_VERSION_INT < (50<<16)
-#define PIX_FMT_RGB32 PIX_FMT_RGBA32
-#define PIX_FMT_YUYV422 PIX_FMT_YUV422
-#endif
-
 static inline int convert_mlt_to_av_cs( mlt_image_format format )
 {
 	int value = 0;
@@ -55,7 +50,7 @@ static inline int convert_mlt_to_av_cs( mlt_image_format format )
 		case mlt_image_yuv420p:
 			value = PIX_FMT_YUV420P;
 			break;
-		case mlt_image_none:
+		default:
 			fprintf( stderr, "Invalid format...\n" );
 			break;
 	}
@@ -191,13 +186,15 @@ mlt_filter filter_swscale_init( mlt_profile profile, void *arg )
 	// Test to see if swscale accepts the arg as resolution
 	if ( arg )
 	{
-		int width = (int) arg;
-		struct SwsContext *context = sws_getContext( width, width, PIX_FMT_RGB32, 64, 64, PIX_FMT_RGB32, SWS_BILINEAR, NULL, NULL, NULL);
-		if ( context )
-			sws_freeContext( context );
-		else
-			return NULL;
-	}		
+		int *width = (int*) arg;
+		if ( *width > 0 )
+		{
+			struct SwsContext *context = sws_getContext( *width, *width, PIX_FMT_RGB32, 64, 64, PIX_FMT_RGB32, SWS_BILINEAR, NULL, NULL, NULL);
+			if ( context )
+				sws_freeContext( context );
+			else
+				return NULL;
+	}	}
 
 	// Create a new scaler
 	mlt_filter filter = mlt_factory_filter( profile, "rescale", NULL );

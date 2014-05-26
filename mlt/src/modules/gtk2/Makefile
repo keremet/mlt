@@ -34,6 +34,7 @@ endif
 
 ifdef USE_PANGO
 OBJS += producer_pango.o
+OBJS += producer_count.o
 OBJS += filter_dynamictext.o
 CFLAGS += `pkg-config $(PKGCONFIG_PREFIX) --cflags pangoft2`
 LDFLAGS += `pkg-config $(PKGCONFIG_PREFIX) --libs pangoft2`
@@ -71,9 +72,9 @@ clean:
 		rm -f $(OBJS) $(ASM_OBJS) $(TARGET)
 
 install: all
-	install -m 755 $(TARGET) "$(DESTDIR)$(libdir)/mlt"
-	install -d "$(DESTDIR)$(datadir)/mlt/gtk2"
-	install -m 644 *.yml "$(DESTDIR)$(datadir)/mlt/gtk2"
+	install -m 755 $(TARGET) "$(DESTDIR)$(moduledir)"
+	install -d "$(DESTDIR)$(mltdatadir)/gtk2"
+	install -m 644 *.yml "$(DESTDIR)$(mltdatadir)/gtk2"
 
 ifneq ($(wildcard .depend),)
 include .depend

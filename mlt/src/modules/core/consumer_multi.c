@@ -30,6 +30,7 @@ static int stop( mlt_consumer consumer );
 static int is_stopped( mlt_consumer consumer );
 static void *consumer_thread( void *arg );
 static void consumer_close( mlt_consumer consumer );
+static void purge( mlt_consumer consumer );
 
 static mlt_properties normalisers = NULL;
 
@@ -57,6 +58,7 @@ mlt_consumer consumer_multi_init( mlt_profile profile, mlt_service_type type, co
 		consumer->start = start;
 		consumer->stop = stop;
 		consumer->is_stopped = is_stopped;
+		consumer->purge = purge;
 	}
 
 	return consumer;
@@ -83,17 +85,27 @@ static void create_filter( mlt_profile profile, mlt_service service, char *effec
 	if ( arg != NULL )
 		*arg ++ = '\0';
 
-	// The swscale and avcolor_space filters require resolution as arg to test compatibility
-	if ( strncmp( effect, "swscale", 7 ) == 0 || strncmp( effect, "avcolo", 6 ) == 0 )
-		arg = (char*) mlt_properties_get_int( MLT_SERVICE_PROPERTIES( service ), "meta.media.width" );
-
-	mlt_filter filter = mlt_factory_filter( profile, id, arg );
-	if ( filter != NULL )
+	// We cannot use GLSL-based filters here.
+	if ( strncmp( effect, "movit.", 6 ) && strncmp( effect, "glsl.", 5 ) )
 	{
-		mlt_properties_set_int( MLT_FILTER_PROPERTIES( filter ), "_loader", 1 );
-		mlt_service_attach( service, filter );
-		mlt_filter_close( filter );
-		*created = 1;
+		mlt_filter filter;
+		// The swscale and avcolor_space filters require resolution as arg to test compatibility
+		if ( strncmp( effect, "swscale", 7 ) == 0 || strncmp( effect, "avcolo", 6 ) == 0 )
+		{
+			int width = mlt_properties_get_int( MLT_SERVICE_PROPERTIES( service ), "meta.media.width" );
+			filter = mlt_factory_filter( profile, id, &width );
+		}
+		else
+		{
+			filter = mlt_factory_filter( profile, id, arg );
+		}
+		if ( filter )
+		{
+			mlt_properties_set_int( MLT_FILTER_PROPERTIES( filter ), "_loader", 1 );
+			mlt_service_attach( service, filter );
+			mlt_filter_close( filter );
+			*created = 1;
+		}
 	}
 	free( id );
 }
@@ -131,6 +143,16 @@ static void attach_normalisers( mlt_profile profile, mlt_service service )
 
 	// Attach the audio and video format converters
 	int created = 0;
+	// movit.convert skips setting the frame->convert_image pointer if GLSL cannot be used.
+	mlt_filter filter = mlt_factory_filter( profile, "movit.convert", NULL );
+	if ( filter != NULL )
+	{
+		mlt_properties_set_int( MLT_FILTER_PROPERTIES( filter ), "_loader", 1 );
+		mlt_service_attach( service, filter );
+		mlt_filter_close( filter );
+		created = 1;
+	}
+	// avcolor_space and imageconvert only set frame->convert_image if it has not been set.
 	create_filter( profile, service, "avcolor_space", &created );
 	if ( !created )
 		create_filter( profile, service, "imageconvert", &created );
@@ -485,6 +507,27 @@ static int stop( mlt_consumer consumer )
 static int is_stopped( mlt_consumer consumer )
 {
 	return !mlt_properties_get_int( MLT_CONSUMER_PROPERTIES( consumer ), "running" );
+}
+
+/** Purge each of the child consumers.
+*/
+
+static void purge( mlt_consumer consumer )
+{
+	mlt_properties properties = MLT_CONSUMER_PROPERTIES( consumer );
+	if ( mlt_properties_get_int( properties, "running" ) )
+	{
+		mlt_consumer nested = NULL;
+		char key[30];
+		int index = 0;
+
+		do {
+			snprintf( key, sizeof(key), "%d.consumer", index++ );
+			nested = mlt_properties_get_data( properties, key, NULL );
+			if ( nested )
+				mlt_consumer_purge( nested );
+		} while ( nested );
+	}
 }
 
 /** The main thread - the argument is simply the consumer.

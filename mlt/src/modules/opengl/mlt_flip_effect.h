@@ -1,7 +1,6 @@
 /*
- * io.h -- dv1394d client demo input/output
- * Copyright (C) 2002-2003 Ushodaya Enterprises Limited
- * Author: Charles Yates <charles.yates@pandora.be>
+ * mlt_flip_effect.h
+ * Copyright (C) 2013 Dan Dennedy <dan@dennedy.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,28 +17,24 @@
  * Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  */
 
-#ifndef _DEMO_IO_H_
-#define _DEMO_IO_H_
+#ifndef MLT_FLIP_EFFECT_H
+#define MLT_FLIP_EFFECT_H
 
-#ifdef __cplusplus
-extern "C"
+namespace Mlt
 {
-#endif
 
-extern char *chomp( char * );
-extern char *trim( char * );
-extern char *strip_quotes( char * );
-extern char *get_string( char *, int, char * );
-extern int *get_int( int *, int );
-extern void term_init( );
-extern int term_read( );
-extern void term_exit( );
-extern char get_keypress( );
-extern void wait_for_any_key( char * );
-extern void beep( );
+class VerticalFlip : public Effect {
+public:
+	VerticalFlip() {}
+	virtual std::string effect_type_id() const { return "MltVerticalFlip"; }
+	std::string output_fragment_shader() {
+		return "vec4 FUNCNAME(vec2 tc) { tc.y = 1.0 - tc.y; return INPUT(tc); }\n";
+	}
+	virtual bool needs_linear_light() const { return false; }
+	virtual bool needs_srgb_primaries() const { return false; }
+	AlphaHandling alpha_handling() const { return DONT_CARE_ALPHA_TYPE; }
+};
 
-#ifdef __cplusplus
-}
-#endif
+} // namespace Mlt
 
-#endif
+#endif // MLT_FLIP_EFFECT_H

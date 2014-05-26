@@ -38,7 +38,7 @@ static int framebuffer_get_image( mlt_frame frame, uint8_t **image, mlt_image_fo
 
 	// Get the filter object and properties
 	mlt_producer producer = mlt_frame_pop_service( frame );
-	int index = ( int )mlt_frame_pop_service( frame );
+	int index = mlt_frame_pop_service_int( frame );
 	mlt_properties properties = MLT_PRODUCER_PROPERTIES( producer );
 
 	mlt_service_lock( MLT_PRODUCER_SERVICE( producer ) );
@@ -74,7 +74,7 @@ static int framebuffer_get_image( mlt_frame frame, uint8_t **image, mlt_image_fo
 		{
 			// Strobe effect wanted, calculate frame position
 			need_first = floor( actual_position );
-			need_first -= need_first % strobe;
+			need_first -= MLT_POSITION_MOD(need_first, strobe);
 		}
 		if ( freeze )
 		{
@@ -157,7 +157,8 @@ static int framebuffer_get_image( mlt_frame frame, uint8_t **image, mlt_image_fo
 		int error = mlt_frame_get_image( first_frame, &first_image, format, width, height, writable );
 
 		if ( error != 0 ) {
-			mlt_log_error( MLT_PRODUCER_SERVICE( producer ), "first_image == NULL get image died\n" );
+			mlt_log_warning( MLT_PRODUCER_SERVICE( producer ), "first_image == NULL get image died\n" );
+			mlt_properties_set_data( properties, "first_frame", NULL, 0, NULL, NULL );
 			mlt_service_unlock( MLT_PRODUCER_SERVICE( producer ) );
 			return error;
 		}
@@ -205,7 +206,7 @@ static int producer_get_frame( mlt_producer producer, mlt_frame_ptr frame, int i
 		*frame = mlt_frame_init( MLT_PRODUCER_SERVICE( producer ) );
 
 		// Stack the producer and producer's get image
-		mlt_frame_push_service( *frame, (void*) index );
+		mlt_frame_push_service_int( *frame, index );
 		mlt_frame_push_service( *frame, producer );
 		mlt_frame_push_service( *frame, framebuffer_get_image );
 
