@@ -1,6 +1,6 @@
 /*
  * producer_avformat.c -- avformat producer
- * Copyright (C) 2003-2012 Ushodaya Enterprises Limited
+ * Copyright (C) 2003-2014 Ushodaya Enterprises Limited
  * Author: Charles Yates <charles.yates@pandora.be>
  * Author: Dan Dennedy <dan@dennedy.org>
  * Much code borrowed from ffmpeg.c: Copyright (c) 2000-2003 Fabrice Bellard
@@ -102,7 +102,7 @@ struct producer_avformat_s
 	unsigned int invalid_pts_counter;
 	unsigned int invalid_dts_counter;
 	mlt_cache image_cache;
-	int colorspace;
+	int yuv_colorspace, color_primaries;
 	int full_luma;
 	pthread_mutex_t video_mutex;
 	pthread_mutex_t audio_mutex;
@@ -112,6 +112,8 @@ struct producer_avformat_s
 	pthread_mutex_t open_mutex;
 	int is_mutex_init;
 	AVRational video_time_base;
+	mlt_frame last_good_frame; // for video error concealment
+	int last_good_position;    // for video error concealment
 #ifdef VDPAU
 	struct
 	{
@@ -186,7 +188,8 @@ mlt_producer producer_avformat_init( mlt_profile profile, const char *service, c
 			if ( strcmp( service, "avformat-novalidate" ) )
 			{
 				// Open the file
-				if ( producer_open( self, profile, file, 1 ) != 0 )
+				mlt_properties_from_utf8( properties, "resource", "_resource" );
+				if ( producer_open( self, profile, mlt_properties_get( properties, "_resource" ), 1 ) != 0 )
 				{
 					// Clean up
 					mlt_producer_close( producer );
@@ -566,6 +569,24 @@ static char* parse_url( mlt_profile profile, const char* URL, AVInputFormat **fo
 	return result;
 }
 
+static mlt_image_format pick_pix_fmt( enum PixelFormat pix_fmt )
+{
+	switch ( pix_fmt )
+	{
+	case PIX_FMT_ARGB:
+	case PIX_FMT_RGBA:
+	case PIX_FMT_ABGR:
+	case PIX_FMT_BGRA:
+		return PIX_FMT_RGBA;
+#if defined(FFUDIV) && (LIBSWSCALE_VERSION_INT >= ((2<<16)+(5<<8)+102))
+	case AV_PIX_FMT_BAYER_RGGB16LE:
+		return PIX_FMT_RGB24;
+#endif
+	default:
+		return PIX_FMT_YUV422P;
+	}
+}
+
 static int get_basic_info( producer_avformat self, mlt_profile profile, const char *filename )
 {
 	int error = 0;
@@ -575,10 +596,6 @@ static int get_basic_info( producer_avformat self, mlt_profile profile, const ch
 
 	AVFormatContext *format = self->video_format;
 
-	// We will treat everything with the producer fps.
-	// TODO: make this more flexible.
-	double fps = mlt_profile_fps( profile );
-
 	// Get the duration
 	if ( !mlt_properties_get_int( properties, "_length_computed" ) )
 	{
@@ -587,7 +604,9 @@ static int get_basic_info( producer_avformat self, mlt_profile profile, const ch
 		if ( format->duration != AV_NOPTS_VALUE )
 		{
 			// This isn't going to be accurate for all formats
-			mlt_position frames = ( mlt_position )( ( ( double )format->duration / ( double )AV_TIME_BASE ) * fps );
+			// We will treat everything with the producer fps.
+			mlt_position frames = ( mlt_position )( int )( format->duration *
+				profile->frame_rate_num / profile->frame_rate_den / AV_TIME_BASE);
 			mlt_properties_set_position( properties, "out", frames - 1 );
 			mlt_properties_set_position( properties, "length", frames );
 			mlt_properties_set_int( properties, "_length_computed", 1 );
@@ -642,9 +661,8 @@ static int get_basic_info( producer_avformat self, mlt_profile profile, const ch
 		get_aspect_ratio( properties, format->streams[ self->video_index ], codec_context );
 
 		// Verify that we can convert this to YUV 4:2:2
-		// TODO: we can now also return RGB and RGBA and quite possibly more in the future.
 		struct SwsContext *context = sws_getContext( codec_context->width, codec_context->height, codec_context->pix_fmt,
-			codec_context->width, codec_context->height, PIX_FMT_YUYV422, SWS_BILINEAR, NULL, NULL, NULL);
+			codec_context->width, codec_context->height, pick_pix_fmt( codec_context->pix_fmt ), SWS_BILINEAR, NULL, NULL, NULL);
 		if ( context )
 			sws_freeContext( context );
 		else
@@ -662,17 +680,18 @@ static int producer_open( producer_avformat self, mlt_profile profile, const cha
 	int error = 0;
 	mlt_properties properties = MLT_PRODUCER_PROPERTIES( self->parent );
 
+	if ( !self->is_mutex_init )
+	{
+		pthread_mutex_init( &self->audio_mutex, NULL );
+		pthread_mutex_init( &self->video_mutex, NULL );
+		pthread_mutex_init( &self->packets_mutex, NULL );
+		pthread_mutex_init( &self->open_mutex, NULL );
+		self->is_mutex_init = 1;
+	}
+
 	// Lock the service
 	if ( take_lock )
 	{
-		if ( !self->is_mutex_init )
-		{
-			pthread_mutex_init( &self->audio_mutex, NULL );
-			pthread_mutex_init( &self->video_mutex, NULL );
-			pthread_mutex_init( &self->packets_mutex, NULL );
-			pthread_mutex_init( &self->open_mutex, NULL );
-			self->is_mutex_init = 1;
-		}
 		pthread_mutex_lock( &self->audio_mutex );
 		pthread_mutex_lock( &self->video_mutex );
 	}
@@ -1027,43 +1046,53 @@ static void get_audio_streams_info( producer_avformat self )
 		self->audio_streams, self->audio_max_stream, self->total_channels, self->max_channel );
 }
 
-static void set_luma_transfer( struct SwsContext *context, int colorspace, int use_full_range )
+static int set_luma_transfer( struct SwsContext *context, int src_colorspace, int dst_colorspace, int full_range )
 {
-	int *coefficients;
-	const int *new_coefficients;
-	int full_range;
-	int brightness, contrast, saturation;
+	const int *src_coefficients = sws_getCoefficients( SWS_CS_DEFAULT );
+	const int *dst_coefficients = sws_getCoefficients( SWS_CS_DEFAULT );
+	int brightness = 0;
+	int contrast = 1 << 16;
+	int saturation = 1  << 16;
 
-	if ( sws_getColorspaceDetails( context, &coefficients, &full_range, &coefficients, &full_range,
-			&brightness, &contrast, &saturation ) != -1 )
+	switch ( src_colorspace )
 	{
-		// Don't change these from defaults unless explicitly told to.
-		if ( use_full_range >= 0 )
-			full_range = use_full_range;
-		switch ( colorspace )
-		{
-		case 170:
-		case 470:
-		case 601:
-		case 624:
-			new_coefficients = sws_getCoefficients( SWS_CS_ITU601 );
-			break;
-		case 240:
-			new_coefficients = sws_getCoefficients( SWS_CS_SMPTE240M );
-			break;
-		case 709:
-			new_coefficients = sws_getCoefficients( SWS_CS_ITU709 );
-			break;
-		default:
-			new_coefficients = coefficients;
-			break;
-		}
-		sws_setColorspaceDetails( context, new_coefficients, full_range, new_coefficients, full_range,
-			brightness, contrast, saturation );
+	case 170:
+	case 470:
+	case 601:
+	case 624:
+		src_coefficients = sws_getCoefficients( SWS_CS_ITU601 );
+		break;
+	case 240:
+		src_coefficients = sws_getCoefficients( SWS_CS_SMPTE240M );
+		break;
+	case 709:
+		src_coefficients = sws_getCoefficients( SWS_CS_ITU709 );
+		break;
+	default:
+		break;
 	}
+	switch ( dst_colorspace )
+	{
+	case 170:
+	case 470:
+	case 601:
+	case 624:
+		src_coefficients = sws_getCoefficients( SWS_CS_ITU601 );
+		break;
+	case 240:
+		src_coefficients = sws_getCoefficients( SWS_CS_SMPTE240M );
+		break;
+	case 709:
+		src_coefficients = sws_getCoefficients( SWS_CS_ITU709 );
+		break;
+	default:
+		break;
+	}
+	return sws_setColorspaceDetails( context, src_coefficients, full_range, dst_coefficients, full_range,
+		brightness, contrast, saturation );
 }
 
-static mlt_image_format pick_pix_format( enum PixelFormat pix_fmt )
+static mlt_image_format pick_image_format( enum PixelFormat pix_fmt )
 {
 	switch ( pix_fmt )
 	{
@@ -1083,7 +1112,10 @@ static mlt_image_format pick_pix_format( enum PixelFormat pix_fmt )
 	case PIX_FMT_MONOBLACK:
 	case PIX_FMT_RGB8:
 	case PIX_FMT_BGR8:
+#if defined(FFUDIV) && (LIBSWSCALE_VERSION_INT >= ((2<<16)+(5<<8)+102))
+	case AV_PIX_FMT_BAYER_RGGB16LE:
 		return mlt_image_rgb24;
+#endif
 	default:
 		return mlt_image_yuv422;
 	}
@@ -1118,10 +1150,13 @@ static mlt_audio_format pick_audio_format( int sample_fmt )
 	}
 }
 
-static void convert_image( producer_avformat self, AVFrame *frame, uint8_t *buffer, int pix_fmt,
+// returns resulting YUV colorspace
+static int convert_image( producer_avformat self, AVFrame *frame, uint8_t *buffer, int pix_fmt,
 	mlt_image_format *format, int width, int height, uint8_t **alpha )
 {
 	int flags = SWS_BICUBIC | SWS_ACCURATE_RND;
+	mlt_profile profile = mlt_service_profile( MLT_PRODUCER_SERVICE( self->parent ) );
+	int result = self->yuv_colorspace;
 
 #ifdef USE_MMX
 	flags |= SWS_CPU_CAPS_MMX;
@@ -1129,6 +1164,10 @@ static void convert_image( producer_avformat self, AVFrame *frame, uint8_t *buff
 #ifdef USE_SSE
 	flags |= SWS_CPU_CAPS_MMX2;
 #endif
+
+	mlt_log_debug( MLT_PRODUCER_SERVICE(self->parent), "%s @ %dx%d space %d->%d\n",
+		mlt_image_format_name( *format ),
+		width, height, self->yuv_colorspace, profile->colorspace );
 
 	// extract alpha from planar formats
 	if ( ( pix_fmt == PIX_FMT_YUVA420P
@@ -1152,7 +1191,8 @@ static void convert_image( producer_avformat self, AVFrame *frame, uint8_t *buff
 	if ( *format == mlt_image_yuv420p )
 	{
 		struct SwsContext *context = sws_getContext( width, height, pix_fmt,
-			width, height, PIX_FMT_YUV420P, flags, NULL, NULL, NULL);
+			width, height, self->full_luma ? PIX_FMT_YUVJ420P : PIX_FMT_YUV420P,
+			flags, NULL, NULL, NULL);
 		AVPicture output;
 		output.data[0] = buffer;
 		output.data[1] = buffer + width * height;
@@ -1160,7 +1200,8 @@ static void convert_image( producer_avformat self, AVFrame *frame, uint8_t *buff
 		output.linesize[0] = width;
 		output.linesize[1] = width >> 1;
 		output.linesize[2] = width >> 1;
-		set_luma_transfer( context, self->colorspace, -1 );
+		if ( !set_luma_transfer( context, self->yuv_colorspace, profile->colorspace, self->full_luma ) )
+			result = profile->colorspace;
 		sws_scale( context, (const uint8_t* const*) frame->data, frame->linesize, 0, height,
 			output.data, output.linesize);
 		sws_freeContext( context );
@@ -1171,7 +1212,8 @@ static void convert_image( producer_avformat self, AVFrame *frame, uint8_t *buff
 			width, height, PIX_FMT_RGB24, flags | SWS_FULL_CHR_H_INT, NULL, NULL, NULL);
 		AVPicture output;
 		avpicture_fill( &output, buffer, PIX_FMT_RGB24, width, height );
-		set_luma_transfer( context, self->colorspace, self->full_luma );
+		// libswscale wants the RGB colorspace to be SWS_CS_DEFAULT, which is = SWS_CS_ITU601.
+		set_luma_transfer( context, self->yuv_colorspace, 601, self->full_luma );
 		sws_scale( context, (const uint8_t* const*) frame->data, frame->linesize, 0, height,
 			output.data, output.linesize);
 		sws_freeContext( context );
@@ -1182,7 +1224,8 @@ static void convert_image( producer_avformat self, AVFrame *frame, uint8_t *buff
 			width, height, PIX_FMT_RGBA, flags | SWS_FULL_CHR_H_INT, NULL, NULL, NULL);
 		AVPicture output;
 		avpicture_fill( &output, buffer, PIX_FMT_RGBA, width, height );
-		set_luma_transfer( context, self->colorspace, self->full_luma );
+		// libswscale wants the RGB colorspace to be SWS_CS_DEFAULT, which is = SWS_CS_ITU601.
+		set_luma_transfer( context, self->yuv_colorspace, 601, self->full_luma );
 		sws_scale( context, (const uint8_t* const*) frame->data, frame->linesize, 0, height,
 			output.data, output.linesize);
 		sws_freeContext( context );
@@ -1193,11 +1236,13 @@ static void convert_image( producer_avformat self, AVFrame *frame, uint8_t *buff
 			width, height, PIX_FMT_YUYV422, flags | SWS_FULL_CHR_H_INP, NULL, NULL, NULL);
 		AVPicture output;
 		avpicture_fill( &output, buffer, PIX_FMT_YUYV422, width, height );
-		set_luma_transfer( context, self->colorspace, -1 );
+		if ( !set_luma_transfer( context, self->yuv_colorspace, profile->colorspace, self->full_luma ) )
+			result = profile->colorspace;
 		sws_scale( context, (const uint8_t* const*) frame->data, frame->linesize, 0, height,
 			output.data, output.linesize);
 		sws_freeContext( context );
 	}
+	return result;
 }
 
 /** Allocate the image buffer and set it on the frame.
@@ -1209,9 +1254,6 @@ static int allocate_buffer( mlt_frame frame, AVCodecContext *codec_context, uint
 
 	if ( codec_context->width == 0 || codec_context->height == 0 )
 		return size;
-
-	if ( *format == mlt_image_glsl )
-		*format = pick_pix_format( codec_context->pix_fmt );
 
 	*width = codec_context->width;
 	*height = codec_context->height;
@@ -1343,12 +1385,20 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 	context = self->video_format;
 	stream = context->streams[ self->video_index ];
 	codec_context = stream->codec;
-	if ( *format == mlt_image_none ||
+	if ( *format == mlt_image_none || *format == mlt_image_glsl ||
 			codec_context->pix_fmt == PIX_FMT_ARGB ||
 			codec_context->pix_fmt == PIX_FMT_RGBA ||
 			codec_context->pix_fmt == PIX_FMT_ABGR ||
 			codec_context->pix_fmt == PIX_FMT_BGRA )
-		*format = pick_pix_format( codec_context->pix_fmt );
+		*format = pick_image_format( codec_context->pix_fmt );
+#if defined(FFUDIV) && (LIBSWSCALE_VERSION_INT >= ((2<<16)+(5<<8)+102))
+	else if ( codec_context->pix_fmt == AV_PIX_FMT_BAYER_RGGB16LE ) {
+		if ( *format == mlt_image_yuv422 )
+			*format = mlt_image_yuv420p;
+		else if ( *format == mlt_image_rgb24a )
+			*format = mlt_image_rgb24;
+	}
+#endif
 
 	// Duplicate the last image if necessary
 	if ( self->video_frame && self->video_frame->linesize[0]
@@ -1357,6 +1407,7 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 		// Duplicate it
 		if ( ( image_size = allocate_buffer( frame, codec_context, buffer, format, width, height ) ) )
 		{
+			int yuv_colorspace;
 			// Workaround 1088 encodings missing cropping info.
 			if ( *height == 1088 && mlt_profile_dar( mlt_service_profile( MLT_PRODUCER_SERVICE( producer ) ) ) == 16.0/9.0 )
 				*height = 1080;
@@ -1370,13 +1421,14 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 				picture.linesize[0] = codec_context->width;
 				picture.linesize[1] = codec_context->width / 2;
 				picture.linesize[2] = codec_context->width / 2;
-				convert_image( self, (AVFrame*) &picture, *buffer,
+				yuv_colorspace = convert_image( self, (AVFrame*) &picture, *buffer,
 					PIX_FMT_YUV420P, format, *width, *height, &alpha );
 			}
 			else
 #endif
-			convert_image( self, self->video_frame, *buffer, codec_context->pix_fmt,
+			yuv_colorspace = convert_image( self, self->video_frame, *buffer, codec_context->pix_fmt,
 				format, *width, *height, &alpha );
+			mlt_properties_set_int( frame_properties, "colorspace", yuv_colorspace );
 			got_picture = 1;
 		}
 	}
@@ -1431,12 +1483,15 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 						mlt_log_fatal( MLT_PRODUCER_SERVICE(producer), "Exiting with error due to disconnected source.\n" );
 						exit( EXIT_FAILURE );
 					}
+					// Send null packets to drain decoder.
+					self->pkt.size = 0;
+					self->pkt.data = NULL;
 				}
 			}
 			pthread_mutex_unlock( &self->packets_mutex );
 
 			// We only deal with video from the selected video_index
-			if ( ret >= 0 && self->pkt.stream_index == self->video_index && self->pkt.size > 0 )
+			if ( self->pkt.stream_index == self->video_index )
 			{
 				int64_t pts = best_pts( self, self->pkt.pts, self->pkt.dts );
 				if ( pts != AV_NOPTS_VALUE )
@@ -1464,7 +1519,7 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 				self->last_position = int_position;
 
 				// Decode the image
-				if ( must_decode || int_position >= req_position )
+				if ( must_decode || int_position >= req_position || !self->pkt.data )
 				{
 #ifdef VDPAU
 					if ( self->vdpau )
@@ -1484,13 +1539,16 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 #else
 					ret = avcodec_decode_video( codec_context, self->video_frame, &got_picture, self->pkt.data, self->pkt.size );
 #endif
+					mlt_log_debug( MLT_PRODUCER_SERVICE(producer), "decoded packet with size %d => %d\n", self->pkt.size, ret );
 					// Note: decode may fail at the beginning of MPEGfile (B-frames referencing before first I-frame), so allow a few errors.
 					if ( ret < 0 )
 					{
-						if ( ++decode_errors <= 10 )
+						if ( ++decode_errors <= 10 ) {
 							ret = 0;
-						else
+						} else {
 							mlt_log_warning( MLT_PRODUCER_SERVICE(producer), "video decoding error %d\n", ret );
+							self->last_good_position = POSITION_INVALID;
+						}
 					}
 					else
 					{
@@ -1519,7 +1577,11 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 					else if ( int_position >= req_position )
 						codec_context->skip_loop_filter = AVDISCARD_NONE;
 				}
-				mlt_log_debug( MLT_PRODUCER_SERVICE(producer), " got_pic %d key %d\n", got_picture, self->pkt.flags & PKT_FLAG_KEY );
+				else if ( !self->pkt.data ) // draining decoder with null packets
+				{
+					ret = -1;
+				}
+				mlt_log_debug( MLT_PRODUCER_SERVICE(producer), " got_pic %d key %d ret %d pkt_pos %d\n", got_picture, self->pkt.flags & PKT_FLAG_KEY, ret, int_position );
 			}
 
 			// Now handle the picture if we have one
@@ -1527,6 +1589,7 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 			{
 				if ( ( image_size = allocate_buffer( frame, codec_context, buffer, format, width, height ) ) )
 				{
+					int yuv_colorspace;
 					// Workaround 1088 encodings missing cropping info.
 					if ( *height == 1088 && mlt_profile_dar( mlt_service_profile( MLT_PRODUCER_SERVICE( producer ) ) ) == 16.0/9.0 )
 						*height = 1080;
@@ -1552,8 +1615,9 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 							VdpStatus status = vdp_surface_get_bits( render->surface, dest_format, planes, pitches );
 							if ( status == VDP_STATUS_OK )
 							{
-								convert_image( self, self->video_frame, *buffer, PIX_FMT_YUV420P,
+								yuv_colorspace = convert_image( self, self->video_frame, *buffer, PIX_FMT_YUV420P,
 									format, *width, *height, &alpha );
+								mlt_properties_set_int( frame_properties, "colorspace", yuv_colorspace );
 							}
 							else
 							{
@@ -1565,12 +1629,14 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 						{
 							mlt_log_error( MLT_PRODUCER_SERVICE(producer), "VDPAU error in VdpDecoderRender\n" );
 							image_size = got_picture = 0;
+							self->last_good_position = POSITION_INVALID;
 						}
 					}
 					else
 #endif
-					convert_image( self, self->video_frame, *buffer, codec_context->pix_fmt,
+					yuv_colorspace = convert_image( self, self->video_frame, *buffer, codec_context->pix_fmt,
 						format, *width, *height, &alpha );
+					mlt_properties_set_int( frame_properties, "colorspace", yuv_colorspace );
 					self->top_field_first |= self->video_frame->top_field_first;
 					self->current_position = int_position;
 				}
@@ -1591,42 +1657,45 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 	if ( alpha )
 		mlt_frame_set_alpha( frame, alpha, (*width) * (*height), mlt_pool_release );
 
-	if ( image_size > 0 && self->image_cache )
+	if ( image_size > 0 )
 	{
 		mlt_properties_set_int( frame_properties, "format", *format );
-		mlt_cache_put_frame( self->image_cache, frame );
-	}
-
-	// Try to duplicate last image if there was a decoding failure
-	// TODO: with multithread decoding a partial frame decoding resulting
-	// in failure also resets av_frame making test below fail.
-	if ( !image_size && self->video_frame && self->video_frame->linesize[0] )
-	{
-		// Duplicate it
-		if ( ( image_size = allocate_buffer( frame, codec_context, buffer, format, width, height ) ) )
-		{
-			// Workaround 1088 encodings missing cropping info.
-			if ( *height == 1088 && mlt_profile_dar( mlt_service_profile( MLT_PRODUCER_SERVICE( producer ) ) ) == 16.0/9.0 )
-				*height = 1080;
-#ifdef VDPAU
-			if ( self->vdpau && self->vdpau->buffer )
-			{
-				AVPicture picture;
-				picture.data[0] = self->vdpau->buffer;
-				picture.data[2] = self->vdpau->buffer + codec_context->width * codec_context->height;
-				picture.data[1] = self->vdpau->buffer + codec_context->width * codec_context->height * 5 / 4;
-				picture.linesize[0] = codec_context->width;
-				picture.linesize[1] = codec_context->width / 2;
-				picture.linesize[2] = codec_context->width / 2;
-				convert_image( self, (AVFrame*) &picture, *buffer,
-					PIX_FMT_YUV420P, format, *width, *height, &alpha );
-			}
-			else
-#endif
-			convert_image( self, self->video_frame, *buffer, codec_context->pix_fmt,
-				format, *width, *height, &alpha );
-			got_picture = 1;
+		// Cache the image for rapid repeated access.
+		if ( self->image_cache ) {
+			mlt_cache_put_frame( self->image_cache, frame );
 		}
+		// Clone frame for error concealment.
+		if ( self->current_position >= self->last_good_position ) {
+			self->last_good_position = self->current_position;
+			if ( self->last_good_frame )
+				mlt_frame_close( self->last_good_frame );
+			self->last_good_frame = mlt_frame_clone( frame, 1 );
+		}
+	}
+	else if ( self->last_good_frame )
+	{
+		// Use last known good frame if there was a decoding failure.
+		mlt_frame original = mlt_frame_clone( self->last_good_frame, 1 );
+		mlt_properties orig_props = MLT_FRAME_PROPERTIES( original );
+		int size = 0;
+
+		*buffer = mlt_properties_get_data( orig_props, "alpha", &size );
+		if (*buffer)
+			mlt_frame_set_alpha( frame, *buffer, size, NULL );
+		*buffer = mlt_properties_get_data( orig_props, "image", &size );
+		mlt_frame_set_image( frame, *buffer, size, NULL );
+		mlt_properties_set_data( frame_properties, "avformat.conceal_error", original, 0, (mlt_destructor) mlt_frame_close, NULL );
+		*format = mlt_properties_get_int( orig_props, "format" );
+
+		// Set the resolution
+		*width = codec_context->width;
+		*height = codec_context->height;
+
+		// Workaround 1088 encodings missing cropping info.
+		if ( *height == 1088 && mlt_profile_dar( mlt_service_profile( MLT_PRODUCER_SERVICE( producer ) ) ) == 16.0/9.0 )
+			*height = 1080;
+
+		got_picture = 1;
 	}
 
 	// Regardless of speed, we expect to get the next frame (cos we ain't too bright)
@@ -1776,7 +1845,7 @@ static int video_codec_init( producer_avformat self, int index, mlt_properties p
 #endif
 		double fps = av_q2d( frame_rate );
 
-#if LIBAVFORMAT_VERSION_MAJOR < 55
+#if LIBAVFORMAT_VERSION_MAJOR < 55 || defined(FFUDIV)
 		// Verify and sanitize the muxer frame rate.
 		if ( isnan( fps ) || isinf( fps ) || fps == 0 )
 		{
@@ -1784,7 +1853,7 @@ static int video_codec_init( producer_avformat self, int index, mlt_properties p
 			fps = av_q2d( frame_rate );
 		}
 #endif
-#if LIBAVFORMAT_VERSION_INT >= ((52<<16)+(42<<8)+0) && LIBAVFORMAT_VERSION_MAJOR < 55
+#if LIBAVFORMAT_VERSION_INT >= ((52<<16)+(42<<8)+0) && ( LIBAVFORMAT_VERSION_MAJOR < 55 || defined(FFUDIV) )
 		// With my samples when r_frame_rate != 1000 but avg_frame_rate is valid,
 		// avg_frame_rate gives some approximate value that does not well match the media.
 		// Also, on my sample where r_frame_rate = 1000, using avg_frame_rate directly
@@ -1823,33 +1892,49 @@ static int video_codec_init( producer_avformat self, int index, mlt_properties p
 		mlt_properties_set_int( properties, "meta.media.frame_rate_den", frame_rate.den );
 
 		// Set the YUV colorspace from override or detect
-		self->colorspace = mlt_properties_get_int( properties, "force_colorspace" );
+		self->yuv_colorspace = mlt_properties_get_int( properties, "force_colorspace" );
 #if LIBAVCODEC_VERSION_INT > ((52<<16)+(28<<8)+0)
-		if ( ! self->colorspace )
+		if ( ! self->yuv_colorspace )
 		{
 			switch ( self->video_codec->colorspace )
 			{
 			case AVCOL_SPC_SMPTE240M:
-				self->colorspace = 240;
+				self->yuv_colorspace = 240;
 				break;
 			case AVCOL_SPC_BT470BG:
 			case AVCOL_SPC_SMPTE170M:
-				self->colorspace = 601;
+				self->yuv_colorspace = 601;
 				break;
 			case AVCOL_SPC_BT709:
-				self->colorspace = 709;
+				self->yuv_colorspace = 709;
 				break;
 			default:
 				// This is a heuristic Charles Poynton suggests in "Digital Video and HDTV"
-				self->colorspace = self->video_codec->width * self->video_codec->height > 750000 ? 709 : 601;
+				self->yuv_colorspace = self->video_codec->width * self->video_codec->height > 750000 ? 709 : 601;
 				break;
 			}
 		}
 #endif
 		// Let apps get chosen colorspace
-		mlt_properties_set_int( properties, "meta.media.colorspace", self->colorspace );
+		mlt_properties_set_int( properties, "meta.media.colorspace", self->yuv_colorspace );
 
-		self->full_luma = -1;
+		switch ( self->video_codec->color_primaries )
+		{
+		case AVCOL_PRI_BT470BG:
+			self->color_primaries = 601625;
+			break;
+		case AVCOL_PRI_SMPTE170M:
+		case AVCOL_PRI_SMPTE240M:
+			self->color_primaries = 601525;
+			break;
+		case AVCOL_PRI_BT709:
+		case AVCOL_PRI_UNSPECIFIED:
+		default:
+			self->color_primaries = 709;
+			break;
+		}
+
+		self->full_luma = 0;
 #if LIBAVCODEC_VERSION_INT >= ((52<<16)+(72<<8)+2)
 		mlt_log_debug( MLT_PRODUCER_SERVICE(self->parent), "color_range %d\n", codec_context->color_range );
 		if ( codec_context->color_range == AVCOL_RANGE_JPEG )
@@ -1885,8 +1970,9 @@ static void producer_set_up_video( producer_avformat self, mlt_frame frame )
 	{
 		unlock_needed = 1;
 		pthread_mutex_lock( &self->video_mutex );
+		mlt_properties_from_utf8( properties, "resource", "_resource" );
 		producer_open( self, mlt_service_profile( MLT_PRODUCER_SERVICE(producer) ),
-			mlt_properties_get( properties, "resource" ), 0 );
+			mlt_properties_get( properties, "_resource" ), 0 );
 		context = self->video_format;
 	}
 
@@ -1907,7 +1993,7 @@ static void producer_set_up_video( producer_avformat self, mlt_frame frame )
 	}
 
 	// Update the video properties if the index changed
-	if ( index != self->video_index )
+	if ( context && index > -1 && index != self->video_index )
 	{
 		// Reset the video properties if the index changed
 		self->video_index = index;
@@ -1935,7 +2021,9 @@ static void producer_set_up_video( producer_avformat self, mlt_frame frame )
 		mlt_properties_set_int( properties, "meta.media.width", self->video_codec->width );
 		mlt_properties_set_int( properties, "meta.media.height", self->video_codec->height );
 		mlt_properties_set_double( frame_properties, "aspect_ratio", aspect_ratio );
-		mlt_properties_set_int( frame_properties, "colorspace", self->colorspace );
+		mlt_properties_set_int( frame_properties, "colorspace", self->yuv_colorspace );
+		mlt_properties_set_int( frame_properties, "color_primaries", self->color_primaries );
+		mlt_properties_set_int( frame_properties, "full_luma", self->full_luma );
 
 		// Workaround 1088 encodings missing cropping info.
 		if ( self->video_codec->height == 1088 && mlt_profile_dar( mlt_service_profile( MLT_PRODUCER_SERVICE( producer ) ) ) == 16.0/9.0 )
@@ -2010,6 +2098,20 @@ static int sample_bytes( AVCodecContext *context )
 #endif
 }
 
+#if LIBAVCODEC_VERSION_MAJOR >= 55
+static void planar_to_interleaved( uint8_t *dest, AVFrame *src, int samples, int channels, int bytes_per_sample )
+{
+	int s, c;
+	for ( s = 0; s < samples; s++ )
+	{
+		for ( c = 0; c < channels; c++ )
+		{
+			memcpy( dest, &src->data[c][s * bytes_per_sample], bytes_per_sample );
+			dest += bytes_per_sample;
+		}
+	}
+}
+#else
 static void planar_to_interleaved( uint8_t *dest, uint8_t *src, int samples, int channels, int bytes_per_sample )
 {
 	int s, c;
@@ -2022,19 +2124,7 @@ static void planar_to_interleaved( uint8_t *dest, uint8_t *src, int samples, int
 		}
 	}
 }
-
-static void planar_to_interleaved2( uint8_t *dest, AVFrame *src, int samples, int channels, int bytes_per_sample )
-{
-	int s, c;
-	for ( s = 0; s < samples; s++ )
-	{
-		for ( c = 0; c < channels; c++ )
-		{
-			memcpy( dest, &src->data[c][s * bytes_per_sample], bytes_per_sample );
-			dest += bytes_per_sample;
-		}
-	}
-}
+#endif
 
 static int decode_audio( producer_avformat self, int *ignore, AVPacket pkt, int channels, int samples, double timecode, double fps )
 {
@@ -2052,11 +2142,9 @@ static int decode_audio( producer_avformat self, int *ignore, AVPacket pkt, int 
 	uint8_t *decode_buffer = self->decode_buffer[ index ];
 
 	int audio_used = self->audio_used[ index ];
-	uint8_t *ptr = pkt.data;
-	int len = pkt.size;
 	int ret = 0;
 
-	while ( ptr && ret >= 0 && len > 0 )
+	while ( pkt.data && pkt.size > 0 )
 	{
 		int sizeof_sample = sample_bytes( codec_context );
 		int data_size = self->audio_buffer_size[ index ];
@@ -2082,8 +2170,9 @@ static int decode_audio( producer_avformat self, int *ignore, AVPacket pkt, int 
 			break;
 		}
 
-		pkt.size = len -= ret;
-		pkt.data = ptr += ret;
+		// Consume (sometimes partial) data in the packet.
+		pkt.size -= ret;
+		pkt.data += ret;
 
 		// If decoded successfully
 		if ( data_size > 0 )
@@ -2106,7 +2195,7 @@ static int decode_audio( producer_avformat self, int *ignore, AVPacket pkt, int 
 			case AV_SAMPLE_FMT_S32P:
 			case AV_SAMPLE_FMT_FLTP:
 #if LIBAVCODEC_VERSION_MAJOR >= 55
-				planar_to_interleaved2( dest, self->audio_frame, convert_samples, codec_context->channels, sizeof_sample );
+				planar_to_interleaved( dest, self->audio_frame, convert_samples, codec_context->channels, sizeof_sample );
 #else
 				planar_to_interleaved( dest, decode_buffer, convert_samples, codec_context->channels, sizeof_sample );
 #endif
@@ -2209,8 +2298,8 @@ static int producer_get_audio( mlt_frame frame, void **buffer, mlt_audio_format 
 		index = 0;
 		index_max = FFMIN( MAX_AUDIO_STREAMS, context->nb_streams );
 		*channels = self->total_channels;
-		*samples = mlt_sample_calculator( fps, FFMAX( self->max_frequency, *frequency ), position );
-		*frequency = FFMAX( self->max_frequency, *frequency );
+		*samples = mlt_sample_calculator( fps, self->max_frequency, position );
+		*frequency = self->max_frequency;
 	}
 
 	// Initialize the buffers
@@ -2487,8 +2576,9 @@ static void producer_set_up_audio( producer_avformat self, mlt_frame frame )
 	// Reopen the file if necessary
 	if ( !context && self->audio_index > -1 && index > -1 )
 	{
+		mlt_properties_from_utf8( properties, "resource", "_resource" );
 		producer_open( self, mlt_service_profile( MLT_PRODUCER_SERVICE(producer) ),
-			mlt_properties_get( properties, "resource" ), 1 );
+			mlt_properties_get( properties, "_resource" ), 1 );
 		context = self->audio_format;
 	}
 
@@ -2611,7 +2701,8 @@ static void producer_avformat_close( producer_avformat self )
 	av_free_packet( &self->pkt );
 	av_free( self->video_frame );
 	av_free( self->audio_frame );
-	pthread_mutex_lock( &self->open_mutex );
+	if ( self->is_mutex_init )
+		pthread_mutex_lock( &self->open_mutex );
 	int i;
 	for ( i = 0; i < MAX_AUDIO_STREAMS; i++ )
 	{
@@ -2640,12 +2731,15 @@ static void producer_avformat_close( producer_avformat self )
 	if ( self->video_format )
 		av_close_input_file( self->video_format );
 #endif
-	pthread_mutex_unlock( &self->open_mutex );
+	if ( self->is_mutex_init )
+		pthread_mutex_unlock( &self->open_mutex );
 #ifdef VDPAU
 	vdpau_producer_close( self );
 #endif
 	if ( self->image_cache )
 		mlt_cache_close( self->image_cache );
+	if ( self->last_good_frame )
+		mlt_frame_close( self->last_good_frame );
 
 	// Cleanup the mutexes
 	if ( self->is_mutex_init )

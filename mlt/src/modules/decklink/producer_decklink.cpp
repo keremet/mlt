@@ -43,6 +43,7 @@ private:
 	int              m_colorspace;
 	int              m_vancLines;
 	mlt_cache        m_cache;
+	bool             m_reprio;
 
 	BMDDisplayMode getDisplayMode( mlt_profile profile, int vancLines )
 	{
@@ -92,7 +93,7 @@ public:
 		m_decklinkInput = NULL;
 	}
 
-	~DeckLinkProducer()
+	virtual ~DeckLinkProducer()
 	{
 		if ( m_queue )
 		{
@@ -357,6 +358,45 @@ public:
 			IDeckLinkVideoInputFrame* video,
 			IDeckLinkAudioInputPacket* audio )
 	{
+		mlt_frame frame = NULL;
+
+		if( !m_reprio )
+		{
+			mlt_properties properties = MLT_PRODUCER_PROPERTIES( getProducer() );
+
+			if ( mlt_properties_get( properties, "priority" ) )
+			{
+				int r;
+				pthread_t thread;
+				pthread_attr_t tattr;
+				struct sched_param param;
+
+				pthread_attr_init(&tattr);
+				pthread_attr_setschedpolicy(&tattr, SCHED_FIFO);
+
+				if ( !strcmp( "max", mlt_properties_get( properties, "priority" ) ) )
+					param.sched_priority = sched_get_priority_max(SCHED_FIFO) - 1;
+				else if ( !strcmp( "min", mlt_properties_get( properties, "priority" ) ) )
+					param.sched_priority = sched_get_priority_min(SCHED_FIFO) + 1;
+				else
+					param.sched_priority = mlt_properties_get_int( properties, "priority" );
+
+				pthread_attr_setschedparam(&tattr, &param);
+
+				thread = pthread_self();
+
+				r = pthread_setschedparam(thread, SCHED_FIFO, &param);
+				if( r )
+					mlt_log_verbose( getProducer(),
+						"VideoInputFrameArrived: pthread_setschedparam returned %d\n", r);
+				else
+					mlt_log_verbose( getProducer(),
+						"VideoInputFrameArrived: param.sched_priority=%d\n", param.sched_priority);
+			};
+
+			m_reprio = true;
+		};
+
 		if ( mlt_properties_get_int( MLT_PRODUCER_PROPERTIES( getProducer() ), "preview" ) &&
 			mlt_producer_get_speed( getProducer() ) == 0.0 && !mlt_deque_count( m_queue ))
 		{
@@ -364,20 +404,39 @@ public:
 			return S_OK;
 		}
 
-		// Create mlt_frame
-		mlt_frame frame = mlt_frame_init( MLT_PRODUCER_SERVICE( getProducer() ) );
 
 		// Copy video
 		if ( video )
 		{
+			IDeckLinkTimecode* timecode = 0;
+
 			if ( !( video->GetFlags() & bmdFrameHasNoInputSource ) )
 			{
+				int vitc_in = mlt_properties_get_int( MLT_PRODUCER_PROPERTIES( getProducer() ), "vitc_in" );
+				if ( vitc_in && ( S_OK == video->GetTimecode( bmdTimecodeRP188, &timecode ) ||
+					S_OK == video->GetTimecode( bmdTimecodeVITC, &timecode ))  && timecode )
+				{
+					int vitc = timecode->GetBCD();
+					SAFE_RELEASE( timecode );
+
+					mlt_log_verbose( getProducer(),
+						"VideoInputFrameArrived: vitc=%.8X vitc_in=%.8X\n", vitc, vitc_in);
+
+					if ( vitc < vitc_in )
+					{
+						pthread_cond_broadcast( &m_condition );
+						return S_OK;
+					}
+
+					mlt_properties_set_int( MLT_PRODUCER_PROPERTIES( getProducer() ), "vitc_in", 0 );
+				}
+
 				int size = video->GetRowBytes() * ( video->GetHeight() + m_vancLines );
 				void* image = mlt_pool_alloc( size );
 				void* buffer = 0;
 				unsigned char* p = (unsigned char*) image;
 				int n = size / 2;
-\
+
 				// Initialize VANC lines to nominal black
 				while ( --n )
 				{
@@ -394,7 +453,7 @@ public:
 						for ( int i = 1; i < m_vancLines + 1; i++ )
 						{
 							if ( vanc->GetBufferForVerticalBlankingLine( i, &buffer ) == S_OK )
-								swab( (char*) buffer, (char*) image + ( i - 1 ) * video->GetRowBytes(), video->GetRowBytes() );
+								swab2( (char*) buffer, (char*) image + ( i - 1 ) * video->GetRowBytes(), video->GetRowBytes() );
 							else
 								mlt_log_debug( getProducer(), "failed capture vanc line %d\n", i );
 						}
@@ -407,24 +466,22 @@ public:
 				if ( image && buffer )
 				{
 					size =  video->GetRowBytes() * video->GetHeight();
-					swab( (char*) buffer, (char*) image + m_vancLines * video->GetRowBytes(), size );
+					swab2( (char*) buffer, (char*) image + m_vancLines * video->GetRowBytes(), size );
+					frame = mlt_frame_init( MLT_PRODUCER_SERVICE( getProducer() ) );
 					mlt_frame_set_image( frame, (uint8_t*) image, size, mlt_pool_release );
 				}
 				else if ( image )
 				{
-					mlt_log_verbose( getProducer(), "no video\n" );
+					mlt_log_verbose( getProducer(), "no video image\n" );
 					mlt_pool_release( image );
 				}
 			}
 			else
 			{
 				mlt_log_verbose( getProducer(), "no signal\n" );
-				mlt_frame_close( frame );
-				frame = 0;
 			}
 
 			// Get timecode
-			IDeckLinkTimecode* timecode = 0;
 			if ( video->GetTimecode( bmdTimecodeVITC, &timecode ) == S_OK && timecode )
 			{
 				DLString timecodeString = 0;
@@ -443,8 +500,6 @@ public:
 		else
 		{
 			mlt_log_verbose( getProducer(), "no video\n" );
-			mlt_frame_close( frame );
-			frame = 0;
 		}
 
 		// Copy audio
@@ -465,7 +520,7 @@ public:
 			}
 			else
 			{
-				mlt_log_verbose( getProducer(), "no audio\n" );
+				mlt_log_verbose( getProducer(), "no audio samples\n" );
 				mlt_pool_release( pcm );
 			}
 		}
@@ -488,7 +543,7 @@ public:
 			{
 				mlt_frame_close( frame );
 				mlt_properties_set_int( MLT_PRODUCER_PROPERTIES( getProducer() ), "dropped", ++m_dropped );
-				mlt_log_warning( getProducer(), "frame dropped %d\n", m_dropped );
+				mlt_log_warning( getProducer(), "buffer overrun, frame dropped %d\n", m_dropped );
 			}
 			pthread_mutex_unlock( &m_mutex );
 		}

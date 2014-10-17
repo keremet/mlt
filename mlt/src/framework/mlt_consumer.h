@@ -53,8 +53,13 @@
  * \event \em consumer-frame-show Subclass implementations fire this immediately after showing a frame
  * or when a frame should be shown (if audio-only consumer).
  * \event \em consumer-frame-render The base class fires this immediately before rendering a frame.
+ * \event \em consumer-thread-create Override the implementation of creating and
+ *   starting a thread by listening and responding to this (real_time 1 or -1 only).
+ * \event \em consumer-thread-join Override the implementation of waiting and
+ *   joining a terminated thread  by listening and responding to this (real_time 1 or -1 only).
  * \event \em consumer-thread-started The base class fires when beginning execution of a rendering thread.
  * \event \em consumer-thread-stopped The base class fires when a rendering thread has ended.
+ * \event \em consumer-stopping This is fired when stop was requested, but before render threads are joined.
  * \event \em consumer-stopped This is fired when the subclass implementation calls mlt_consumer_stopped().
  * \properties \em fps video frames per second as floating point (read only)
  * \properties \em frame_rate_num the numerator of the video frame rate, overrides \p mlt_profile_s
@@ -74,6 +79,8 @@
  *   Set this to -1 if the consumer does not care about the field order.
  * \properties \em mlt_image_format the image format to request in rendering threads, defaults to yuv422
  * \properties \em mlt_audio_format the audio format to request in rendering threads, defaults to S16
+ * \properties \em audio_off set non-zero to disable audio processing
+ * \properties \em video_off set non-zero to disable video processing
  */
 
 struct mlt_consumer_s

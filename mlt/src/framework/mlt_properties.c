@@ -144,12 +144,15 @@ int mlt_properties_set_lcnumeric( mlt_properties self, const char *locale )
 	{
 		property_list *list = self->local;
 
-#if defined(__linux__) || defined(__DARWIN__)
+#if defined(__GLIBC__) || defined(__DARWIN__)
 		if ( list->locale )
 			freelocale( list->locale );
 		list->locale = newlocale( LC_NUMERIC_MASK, locale, NULL );
+#else
+		if ( list->locale )
+			free( list->locale );
+		list->locale = strdup( locale );
 #endif
-		error = list->locale == NULL;
 	}
 	else
 		error = 1;
@@ -173,18 +176,23 @@ const char* mlt_properties_get_lcnumeric( mlt_properties self )
 	if ( list->locale )
 	{
 #if defined(__DARWIN__)
-		result = querylocale( LC_NUMERIC, list->locale );
-#elif defined(__linux__)
-		result = list->locale->__names[ LC_NUMERIC ];
+        result = querylocale( LC_NUMERIC, list->locale );
+#elif defined(__GLIBC__)
+        result = list->locale->__names[ LC_NUMERIC ];
 #else
-		// TODO: not yet sure what to do on other platforms
+		result = list->locale;
 #endif
-	}
+    }
 	return result;
 }
 
 static int load_properties( mlt_properties self, const char *filename )
 {
+	// Convert filename string encoding.
+	mlt_properties_set( self, "_mlt_properties_load", filename );
+	mlt_properties_from_utf8( self, "_mlt_properties_load", "__mlt_properties_load" );
+	filename = mlt_properties_get( self, "__mlt_properties_load" );
+
 	// Open the file
 	FILE *file = fopen( filename, "r" );
 
@@ -328,11 +336,10 @@ int mlt_properties_preset( mlt_properties self, const char *name )
 
 static inline int generate_hash( const char *name )
 {
-	int hash = 0;
-	int i = 1;
+	unsigned int hash = 5381;
 	while ( *name )
-		hash = ( hash + ( i ++ * ( *name ++ & 31 ) ) ) % 199;
-	return hash;
+		hash = hash * 33 + (unsigned int) ( *name ++ );
+	return hash % 199;
 }
 
 /** Copy a serializable property to a properties list that is mirroring this one.
@@ -508,13 +515,12 @@ static inline mlt_property mlt_properties_find( mlt_properties self, const char 
 	{
 		// Check if we're hashed
 		if ( list->count > 0 &&
-		 	name[ 0 ] == list->name[ i ][ 0 ] &&
 		 	!strcmp( list->name[ i ], name ) )
 			value = list->value[ i ];
 
 		// Locate the item
 		for ( i = list->count - 1; value == NULL && i >= 0; i -- )
-			if ( name[ 0 ] == list->name[ i ][ 0 ] && !strcmp( list->name[ i ], name ) )
+			if ( !strcmp( list->name[ i ], name ) )
 				value = list->value[ i ];
 	}
 	mlt_properties_unlock( self );
@@ -1241,6 +1247,12 @@ int mlt_properties_save( mlt_properties self, const char *filename )
 {
 	int error = 1;
 	if ( !self || !filename ) return error;
+
+	// Convert filename string encoding.
+	mlt_properties_set( self, "_mlt_properties_save", filename );
+	mlt_properties_from_utf8( self, "_mlt_properties_save", "__mlt_properties_save" );
+	filename = mlt_properties_get( self, "__mlt_properties_save" );
+
 	FILE *f = fopen( filename, "w" );
 	if ( f != NULL )
 	{
@@ -1396,10 +1408,13 @@ void mlt_properties_close( mlt_properties self )
 				free( list->name[ index ] );
 			}
 
-#if defined(__linux__) || defined(__DARWIN__)
+#if defined(__GLIBC__) || defined(__DARWIN__)
 			// Cleanup locale
 			if ( list->locale )
 				freelocale( list->locale );
+#else
+			if ( list->locale )
+				free( list->locale );
 #endif
 
 			// Clear up the list
@@ -1736,6 +1751,11 @@ mlt_properties mlt_properties_parse_yaml( const char *filename )
 
 	if ( self )
 	{
+		// Convert filename string encoding.
+		mlt_properties_set( self, "_mlt_properties_parse_yaml", filename );
+		mlt_properties_from_utf8( self, "_mlt_properties_parse_yaml", "__mlt_properties_parse_yaml" );
+		filename = mlt_properties_get( self, "__mlt_properties_parse_yaml" );
+	
 		// Open the file
 		FILE *file = fopen( filename, "r" );
 
@@ -2090,6 +2110,38 @@ char *mlt_properties_get_time( mlt_properties self, const char* name, mlt_time_f
 		return value == NULL ? NULL : mlt_property_get_time( value, format, fps, list->locale );
 	}
 	return NULL;
+}
+
+/** Convert a frame count to a time string.
+ *
+ * Do not free the returned string. It's lifetime is controlled by the property.
+ * \public \memberof mlt_properties_s
+ * \param self a properties list
+ * \param frames the frame count to convert
+ * \param format the time format that you want
+ * \return the time string or NULL if error, e.g. there is no profile
+ */
+
+char *mlt_properties_frames_to_time( mlt_properties self, mlt_position frames, mlt_time_format format )
+{
+	const char *name = "_mlt_properties_time";
+	mlt_properties_set_position( self, name, frames );
+	return mlt_properties_get_time( self, name, format );
+}
+
+/** Convert a time string to a frame count.
+ *
+ * \public \memberof mlt_properties_s
+ * \param self a properties list
+ * \param time the time string to convert
+ * \return a frame count or a negative value if error, e.g. there is no profile
+ */
+
+mlt_position mlt_properties_time_to_frames( mlt_properties self, const char *time )
+{
+	const char *name = "_mlt_properties_time";
+	mlt_properties_set( self, name, time );
+	return mlt_properties_get_position( self, name );
 }
 
 /** Convert a numeric property to a tuple of color components.
@@ -2477,3 +2529,30 @@ extern mlt_rect mlt_properties_anim_get_rect( mlt_properties self, const char *n
 	mlt_rect rect = { DBL_MIN, DBL_MIN, DBL_MIN, DBL_MIN, DBL_MIN };
 	return value == NULL ? rect : mlt_property_anim_get_rect( value, fps, list->locale, position, length );
 }
+
+#ifndef WIN32
+
+// See win32/win32.c for win32 implementation.
+
+/** Convert UTF-8 property to the locale-defined encoding.
+ *
+ * MLT uses UTF-8 for strings, but Windows cannot accept UTF-8 for a filename.
+ * Windows uses code pages for the locale encoding.
+ * \public \memberof mlt_properties_s
+ * \param self a properties list
+ * \param name_from the property to read whose value is a UTF-8 string
+ * \param name_to the name of the new property that will contain converted string
+ * \return true if error
+ */
+
+int mlt_properties_from_utf8( mlt_properties properties, const char *name_from, const char *name_to )
+{
+	// On non-Windows platforms, assume UTF-8 will always work and does not need conversion.
+	// This function just becomes a pass-through operation.
+	// This was largely chosen to prevent adding a libiconv dependency to the framework per policy.
+	// However, for file open operations on Windows, especially when processing XML, a text codec
+	// dependency is hardly avoidable.
+	return mlt_properties_set( properties, name_to, mlt_properties_get( properties, name_from ) );
+}
+
+#endif

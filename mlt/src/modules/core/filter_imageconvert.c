@@ -37,15 +37,6 @@
   u = u > 240 ? 240 : u;\
   v = v > 240 ? 240 : v
 
-/** This macro scales YUV up into the full gamut of the RGB color space. */
-#define YUV2RGB_601_SCALED( y, u, v, r, g, b ) \
-  r = ((1192 * ( y - 16 ) + 1634 * ( v - 128 ) ) >> 10 ); \
-  g = ((1192 * ( y - 16 ) - 832 * ( v - 128 ) - 401 * ( u - 128 ) ) >> 10 ); \
-  b = ((1192 * ( y - 16 ) + 2066 * ( u - 128 ) ) >> 10 ); \
-  r = r < 0 ? 0 : r > 255 ? 255 : r; \
-  g = g < 0 ? 0 : g > 255 ? 255 : g; \
-  b = b < 0 ? 0 : b > 255 ? 255 : b;
-
 /** This macro converts a YUV value to the RGB color space. */
 #define YUV2RGB_601_UNSCALED( y, u, v, r, g, b ) \
   r = ((1024 * y + 1404 * ( v - 128 ) ) >> 10 ); \
@@ -370,7 +361,7 @@ static int convert_image( mlt_frame frame, uint8_t **buffer, mlt_image_format *f
 /** Filter processing.
 */
 
-static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
+static mlt_frame filter_process( mlt_filter filter, mlt_frame frame )
 {
 	if ( !frame->convert_image )
 		frame->convert_image = convert_image;
@@ -382,10 +373,11 @@ static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
 
 mlt_filter filter_imageconvert_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg )
 {
-	mlt_filter this = calloc( 1, sizeof( struct mlt_filter_s ) );
-	if ( mlt_filter_init( this, this ) == 0 )
+	mlt_filter filter = calloc( 1, sizeof( struct mlt_filter_s ) );
+	if ( mlt_filter_init( filter, filter ) == 0 )
 	{
-		this->process = filter_process;
+		filter->process = filter_process;
 	}
-	return this;
+	return filter;
 }
+

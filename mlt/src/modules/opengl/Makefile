@@ -1,22 +1,21 @@
-CFLAGS += -I../..
-
-LDFLAGS += -L../../framework -lmlt -lm
-
 include ../../../config.mak
+
+CFLAGS := -I../.. $(CFLAGS)
+
+LDFLAGS := -L../../framework -lmlt -lm $(LDFLAGS)
 
 TARGET = ../libmltopengl$(LIBSUF)
 
 OBJS = factory.o
 
-CPPOBJS = fbo_input.o
-CPPOBJS += filter_glsl_manager.o
+CPPOBJS = filter_glsl_manager.o
 CPPOBJS += filter_movit_blur.o
 CPPOBJS += filter_movit_convert.o
 CPPOBJS += filter_movit_crop.o
-CPPOBJS += filter_deconvolution_sharpen.o
+CPPOBJS += filter_movit_deconvolution_sharpen.o
 CPPOBJS += filter_movit_diffusion.o
 CPPOBJS += filter_movit_glow.o
-CPPOBJS += filter_lift_gamma_gain.o
+CPPOBJS += filter_movit_lift_gamma_gain.o
 CPPOBJS += filter_movit_mirror.o
 CPPOBJS += filter_movit_opacity.o
 CPPOBJS += filter_movit_rect.o
@@ -24,27 +23,28 @@ CPPOBJS += filter_movit_resample.o
 CPPOBJS += filter_movit_resize.o
 CPPOBJS += filter_movit_saturation.o
 CPPOBJS += filter_movit_vignette.o
-CPPOBJS += filter_white_balance.o
+CPPOBJS += filter_movit_white_balance.o
 CPPOBJS += mlt_movit_input.o
+CPPOBJS += transition_movit_luma.o
 CPPOBJS += transition_movit_mix.o
 CPPOBJS += transition_movit_overlay.o
 
-CXXFLAGS += -Wno-deprecated $(CFLAGS)
-CXXFLAGS += `pkg-config --cflags movit 2> /dev/null`
+CXXFLAGS := -Wno-deprecated $(CFLAGS) $(CXXFLAGS)
+CXXFLAGS += $(shell pkg-config --cflags movit 2> /dev/null)
 
-SHADERDIR = `pkg-config --variable=shaderdir movit`
+SHADERDIR = $(shell pkg-config --variable=shaderdir movit)
 CXXFLAGS += -DSHADERDIR=\"$(SHADERDIR)\"
 
 LDFLAGS += -L../../mlt++ -lmlt++
 
 ifeq ($(targetos), MinGW)
-	CXXFLAGS += `pkg-config --cflags glew`
-	LDFLAGS += -lmovit `pkg-config --libs-only-L glew` -lglew32 -lopengl32
+	CXXFLAGS += $(shell pkg-config --cflags movit)
+	LDFLAGS += $(shell pkg-config --libs movit) -lopengl32 -lpthread
 else
-	LDFLAGS += `pkg-config --libs movit 2> /dev/null`
+	LDFLAGS += $(shell pkg-config --libs movit 2> /dev/null)
 ifeq ($(targetos), Darwin)
 	CXXFLAGS += -FOpenGL
-	LDFLAGS += -framework OpenGL
+	LDFLAGS += -lpthread -framework OpenGL
 else
 	OBJS += consumer_xgl.o
 	LDFLAGS += -lpthread -lGL -lX11

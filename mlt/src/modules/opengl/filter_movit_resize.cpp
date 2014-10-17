@@ -23,9 +23,12 @@
 #include <stdlib.h>
 #include <assert.h>
 
-#include "glsl_manager.h"
+#include "filter_glsl_manager.h"
 #include <movit/init.h>
 #include <movit/padding_effect.h>
+#include "optional_effect.h"
+
+using namespace movit;
 
 static float alignment_parse( char* align )
 {
@@ -156,16 +159,22 @@ static int get_image( mlt_frame frame, uint8_t **image, mlt_image_format *format
 	}
 
 	if ( !error ) {
+		mlt_properties filter_properties = MLT_FILTER_PROPERTIES( filter );
 		GlslManager::get_instance()->lock_service( frame );
-		Effect* effect = GlslManager::get_effect( filter, frame );
-		if ( effect ) {
-			bool ok = effect->set_int( "width", *width );
-			ok |= effect->set_int( "height", *height );
-			ok |= effect->set_float( "left", rect.x );
-			ok |= effect->set_float( "top", rect.y );
-			assert(ok);
-		}
+		mlt_properties_set_int( filter_properties, "_movit.parms.int.width", *width );
+		mlt_properties_set_int( filter_properties, "_movit.parms.int.height", *height );
+		mlt_properties_set_double( filter_properties, "_movit.parms.float.left", rect.x );
+		mlt_properties_set_double( filter_properties, "_movit.parms.float.top", rect.y );
+
+		bool disable = ( *width == owidth && *height == oheight );
+		mlt_properties_set_int( filter_properties, "_movit.parms.int.disable", disable );
+
 		GlslManager::get_instance()->unlock_service( frame );
+
+		GlslManager::set_effect_input( MLT_FILTER_SERVICE( filter ), frame, (mlt_service) *image );
+		GlslManager::set_effect( MLT_FILTER_SERVICE( filter ), frame, new OptionalEffect<PaddingEffect> );
+		*image = (uint8_t *) MLT_FILTER_SERVICE( filter );
+		return error;
 	}
 
 	return error;
@@ -173,8 +182,6 @@ static int get_image( mlt_frame frame, uint8_t **image, mlt_image_format *format
 
 static mlt_frame process( mlt_filter filter, mlt_frame frame )
 {
-	if ( !GlslManager::get_effect( filter, frame ) )
-		GlslManager::add_effect( filter, frame, new PaddingEffect );
 	mlt_frame_push_service( frame, filter );
 	mlt_frame_push_get_image( frame, get_image );
 	return frame;
@@ -188,6 +195,8 @@ mlt_filter filter_movit_resize_init( mlt_profile profile, mlt_service_type type,
 
 	if ( glsl && ( filter = mlt_filter_new() ) )
 	{
+		mlt_properties properties = MLT_FILTER_PROPERTIES( filter );
+		glsl->add_ref( properties );
 		filter->process = process;
 	}
 	return filter;

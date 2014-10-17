@@ -281,6 +281,9 @@ static int producer_get_image( mlt_frame self, uint8_t **buffer, mlt_image_forma
 	mlt_properties_set_int( properties, "colorspace", mlt_properties_get_int( frame_properties, "colorspace" ) );
 	mlt_properties_set_int( properties, "force_full_luma", mlt_properties_get_int( frame_properties, "force_full_luma" ) );
 	mlt_properties_set_int( properties, "top_field_first", mlt_properties_get_int( frame_properties, "top_field_first" ) );
+	mlt_properties_set_data( properties, "movit.convert.fence",
+		mlt_properties_get_data( frame_properties, "movit.convert.fence", NULL ),
+		0, NULL, NULL );
 	data = mlt_frame_get_alpha_mask( frame );
 	mlt_properties_get_data( frame_properties, "alpha", &size );
 	mlt_frame_set_alpha( self, data, size, NULL );
@@ -504,6 +507,7 @@ static int producer_get_frame( mlt_producer parent, mlt_frame_ptr frame, int tra
 				mlt_properties_set_int( frame_properties, "progressive", mlt_properties_get_int( video_properties, "progressive" ) );
 				mlt_properties_set_double( frame_properties, "aspect_ratio", mlt_properties_get_double( video_properties, "aspect_ratio" ) );
 				mlt_properties_set_int( frame_properties, "image_count", image_count );
+				mlt_properties_set_data( frame_properties, "_producer", mlt_frame_get_original_producer( first_video ), 0, NULL, NULL );
 			}
 			else
 			{

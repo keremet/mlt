@@ -1,17 +1,25 @@
 CFLAGS += -I../..
 
-LDFLAGS += -L../../framework -lmlt -lm
+LDFLAGS += -L../../framework -lmlt -lm -lpthread
 
 include ../../../config.mak
 
 TARGET = ../libmltplus$(LIBSUF)
 
-OBJS = factory.o \
+OBJS = consumer_blipflash.o \
+	   factory.o \
 	   filter_affine.o \
 	   filter_charcoal.o \
+	   filter_dynamictext.o \
 	   filter_invert.o \
+	   filter_lift_gamma_gain.o \
+	   filter_loudness.o \
+	   filter_rgblut.o \
 	   filter_sepia.o \
-	   transition_affine.o
+	   producer_blipflash.o \
+	   producer_count.o \
+	   transition_affine.o \
+	   ebur128/ebur128.o
 
 SRCS := $(OBJS:.o=.c)
 

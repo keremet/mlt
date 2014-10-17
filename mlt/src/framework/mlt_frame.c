@@ -437,6 +437,10 @@ int mlt_image_format_size( mlt_image_format format, int width, int height, int *
 		case mlt_image_yuv420p:
 			if ( bpp ) *bpp = 3 / 2;
 			return width * height * 3 / 2;
+		case mlt_image_glsl:
+		case mlt_image_glsl_texture:
+			if ( bpp ) *bpp = 0;
+			return 4;
 		default:
 			if ( bpp ) *bpp = 0;
 			return 0;
@@ -475,7 +479,7 @@ static int generate_test_image( mlt_properties properties, uint8_t **buffer,  ml
 			mlt_properties_set_data( properties, "test_card_producer", NULL, 0, NULL, NULL );
 		}
 	}
-	if ( error && buffer && *format != mlt_image_none )
+	if ( error && buffer )
 	{
 		int size = 0;
 
@@ -505,6 +509,10 @@ static int generate_test_image( mlt_properties properties, uint8_t **buffer,  ml
 				if ( *buffer )
 					memset( *buffer, 255, size );
 				break;
+			case mlt_image_none:
+			case mlt_image_glsl:
+			case mlt_image_glsl_texture:
+				*format = mlt_image_yuv422;
 			case mlt_image_yuv422:
 				size *= 2;
 				size += *width * 2;
@@ -737,26 +745,11 @@ int mlt_frame_get_audio( mlt_frame self, void **buffer, mlt_audio_format *format
 		mlt_properties_set_int( properties, "audio_samples", *samples );
 		mlt_properties_set_int( properties, "audio_format", *format );
 
-		switch( *format )
-		{
-			case mlt_image_none:
-				size = 0;
-				*buffer = NULL;
-				break;
-			case mlt_audio_s16:
-				size = *samples * *channels * sizeof( int16_t );
-				break;
-			case mlt_audio_s32:
-				size = *samples * *channels * sizeof( int32_t );
-				break;
-			case mlt_audio_float:
-				size = *samples * *channels * sizeof( float );
-				break;
-			default:
-				break;
-		}
+		size = mlt_audio_format_size( *format, *samples, *channels );
 		if ( size )
 			*buffer = mlt_pool_alloc( size );
+		else
+			*buffer = NULL;
 		if ( *buffer )
 			memset( *buffer, 0, size );
 		mlt_properties_set_data( properties, "audio", *buffer, size, ( mlt_destructor )mlt_pool_release, NULL );
@@ -764,7 +757,7 @@ int mlt_frame_get_audio( mlt_frame self, void **buffer, mlt_audio_format *format
 	}
 
 	// TODO: This does not belong here
-	if ( *format == mlt_audio_s16 && mlt_properties_get( properties, "meta.volume" ) )
+	if ( *format == mlt_audio_s16 && mlt_properties_get( properties, "meta.volume" ) && *buffer )
 	{
 		double value = mlt_properties_get_double( properties, "meta.volume" );
 
@@ -1070,10 +1063,12 @@ mlt_frame mlt_frame_clone( mlt_frame self, int is_deep )
 		data = mlt_properties_get_data( properties, "image", &size );
 		if ( data )
 		{
+			int width = mlt_properties_get_int( properties, "width" );
+			int height = mlt_properties_get_int( properties, "height" );
+
 			if ( ! size )
 				size = mlt_image_format_size( mlt_properties_get_int( properties, "format" ),
-					mlt_properties_get_int( properties, "width" ),
-					mlt_properties_get_int( properties, "height" ), NULL );
+					width, height, NULL );
 			copy = mlt_pool_alloc( size );
 			memcpy( copy, data, size );
 			mlt_properties_set_data( new_props, "image", copy, size, mlt_pool_release, NULL );
@@ -1082,8 +1077,7 @@ mlt_frame mlt_frame_clone( mlt_frame self, int is_deep )
 			if ( data )
 			{
 				if ( ! size )
-					size = mlt_properties_get_int( properties, "width" ) *
-						mlt_properties_get_int( properties, "height" );
+					size = width * height;
 				copy = mlt_pool_alloc( size );
 				memcpy( copy, data, size );
 				mlt_properties_set_data( new_props, "alpha", copy, size, mlt_pool_release, NULL );

@@ -1,6 +1,6 @@
 /*
  * producer_xml.c -- a libxml2 parser of mlt service networks
- * Copyright (C) 2003-2009 Ushodaya Enterprises Limited
+ * Copyright (C) 2003-2014 Ushodaya Enterprises Limited
  * Author: Dan Dennedy <dan@dennedy.org>
  *
  * This library is free software; you can redistribute it and/or
@@ -590,7 +590,8 @@ static void on_end_producer( deserialise_context context, const xmlChar *name )
 		// Track this producer
 		track_service( context->destructors, producer, (mlt_destructor) mlt_producer_close );
 		mlt_properties_set_lcnumeric( MLT_SERVICE_PROPERTIES( producer ), context->lc_numeric );
-		context->seekable &= mlt_properties_get_int( MLT_SERVICE_PROPERTIES( producer ), "seekable" );
+		if ( mlt_properties_get( MLT_SERVICE_PROPERTIES( producer ), "seekable" ) )
+			context->seekable &= mlt_properties_get_int( MLT_SERVICE_PROPERTIES( producer ), "seekable" );
 
 		// Propagate the properties
 		qualify_property( context, properties, "resource" );
@@ -931,6 +932,7 @@ static void on_end_filter( deserialise_context context, const xmlChar *name )
 		qualify_property( context, properties, "luma.resource" );
 		qualify_property( context, properties, "composite.luma" );
 		qualify_property( context, properties, "producer.resource" );
+		qualify_property( context, properties, "filename" );
 		mlt_properties_inherit( filter_props, properties );
 
 		// Attach all filters from service onto filter
@@ -1551,20 +1553,61 @@ static void parse_url( mlt_properties properties, char *url )
 }
 
 // Quick workaround to avoid unecessary libxml2 warnings
-static int file_exists( char *file )
+static int file_exists( char *name )
 {
-	char *name = strdup( file );
 	int exists = 0;
-	if ( name != NULL && strchr( name, '?' ) )
-		*( strchr( name, '?' ) ) = '\0';
 	if ( name != NULL )
 	{
 		FILE *f = fopen( name, "r" );
 		exists = f != NULL;
 		if ( exists ) fclose( f );
 	}
-	free( name );
 	return exists;
+}
+
+// This function will add remaing services in the context service stack marked
+// with a "xml_retain" property to a property named "xml_retain" on the returned
+// service. The property is a mlt_properties data property.
+
+static void retain_services( struct deserialise_context_s *context, mlt_service service )
+{
+	mlt_properties retain_list = mlt_properties_new();
+	enum service_type type;
+	mlt_service retain_service = context_pop_service( context, &type );
+
+	while ( retain_service )
+	{
+		mlt_properties retain_properties = MLT_SERVICE_PROPERTIES( retain_service );
+		
+		if ( mlt_properties_get_int( retain_properties, "xml_retain" ) )
+		{
+			// Remove the retained service from the destructors list.
+			int i;
+			for ( i = mlt_properties_count( context->destructors ) - 1; i >= 1; i -- )
+			{
+				const char *name = mlt_properties_get_name( context->destructors, i );
+				if ( mlt_properties_get_data_at( context->destructors, i, NULL ) == retain_service )
+				{
+					mlt_properties_set_data( context->destructors, name, retain_service, 0, NULL, NULL );
+					break;
+				}
+			}
+			const char *name = mlt_properties_get( retain_properties, "id" );
+			if ( name )
+				mlt_properties_set_data( retain_list, name, retain_service, 0,
+					(mlt_destructor) mlt_service_close, NULL );
+		}
+		retain_service = context_pop_service( context, &type );
+	}
+	if ( mlt_properties_count( retain_list ) > 0 )
+	{
+		mlt_properties_set_data( MLT_SERVICE_PROPERTIES(service), "xml_retain", retain_list, 0,
+			(mlt_destructor) mlt_properties_close, NULL );
+	}
+	else
+	{
+		mlt_properties_close( retain_list );
+	}
 }
 
 mlt_producer producer_xml_init( mlt_profile profile, mlt_service_type servtype, const char *id, char *data )
@@ -1582,7 +1625,7 @@ mlt_producer producer_xml_init( mlt_profile profile, mlt_service_type servtype, 
 	if ( data && strlen( data ) >= 7 && strncmp( data, "file://", 7 ) == 0 )
 		data += 7;
 
-	if ( data == NULL || !strcmp( data, "" ) || ( is_filename && !file_exists( data ) ) )
+	if ( data == NULL || !strcmp( data, "" ) )
 		return NULL;
 
 	context = calloc( 1, sizeof( struct deserialise_context_s ) );
@@ -1599,7 +1642,8 @@ mlt_producer producer_xml_init( mlt_profile profile, mlt_service_type servtype, 
 	mlt_properties_set( context->producer_map, "root", "" );
 	if ( is_filename )
 	{
-		filename = strdup( data );
+		mlt_properties_set( context->params, "_mlt_xml_resource", data );
+		filename = mlt_properties_get( context->params, "_mlt_xml_resource" );
 		parse_url( context->params, url_decode( filename, data ) );
 
 		// We need the directory prefix which was used for the xml
@@ -1620,6 +1664,19 @@ mlt_producer producer_xml_init( mlt_profile profile, mlt_service_type servtype, 
 				free( real );
 				free( cwd );
 			}
+		}
+
+		// Convert file name string encoding.
+		mlt_properties_from_utf8( context->params, "_mlt_xml_resource", "__mlt_xml_resource" );
+		filename = mlt_properties_get( context->params, "__mlt_xml_resource" );
+
+		if ( !file_exists( filename ) )
+		{
+			mlt_properties_close( context->producer_map );
+			mlt_properties_close( context->destructors );
+			mlt_properties_close( context->params );
+			free( context );
+			return NULL;
 		}
 	}
 
@@ -1652,7 +1709,6 @@ mlt_producer producer_xml_init( mlt_profile profile, mlt_service_type servtype, 
 		mlt_properties_close( context->params );
 		free( context );
 		free( sax );
-		free( filename );
 		return NULL;
 	}
 
@@ -1681,7 +1737,6 @@ mlt_producer producer_xml_init( mlt_profile profile, mlt_service_type servtype, 
 		xmlFreeDoc( context->entity_doc );
 		free( context );
 		free( sax );
-		free( filename );
 		return NULL;
 	}
 
@@ -1701,7 +1756,6 @@ mlt_producer producer_xml_init( mlt_profile profile, mlt_service_type servtype, 
 		xmlFreeDoc( context->entity_doc );
 		free( context );
 		free( sax );
-		free( filename );
 		return NULL;
 	}
 
@@ -1709,7 +1763,9 @@ mlt_producer producer_xml_init( mlt_profile profile, mlt_service_type servtype, 
 	// may exist when trying to load glsl. or movit. services.
 	// The "if requested" part can come from query string qglsl=1 or when
 	// a service beginning with glsl. or movit. appears in the XML.
-	if ( mlt_properties_get_int( context->params, "qglsl" ) )
+	if ( mlt_properties_get_int( context->params, "qglsl" ) && strcmp( id, "xml-nogl" )
+		// Only if glslManager does not yet exist.
+		&& !mlt_properties_get_data( mlt_global_properties(), "glslManager", NULL ) )
 		context->qglsl = mlt_factory_consumer( profile, "qglsl", NULL );
 
 	// Setup SAX callbacks for second pass
@@ -1815,6 +1871,8 @@ mlt_producer producer_xml_init( mlt_profile profile, mlt_service_type servtype, 
 			(mlt_destructor) mlt_consumer_close, NULL );
 
 		mlt_properties_set_int( properties, "seekable", context->seekable );
+
+		retain_services( context, service );
 	}
 	else
 	{
@@ -1832,7 +1890,6 @@ mlt_producer producer_xml_init( mlt_profile profile, mlt_service_type servtype, 
 	if ( context->lc_numeric )
 		free( context->lc_numeric );
 	free( context );
-	free( filename );
 
 	return MLT_PRODUCER( service );
 }

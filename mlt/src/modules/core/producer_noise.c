@@ -1,6 +1,6 @@
 /*
  * producer_noise.c -- noise generating producer
- * Copyright (C) 2003-2004 Ushodaya Enterprises Limited
+ * Copyright (C) 2003-2014 Ushodaya Enterprises Limited
  * Author: Charles Yates <charles.yates@pandora.be>
  *
  * This library is free software; you can redistribute it and/or
@@ -29,20 +29,31 @@
 /** Random number generator
 */
 
-static unsigned int seed_x = 521288629;
-static unsigned int seed_y = 362436069;
-
-static inline unsigned int fast_rand( )
+typedef struct
 {
-   static unsigned int a = 18000, b = 30903;
-   seed_x = a * ( seed_x & 65535 ) + ( seed_x >> 16 );
-   seed_y = b * ( seed_y & 65535 ) + ( seed_y >> 16 );
-   return ( ( seed_x << 16 ) + ( seed_y & 65535 ) );
+	unsigned int x;
+	unsigned int y;
+} rand_seed;
+
+static void init_seed( rand_seed* seed, int init )
+{
+	// Use the initial value to initialize the seed to arbitrary values.
+	// This causes the algorithm to produce consistent results each time for the same frame number.
+	seed->x = 521288629 + init - ( init << 16 );
+	seed->y = 362436069 - init + ( init << 16 );
+}
+
+static inline unsigned int fast_rand( rand_seed* seed )
+{
+	static unsigned int a = 18000, b = 30903;
+	seed->x = a * ( seed->x & 65535 ) + ( seed->x >> 16 );
+	seed->y = b * ( seed->y & 65535 ) + ( seed->y >> 16 );
+	return ( ( seed->x << 16 ) + ( seed->y & 65535 ) );
 }
 
 // Foward declarations
-static int producer_get_frame( mlt_producer this, mlt_frame_ptr frame, int index );
-static void producer_close( mlt_producer this );
+static int producer_get_frame( mlt_producer producer, mlt_frame_ptr frame, int index );
+static void producer_close( mlt_producer producer );
 
 /** Initialise.
 */
@@ -50,17 +61,17 @@ static void producer_close( mlt_producer this );
 mlt_producer producer_noise_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg )
 {
 	// Create a new producer object
-	mlt_producer this = mlt_producer_new( profile );
+	mlt_producer producer = mlt_producer_new( profile );
 
 	// Initialise the producer
-	if ( this != NULL )
+	if ( producer != NULL )
 	{
 		// Callback registration
-		this->get_frame = producer_get_frame;
-		this->close = ( mlt_destructor )producer_close;
+		producer->get_frame = producer_get_frame;
+		producer->close = ( mlt_destructor )producer_close;
 	}
 
-	return this;
+	return producer;
 }
 
 static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_format *format, int *width, int *height, int writable )
@@ -92,10 +103,14 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 		// Value to hold a random number
 		uint32_t value;
 
+		// Initialize seed from the frame number.
+		rand_seed seed;
+		init_seed( &seed, mlt_frame_get_position( frame ) );
+
 		// Generate random noise
 		while ( p != *buffer )
 		{
-			value = fast_rand( ) & 0xff;
+			value = fast_rand( &seed ) & 0xff;
 			*( -- p ) = 128;
 			*( -- p ) = value < 16 ? 16 : value > 240 ? 240 : value;
 		}
@@ -124,8 +139,10 @@ static int producer_get_audio( mlt_frame frame, int16_t **buffer, mlt_audio_form
 	if ( *buffer != NULL )
 	{
 		int16_t *p = *buffer + size / 2;
-		while ( p != *buffer ) 
-			*( -- p ) = fast_rand( ) & 0x0f00;
+		rand_seed seed;
+		init_seed( &seed, mlt_frame_get_position( frame ) );
+		while ( p != *buffer )
+			*( -- p ) = fast_rand( &seed ) & 0x0f00;
 	}
 
 	// Set the buffer for destruction
@@ -134,10 +151,10 @@ static int producer_get_audio( mlt_frame frame, int16_t **buffer, mlt_audio_form
 	return 0;
 }
 
-static int producer_get_frame( mlt_producer this, mlt_frame_ptr frame, int index )
+static int producer_get_frame( mlt_producer producer, mlt_frame_ptr frame, int index )
 {
 	// Generate a frame
-	*frame = mlt_frame_init( MLT_PRODUCER_SERVICE( this ) );
+	*frame = mlt_frame_init( MLT_PRODUCER_SERVICE( producer ) );
 
 	// Check that we created a frame and initialise it
 	if ( *frame != NULL )
@@ -146,14 +163,14 @@ static int producer_get_frame( mlt_producer this, mlt_frame_ptr frame, int index
 		mlt_properties properties = MLT_FRAME_PROPERTIES( *frame );
 
 		// Aspect ratio is whatever it needs to be
-		mlt_profile profile = mlt_service_profile( MLT_PRODUCER_SERVICE( this ) );
+		mlt_profile profile = mlt_service_profile( MLT_PRODUCER_SERVICE( producer ) );
 		mlt_properties_set_double( properties, "aspect_ratio", mlt_profile_sar( profile ) );
 
 		// Set producer-specific frame properties
 		mlt_properties_set_int( properties, "progressive", 1 );
 
 		// Update timecode on the frame we're creating
-		mlt_frame_set_position( *frame, mlt_producer_position( this ) );
+		mlt_frame_set_position( *frame, mlt_producer_position( producer ) );
 
 		// Push the get_image method
 		mlt_frame_push_get_image( *frame, producer_get_image );
@@ -163,15 +180,15 @@ static int producer_get_frame( mlt_producer this, mlt_frame_ptr frame, int index
 	}
 
 	// Calculate the next timecode
-	mlt_producer_prepare_next( this );
+	mlt_producer_prepare_next( producer );
 
 	return 0;
 }
 
-static void producer_close( mlt_producer this )
+static void producer_close( mlt_producer producer )
 {
-	this->close = NULL;
-	mlt_producer_close( this );
-	free( this );
+	producer->close = NULL;
+	mlt_producer_close( producer );
+	free( producer );
 }
 

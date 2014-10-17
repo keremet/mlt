@@ -49,9 +49,10 @@ typedef struct
 {
 	int real_time;
 	int ahead;
+	int preroll;
 	mlt_image_format format;
 	mlt_deque queue;
-	pthread_t ahead_thread;
+	void *ahead_thread;
 	pthread_mutex_t queue_mutex;
 	pthread_cond_t queue_cond;
 	pthread_mutex_t put_mutex;
@@ -74,11 +75,18 @@ typedef struct
 }
 consumer_private;
 
+typedef void* ( *thread_function_t )( void* );
+
 static void mlt_consumer_frame_render( mlt_listener listener, mlt_properties owner, mlt_service self, void **args );
 static void mlt_consumer_frame_show( mlt_listener listener, mlt_properties owner, mlt_service self, void **args );
 static void mlt_consumer_property_changed( mlt_properties owner, mlt_consumer self, char *name );
 static void apply_profile_properties( mlt_consumer self, mlt_profile profile, mlt_properties properties );
 static void on_consumer_frame_show( mlt_properties owner, mlt_consumer self, mlt_frame frame );
+static void transmit_thread_create( mlt_listener listener, mlt_properties owner, mlt_service self, void **args );
+static void mlt_thread_create( mlt_consumer self, thread_function_t function );
+static void transmit_thread_join( mlt_listener listener, mlt_properties owner, mlt_service self, void **args );
+static void mlt_thread_join( mlt_consumer self );
+static void consumer_read_ahead_start( mlt_consumer self );
 
 /** Initialize a consumer service.
  *
@@ -140,7 +148,10 @@ int mlt_consumer_init( mlt_consumer self, void *child, mlt_profile profile )
 		mlt_events_register( properties, "consumer-frame-render", ( mlt_transmitter )mlt_consumer_frame_render );
 		mlt_events_register( properties, "consumer-thread-started", NULL );
 		mlt_events_register( properties, "consumer-thread-stopped", NULL );
+		mlt_events_register( properties, "consumer-stopping", NULL );
 		mlt_events_register( properties, "consumer-stopped", NULL );
+		mlt_events_register( properties, "consumer-thread-create", ( mlt_transmitter )transmit_thread_create );
+		mlt_events_register( properties, "consumer-thread-join", ( mlt_transmitter )transmit_thread_join );
 		mlt_events_listen( properties, self, "consumer-frame-show", ( mlt_listener )on_consumer_frame_show );
 
 		// Register a property-changed listener to handle the profile property -
@@ -178,7 +189,7 @@ static void apply_profile_properties( mlt_consumer self, mlt_profile profile, ml
 	mlt_properties_set_int( properties, "sample_aspect_den", profile->sample_aspect_den );
 	mlt_properties_set_double( properties, "display_ratio", mlt_profile_dar( profile )  );
 	mlt_properties_set_int( properties, "display_aspect_num", profile->display_aspect_num );
-	mlt_properties_set_int( properties, "display_aspect_num", profile->display_aspect_num );
+	mlt_properties_set_int( properties, "display_aspect_den", profile->display_aspect_den );
 	mlt_properties_set_int( properties, "colorspace", profile->colorspace );
 	mlt_event_unblock( priv->event_listener );
 }
@@ -532,6 +543,12 @@ int mlt_consumer_start( mlt_consumer self )
 			priv->format = mlt_image_yuv422;
 	}
 
+	priv->preroll = 1;
+#ifdef WIN32
+	if ( priv->real_time == 1 || priv->real_time == -1 )
+		consumer_read_ahead_start( self );
+#endif
+
 	// Start the service
 	if ( self->start != NULL )
 		return self->start( self );
@@ -806,6 +823,9 @@ static void *consumer_read_ahead_thread( void *arg )
 			continue;
 		pos = mlt_frame_get_position( frame );
 
+		// WebVfx uses this to setup a consumer-stopping event handler.
+		mlt_properties_set_data( MLT_FRAME_PROPERTIES( frame ), "consumer", self, 0, NULL, NULL );
+
 		// Increment the counter used for averaging processing cost
 		count ++;
 
@@ -908,7 +928,18 @@ static void *consumer_read_ahead_thread( void *arg )
 
 	// Remove the last frame
 	mlt_frame_close( frame );
-	mlt_events_fire( properties, "consumer-thread-stopped", NULL );
+
+	// Wipe the queue
+	pthread_mutex_lock( &priv->queue_mutex );
+	while ( mlt_deque_count( priv->queue ) )
+		mlt_frame_close( mlt_deque_pop_back( priv->queue ) );
+
+	// Close the queue
+	mlt_deque_close( priv->queue );
+	priv->queue = NULL;
+	pthread_mutex_unlock( &priv->queue_mutex );
+
+	mlt_events_fire( MLT_CONSUMER_PROPERTIES(self), "consumer-thread-stopped", NULL );
 
 	return NULL;
 }
@@ -1001,6 +1032,9 @@ static void *consumer_worker_thread( void *arg )
 		if ( frame == NULL )
 			continue;
 
+		// WebVfx uses this to setup a consumer-stopping event handler.
+		mlt_properties_set_data( MLT_FRAME_PROPERTIES( frame ), "consumer", self, 0, NULL, NULL );
+
 #ifdef DEINTERLACE_ON_NOT_NORMAL_SPEED
 		// All non normal playback frames should be shown
 		if ( mlt_properties_get_int( MLT_FRAME_PROPERTIES( frame ), "_speed" ) != 1 )
@@ -1024,7 +1058,6 @@ static void *consumer_worker_thread( void *arg )
 		pthread_cond_broadcast( &priv->done_cond );
 		pthread_mutex_unlock( &priv->done_mutex );
 	}
-	mlt_events_fire( properties, "consumer-thread-stopped", NULL );
 
 	return NULL;
 }
@@ -1039,6 +1072,9 @@ static void consumer_read_ahead_start( mlt_consumer self )
 {
 	consumer_private *priv = self->local;
 
+	if ( priv->started )
+		return;
+
 	// We're running now
 	priv->ahead = 1;
 
@@ -1052,24 +1088,7 @@ static void consumer_read_ahead_start( mlt_consumer self )
 	pthread_cond_init( &priv->queue_cond, NULL );
 
 	// Create the read ahead
-	if ( mlt_properties_get( MLT_CONSUMER_PROPERTIES( self ), "priority" ) )
-	{
-		struct sched_param priority;
-		priority.sched_priority = mlt_properties_get_int( MLT_CONSUMER_PROPERTIES( self ), "priority" );
-		pthread_attr_t thread_attributes;
-		pthread_attr_init( &thread_attributes );
-		pthread_attr_setschedpolicy( &thread_attributes, SCHED_OTHER );
-		pthread_attr_setschedparam( &thread_attributes, &priority );
-		pthread_attr_setinheritsched( &thread_attributes, PTHREAD_EXPLICIT_SCHED );
-		pthread_attr_setscope( &thread_attributes, PTHREAD_SCOPE_SYSTEM );
-		if ( pthread_create( &priv->ahead_thread, &thread_attributes, consumer_read_ahead_thread, self ) < 0 )
-			pthread_create( &priv->ahead_thread, NULL, consumer_read_ahead_thread, self );
-		pthread_attr_destroy( &thread_attributes );
-	}
-	else
-	{
-		pthread_create( &priv->ahead_thread, NULL, consumer_read_ahead_thread, self );
-	}
+	mlt_thread_create( self, (thread_function_t) consumer_read_ahead_thread );
 	priv->started = 1;
 }
 
@@ -1083,7 +1102,12 @@ static void consumer_work_start( mlt_consumer self )
 {
 	consumer_private *priv = self->local;
 	int n = abs( priv->real_time );
-	pthread_t *thread = calloc( 1, sizeof( pthread_t ) * n );
+	pthread_t *thread;
+
+	if ( priv->started )
+		return;
+
+	thread = calloc( 1, sizeof( pthread_t ) * n );
 
 	// We're running now
 	priv->ahead = 1;
@@ -1168,6 +1192,7 @@ static void consumer_read_ahead_stop( mlt_consumer self )
 #endif
 		// Inform thread to stop
 		priv->ahead = 0;
+		mlt_events_fire( MLT_CONSUMER_PROPERTIES(self), "consumer-stopping", NULL );
 
 		// Broadcast to the condition in case it's waiting
 		pthread_mutex_lock( &priv->queue_mutex );
@@ -1180,20 +1205,13 @@ static void consumer_read_ahead_stop( mlt_consumer self )
 		pthread_mutex_unlock( &priv->put_mutex );
 
 		// Join the thread
-		pthread_join( priv->ahead_thread, NULL );
+		mlt_thread_join( self );
 
 		// Destroy the frame queue mutex
 		pthread_mutex_destroy( &priv->queue_mutex );
 
 		// Destroy the condition
 		pthread_cond_destroy( &priv->queue_cond );
-
-		// Wipe the queue
-		while ( mlt_deque_count( priv->queue ) )
-			mlt_frame_close( mlt_deque_pop_back( priv->queue ) );
-
-		// Close the queue
-		mlt_deque_close( priv->queue );
 	}
 }
 
@@ -1218,6 +1236,7 @@ static void consumer_work_stop( mlt_consumer self )
 #endif
 		// Inform thread to stop
 		priv->ahead = 0;
+		mlt_events_fire( MLT_CONSUMER_PROPERTIES(self), "consumer-stopping", NULL );
 
 		// Broadcast to the queue condition in case it's waiting
 		pthread_mutex_lock( &priv->queue_mutex );
@@ -1258,6 +1277,8 @@ static void consumer_work_stop( mlt_consumer self )
 		// Close the queues
 		mlt_deque_close( priv->queue );
 		mlt_deque_close( priv->worker_threads );
+
+		mlt_events_fire( MLT_CONSUMER_PROPERTIES(self), "consumer-thread-stopped", NULL );
 	}
 }
 
@@ -1281,14 +1302,15 @@ void mlt_consumer_purge( mlt_consumer self )
 		pthread_cond_broadcast( &priv->put_cond );
 		pthread_mutex_unlock( &priv->put_mutex );
 
-		if ( priv->started && priv->real_time )
-			pthread_mutex_lock( &priv->queue_mutex );
-
 		if ( self->purge )
 			self->purge( self );
 
+		if ( priv->started && priv->real_time )
+			pthread_mutex_lock( &priv->queue_mutex );
+
 		while ( priv->started && mlt_deque_count( priv->queue ) )
 			mlt_frame_close( mlt_deque_pop_back( priv->queue ) );
+
 		if ( priv->started && priv->real_time )
 		{
 			priv->is_purge = 1;
@@ -1478,14 +1500,16 @@ mlt_frame mlt_consumer_rt_frame( mlt_consumer self )
 	{
 		int size = 1;
 
-		// Is the read ahead running?
-		if ( priv->ahead == 0 )
+		if ( priv->preroll )
 		{
 			int buffer = mlt_properties_get_int( properties, "buffer" );
 			int prefill = mlt_properties_get_int( properties, "prefill" );
+#ifndef WIN32
 			consumer_read_ahead_start( self );
+#endif
 			if ( buffer > 1 )
 				size = prefill > 0 && prefill < buffer ? prefill : buffer;
+			priv->preroll = 0;
 		}
 
 		// Get frame from queue
@@ -1508,7 +1532,12 @@ mlt_frame mlt_consumer_rt_frame( mlt_consumer self )
 
 		// This isn't true, but from the consumers perspective it is
 		if ( frame != NULL )
+		{
 			mlt_properties_set_int( MLT_FRAME_PROPERTIES( frame ), "rendered", 1 );
+
+			// WebVfx uses this to setup a consumer-stopping event handler.
+			mlt_properties_set_data( MLT_FRAME_PROPERTIES( frame ), "consumer", self, 0, NULL, NULL );
+		}
 	}
 
 	return frame;
@@ -1551,7 +1580,6 @@ int mlt_consumer_stop( mlt_consumer self )
 	mlt_log( MLT_CONSUMER_SERVICE( self ), MLT_LOG_DEBUG, "stopping consumer\n" );
 	
 	// Cancel the read ahead threads
-	priv->ahead = 0;
 	if ( priv->started )
 	{
 		// Unblock the consumer calling mlt_consumer_rt_frame
@@ -1649,4 +1677,66 @@ mlt_position mlt_consumer_position( mlt_consumer consumer )
 {
 	return ( ( consumer_private* ) consumer->local )->position;
 }
-		
+
+static void transmit_thread_create( mlt_listener listener, mlt_properties owner, mlt_service self, void **args )
+{
+	if ( listener )
+		listener( owner, self,
+			(void**) args[0] /* handle */, (int*) args[1] /* priority */, (thread_function_t) args[2], (void*) args[3] /* data */ );
+}
+
+static void mlt_thread_create( mlt_consumer self, thread_function_t function )
+{
+	consumer_private *priv = self->local;
+	mlt_properties properties = MLT_CONSUMER_PROPERTIES( self );
+
+	if ( mlt_properties_get( MLT_CONSUMER_PROPERTIES( self ), "priority" ) )
+	{
+		struct sched_param priority;
+		priority.sched_priority = mlt_properties_get_int( MLT_CONSUMER_PROPERTIES( self ), "priority" );
+		if ( mlt_events_fire( properties, "consumer-thread-create",
+		     &priv->ahead_thread, &priority.sched_priority, function, self, NULL ) < 1 )
+		{
+			pthread_attr_t thread_attributes;
+			pthread_attr_init( &thread_attributes );
+			pthread_attr_setschedpolicy( &thread_attributes, SCHED_OTHER );
+			pthread_attr_setschedparam( &thread_attributes, &priority );
+			pthread_attr_setinheritsched( &thread_attributes, PTHREAD_EXPLICIT_SCHED );
+			pthread_attr_setscope( &thread_attributes, PTHREAD_SCOPE_SYSTEM );
+			priv->ahead_thread = malloc( sizeof( pthread_t ) );
+			pthread_t *handle = priv->ahead_thread;
+			if ( pthread_create( ( pthread_t* ) &( *handle ), &thread_attributes, function, self ) < 0 )
+				pthread_create( ( pthread_t* ) &( *handle ), NULL, function, self );
+			pthread_attr_destroy( &thread_attributes );
+		}
+	}
+	else
+	{
+		int priority = -1;
+		if ( mlt_events_fire( properties, "consumer-thread-create",
+		     &priv->ahead_thread, &priority, function, self, NULL ) < 1 )
+		{
+			priv->ahead_thread = malloc( sizeof( pthread_t ) );
+			pthread_t *handle = priv->ahead_thread;
+			pthread_create( ( pthread_t* ) &( *handle ), NULL, function, self );
+		}
+	}
+}
+
+static void transmit_thread_join( mlt_listener listener, mlt_properties owner, mlt_service self, void **args )
+{
+	if ( listener )
+		listener( owner, self, (void*) args[0] /* handle */ );
+}
+
+static void mlt_thread_join( mlt_consumer self )
+{
+	consumer_private *priv = self->local;
+	if ( mlt_events_fire( MLT_CONSUMER_PROPERTIES(self), "consumer-thread-join", priv->ahead_thread, NULL ) < 1 )
+	{
+		pthread_t *handle = priv->ahead_thread;
+		pthread_join( *handle, NULL );
+		free( priv->ahead_thread );
+	}
+	priv->ahead_thread = NULL;
+}

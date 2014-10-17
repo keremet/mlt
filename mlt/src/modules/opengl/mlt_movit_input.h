@@ -20,42 +20,35 @@
 #ifndef MLT_MOVIT_INPUT_H
 #define MLT_MOVIT_INPUT_H
 
+#include <framework/mlt_types.h>
+
 #include <movit/flat_input.h>
 #include <movit/ycbcr_input.h>
 #include <movit/effect_chain.h>
 
-class MltInput : public Input
+class MltInput
 {
 public:
-	MltInput(unsigned width, unsigned height);
+	MltInput( mlt_image_format format );
 	~MltInput();
 
-	// Effect overrides
-	std::string effect_type_id() const { return "MltInput"; }
-	Effect::AlphaHandling alpha_handling() const;
-	std::string output_fragment_shader();
-	void set_gl_state(GLuint glsl_program_num, const std::string& prefix, unsigned *sampler_num);
-
-	// Input ovverrides
-	void finalize();
-	bool can_output_linear_gamma() const;
-	unsigned get_width() const { return m_width; }
-	unsigned get_height() const { return m_height; }
-	Colorspace get_color_space() const;
-	GammaCurve get_gamma_curve() const;
-
-	// Custom methods
-	void useFlatInput(EffectChain* chain, MovitPixelFormat pix_fmt, unsigned width, unsigned height);
-	void useYCbCrInput(EffectChain* chain, const ImageFormat& image_format, const YCbCrFormat& ycbcr_format, unsigned width, unsigned height);
-	void useFBOInput(EffectChain* chain, GLuint texture);
+	void useFlatInput(movit::MovitPixelFormat pix_fmt, unsigned width, unsigned height);
+	void useYCbCrInput(const movit::ImageFormat& image_format, const movit::YCbCrFormat& ycbcr_format, unsigned width, unsigned height);
 	void set_pixel_data(const unsigned char* data);
+	void invalidate_pixel_data();
+	movit::Input *get_input() { return input; }
+
+	// The original pixel format that was used to create this MltInput,
+	// in case we change our mind later and want to convert on the CPU instead.
+	mlt_image_format get_format() const { return m_format; }
 
 private:
+	mlt_image_format m_format;
 	unsigned m_width, m_height;
-	int output_linear_gamma, needs_mipmaps;
-	Input *input;
+	// Note: Owned by the EffectChain, so should not be deleted by us.
+	movit::Input *input;
 	bool isRGB;
-	YCbCrFormat m_ycbcr_format;
+	movit::YCbCrFormat m_ycbcr_format;
 };
 
 #endif // MLT_MOVIT_INPUT_H

@@ -1,6 +1,6 @@
 /*
  * filter_mirror.c -- mirror filter
- * Copyright (C) 2003-2004 Ushodaya Enterprises Limited
+ * Copyright (C) 2003-2014 Ushodaya Enterprises Limited
  * Author: Charles Yates <charles.yates@pandora.be>
  *
  * This library is free software; you can redistribute it and/or
@@ -31,10 +31,10 @@
 static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format *format, int *width, int *height, int writable )
 {
 	// Pop the mirror filter from the stack
-	mlt_filter this = mlt_frame_pop_service( frame );
+	mlt_filter filter = mlt_frame_pop_service( frame );
 
 	// Get the mirror type
-	mlt_properties properties = MLT_FILTER_PROPERTIES( this );
+	mlt_properties properties = MLT_FILTER_PROPERTIES( filter );
 
 	// Get the properties
 	char *mirror = mlt_properties_get( properties, "mirror" );
@@ -298,10 +298,10 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 /** Filter processing.
 */
 
-static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
+static mlt_frame filter_process( mlt_filter filter, mlt_frame frame )
 {
 	// Push the service on to the stack
-	mlt_frame_push_service( frame, this );
+	mlt_frame_push_service( frame, filter );
 
 	// Push the filter method on to the stack
 	mlt_frame_push_service( frame, filter_get_image );
@@ -315,22 +315,22 @@ static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
 mlt_filter filter_mirror_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg )
 {
 	// Construct a new filter
-	mlt_filter this = mlt_filter_new( );
+	mlt_filter filter = mlt_filter_new( );
 
 	// If we have a filter, initialise it
-	if ( this != NULL )
+	if ( filter != NULL )
 	{
 		// Get the properties
-		mlt_properties properties = MLT_FILTER_PROPERTIES( this );
+		mlt_properties properties = MLT_FILTER_PROPERTIES( filter );
 
 		// Set the default mirror type
 		mlt_properties_set_or_default( properties, "mirror", arg, "horizontal" );
 
 		// Assign the process method
-		this->process = filter_process;
+		filter->process = filter_process;
 	}
 
 	// Return the filter
-	return this;
+	return filter;
 }
 

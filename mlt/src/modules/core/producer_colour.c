@@ -27,11 +27,6 @@
 #include <string.h>
 
 
-typedef struct
-{
-	uint8_t r, g, b, a;
-} rgba_color;
-
 static int producer_get_frame( mlt_producer parent, mlt_frame_ptr frame, int index );
 static void producer_close( mlt_producer parent );
 
@@ -56,45 +51,6 @@ mlt_producer producer_colour_init( mlt_profile profile, mlt_service_type type, c
 	}
 	free( producer );
 	return NULL;
-}
-
-rgba_color parse_color( char *color, unsigned int color_int )
-{
-	rgba_color result = { 0xff, 0xff, 0xff, 0xff };
-
-	if ( !strcmp( color, "red" ) )
-	{
-		result.r = 0xff;
-		result.g = 0x00;
-		result.b = 0x00;
-	}
-	else if ( !strcmp( color, "green" ) )
-	{
-		result.r = 0x00;
-		result.g = 0xff;
-		result.b = 0x00;
-	}
-	else if ( !strcmp( color, "blue" ) )
-	{
-		result.r = 0x00;
-		result.g = 0x00;
-		result.b = 0xff;
-	}
-	else if ( !strcmp( color, "black" ) )
-	{
-		result.r = 0x00;
-		result.g = 0x00;
-		result.b = 0x00;
-	}
-	else if ( strcmp( color, "white" ) )
-	{
-		result.r = ( color_int >> 24 ) & 0xff;
-		result.g = ( color_int >> 16 ) & 0xff;
-		result.b = ( color_int >> 8 ) & 0xff;
-		result.a = ( color_int ) & 0xff;
-	}
-
-	return result;
 }
 
 static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_format *format, int *width, int *height, int writable )
@@ -129,10 +85,10 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 		free( now );
 		now = mlt_properties_get( producer_props, "resource" );
 	}
-	rgba_color color = parse_color( now, mlt_properties_get_int( producer_props, "resource" ) );
+	mlt_color color = mlt_properties_get_color( producer_props, "resource" );
 
 	// Choose suitable out values if nothing specific requested
-	if ( *format == mlt_image_none )
+	if ( *format == mlt_image_none || *format == mlt_image_glsl )
 		*format = mlt_image_rgb24a;
 	if ( *width <= 0 )
 		*width = mlt_service_profile( MLT_PRODUCER_SERVICE(producer) )->width;
@@ -140,7 +96,7 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 		*height = mlt_service_profile( MLT_PRODUCER_SERVICE(producer) )->height;
 
 	// See if we need to regenerate
-	if ( strcmp( now, then ) || *width != current_width || *height != current_height || *format != current_format )
+	if ( !now || ( then && strcmp( now, then ) ) || *width != current_width || *height != current_height || *format != current_format )
 	{
 		// Color the image
 		int i = *width * *height + 1;
@@ -195,7 +151,12 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 				*p ++ = color.b;
 			}
 			break;
+		case mlt_image_glsl:
+		case mlt_image_glsl_texture:
+			memset(p, 0, size);
+			break;
 		default:
+			*format = mlt_image_rgb24a;
 			while ( --i )
 			{
 				*p ++ = color.r;

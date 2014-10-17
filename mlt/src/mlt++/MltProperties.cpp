@@ -102,9 +102,9 @@ void Properties::unblock( void *object )
 	mlt_events_unblock( get_properties( ), object != NULL ? object : get_properties( ) );
 }
 
-void Properties::fire_event( const char *event )
+int Properties::fire_event( const char *event )
 {
-	mlt_events_fire( get_properties( ), event, NULL );
+	return mlt_events_fire( get_properties( ), event, NULL );
 }
 
 bool Properties::is_valid( )
@@ -242,22 +242,7 @@ void Properties::load( const char *file )
 
 int Properties::save( const char *file )
 {
-#ifdef WIN32
 	return mlt_properties_save( get_properties( ), file );
-#else
-	int error = 0;
-	FILE *f = fopen( file, "w" );
-	if ( f != NULL )
-	{
-		dump( f );
-		fclose( f );
-	}
-	else
-	{
-		error = 1;
-	}
-	return error;
-#endif
 }
 
 #if defined( __DARWIN__ ) && GCC_VERSION < 40000
@@ -335,6 +320,16 @@ const char *Properties::get_lcnumeric( )
 char *Properties::get_time( const char *name, mlt_time_format format )
 {
 	return mlt_properties_get_time( get_properties(), name, format );
+}
+
+char *Properties::frames_to_time( int frames, mlt_time_format format )
+{
+	return mlt_properties_frames_to_time( get_properties(), frames, format );
+}
+
+int Properties::time_to_frames( const char *time )
+{
+	return mlt_properties_time_to_frames( get_properties(), time );
 }
 
 mlt_color Properties::get_color( const char *name )

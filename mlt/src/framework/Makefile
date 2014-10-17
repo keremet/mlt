@@ -81,6 +81,7 @@ INCS = mlt_consumer.h \
 SRCS := $(OBJS:.o=.c)
 
 ifeq ($(targetos), MinGW)
+LDFLAGS += -liconv
 OBJS += ../win32/win32.o
 SRCS += ../win32/win32.c
 endif

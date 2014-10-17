@@ -20,9 +20,11 @@
 
 #include <stdlib.h>
 #include <string>
-#include "glsl_manager.h"
+#include "filter_glsl_manager.h"
 #include <movit/init.h>
+#include <movit/util.h>
 #include <movit/effect_chain.h>
+#include <movit/resource_pool.h>
 #include "mlt_movit_input.h"
 #include "mlt_flip_effect.h"
 #include <mlt++/MltEvent.h>
@@ -32,37 +34,69 @@ extern "C" {
 #include <framework/mlt_factory.h>
 }
 
-void deleteManager(GlslManager *p)
+#if defined(__DARWIN__)
+#include <OpenGL/OpenGL.h>
+#elif defined(WIN32)
+#include <wingdi.h>
+#else
+#include <GL/glx.h>
+#endif
+
+using namespace movit;
+
+void dec_ref_and_delete(GlslManager *p)
 {
-	delete p;
+	if (p->dec_ref() == 0) {
+		delete p;
+	}
 }
 
 GlslManager::GlslManager()
 	: Mlt::Filter( mlt_filter_new() )
+	, resource_pool(new ResourcePool())
 	, pbo(0)
 	, initEvent(0)
+	, closeEvent(0)
+	, prev_sync(NULL)
 {
 	mlt_filter filter = get_filter();
 	if ( filter ) {
 		// Set the mlt_filter child in case we choose to override virtual functions.
 		filter->child = this;
-		mlt_properties_set_data(mlt_global_properties(), "glslManager", this, 0,
-			(mlt_destructor) deleteManager, NULL);
+		add_ref(mlt_global_properties());
 
 		mlt_events_register( get_properties(), "init glsl", NULL );
+		mlt_events_register( get_properties(), "close glsl", NULL );
 		initEvent = listen("init glsl", this, (mlt_listener) GlslManager::onInit);
+		closeEvent = listen("close glsl", this, (mlt_listener) GlslManager::onClose);
 	}
 }
 
 GlslManager::~GlslManager()
 {
 	mlt_log_debug(get_service(), "%s\n", __FUNCTION__);
-	while (fbo_list.peek_back())
-		delete (glsl_fbo) fbo_list.pop_back();
-	while (texture_list.peek_back())
-		delete (glsl_texture) texture_list.pop_back();
-	delete pbo;
+	cleanupContext();
+// XXX If there is still a frame holding a reference to a texture after this
+// destructor is called, then it will crash in release_texture().
+//	while (texture_list.peek_back())
+//		delete (glsl_texture) texture_list.pop_back();
 	delete initEvent;
+	delete closeEvent;
+	if (prev_sync != NULL) {
+		glDeleteSync( prev_sync );
+	}
+	while (syncs_to_delete.count() > 0) {
+		GLsync sync = (GLsync) syncs_to_delete.pop_front();
+		glDeleteSync( sync );
+	}
+	delete resource_pool;
+}
+
+void GlslManager::add_ref(mlt_properties properties)
+{
+	inc_ref();
+	mlt_properties_set_data(properties, "glslManager", this, 0,
+	    (mlt_destructor) dec_ref_and_delete, NULL);
 }
 
 GlslManager* GlslManager::get_instance()
@@ -70,40 +104,9 @@ GlslManager* GlslManager::get_instance()
 	return (GlslManager*) mlt_properties_get_data(mlt_global_properties(), "glslManager", 0);
 }
 
-glsl_fbo GlslManager::get_fbo(int width, int height)
-{
-	for (int i = 0; i < fbo_list.count(); ++i) {
-		glsl_fbo fbo = (glsl_fbo) fbo_list.peek(i);
-		if (!fbo->used && (fbo->width == width) && (fbo->height == height)) {
-			fbo->used = 1;
-			return fbo;
-		}
-	}
-	GLuint fb = 0;
-	glGenFramebuffers(1, &fb);
-	if (!fb)
-		return NULL;
-
-	glsl_fbo fbo = new glsl_fbo_s;
-	if (!fbo) {
-		glDeleteFramebuffers(1, &fb);
-		return NULL;
-	}
-	fbo->fbo = fb;
-	fbo->width = width;
-	fbo->height = height;
-	fbo->used = 1;
-	fbo_list.push_back(fbo);
-	return fbo;
-}
-
-void GlslManager::release_fbo(glsl_fbo fbo)
-{
-	fbo->used = 0;
-}
-
 glsl_texture GlslManager::get_texture(int width, int height, GLint internal_format)
 {
+	lock();
 	for (int i = 0; i < texture_list.count(); ++i) {
 		glsl_texture tex = (glsl_texture) texture_list.peek(i);
 		if (!tex->used && (tex->width == width) && (tex->height == height) && (tex->internal_format == internal_format)) {
@@ -112,21 +115,26 @@ glsl_texture GlslManager::get_texture(int width, int height, GLint internal_form
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 			glBindTexture( GL_TEXTURE_2D, 0);
 			tex->used = 1;
+			unlock();
 			return tex;
 		}
 	}
+	unlock();
+
 	GLuint tex = 0;
 	glGenTextures(1, &tex);
-	if (!tex)
+	if (!tex) {
 		return NULL;
+	}
 
 	glsl_texture gtex = new glsl_texture_s;
 	if (!gtex) {
 		glDeleteTextures(1, &tex);
 		return NULL;
 	}
+
 	glBindTexture( GL_TEXTURE_2D, tex );
-	glTexImage2D( GL_TEXTURE_2D, 0, internal_format, width, height, 0, internal_format, GL_UNSIGNED_BYTE, NULL );
+	glTexImage2D( GL_TEXTURE_2D, 0, internal_format, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL );
     glTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
     glTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
     glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
@@ -138,7 +146,9 @@ glsl_texture GlslManager::get_texture(int width, int height, GLint internal_form
 	gtex->height = height;
 	gtex->internal_format = internal_format;
 	gtex->used = 1;
+	lock();
 	texture_list.push_back(gtex);
+	unlock();
 	return gtex;
 }
 
@@ -147,20 +157,36 @@ void GlslManager::release_texture(glsl_texture texture)
 	texture->used = 0;
 }
 
+void GlslManager::delete_sync(GLsync sync)
+{
+	// We do not know which thread we are called from, and we can only
+	// delete this if we are in one with a valid OpenGL context.
+	// Thus, store it for later deletion in render_frame_texture().
+	GlslManager* g = GlslManager::get_instance();
+	g->lock();
+	g->syncs_to_delete.push_back(sync);
+	g->unlock();
+}
+
 glsl_pbo GlslManager::get_pbo(int size)
 {
+	lock();
 	if (!pbo) {
 		GLuint pb = 0;
 		glGenBuffers(1, &pb);
-		if (!pb)
+		if (!pb) {
+			unlock();
 			return NULL;
+		}
 
 		pbo = new glsl_pbo_s;
 		if (!pbo) {
 			glDeleteBuffers(1, &pb);
+			unlock();
 			return NULL;
 		}
 		pbo->pbo = pb;
+		pbo->size = 0;
 	}
 	if (size > pbo->size) {
 		glBindBuffer(GL_PIXEL_UNPACK_BUFFER_ARB, pbo->pbo);
@@ -168,7 +194,25 @@ glsl_pbo GlslManager::get_pbo(int size)
 		glBindBuffer(GL_PIXEL_UNPACK_BUFFER_ARB, 0);
 		pbo->size = size;
 	}
+	unlock();
 	return pbo;
+}
+
+void GlslManager::cleanupContext()
+{
+	lock();
+	while (texture_list.peek_back()) {
+		glsl_texture texture = (glsl_texture) texture_list.peek_back();
+		glDeleteTextures(1, &texture->texture);
+		delete texture;
+		texture_list.pop_back();
+	}
+	if (pbo) {
+		glDeleteBuffers(1, &pbo->pbo);
+		delete pbo;
+		pbo = 0;
+	}
+	unlock();
 }
 
 void GlslManager::onInit( mlt_properties owner, GlslManager* filter )
@@ -181,8 +225,13 @@ void GlslManager::onInit( mlt_properties owner, GlslManager* filter )
 #else
 	std::string path = std::string(getenv("MLT_MOVIT_PATH") ? getenv("MLT_MOVIT_PATH") : SHADERDIR);
 #endif
-	::init_movit( path, mlt_log_get_level() == MLT_LOG_DEBUG? MOVIT_DEBUG_ON : MOVIT_DEBUG_OFF );
-	filter->set( "glsl_supported", movit_initialized );
+	bool success = init_movit( path, mlt_log_get_level() == MLT_LOG_DEBUG? MOVIT_DEBUG_ON : MOVIT_DEBUG_OFF );
+	filter->set( "glsl_supported", success );
+}
+
+void GlslManager::onClose( mlt_properties owner, GlslManager *filter )
+{
+	filter->cleanupContext();
 }
 
 void GlslManager::onServiceChanged( mlt_properties owner, mlt_service aservice )
@@ -190,9 +239,6 @@ void GlslManager::onServiceChanged( mlt_properties owner, mlt_service aservice )
 	Mlt::Service service( aservice );
 	service.lock();
 	service.set( "movit chain", NULL, 0 );
-	service.set( "movit input", NULL, 0 );
-	// Destroy the effect list.
-	GlslManager::get_instance()->set( service.get( "_unique_id" ), NULL, 0 );
 	service.unlock();
 }
 
@@ -216,96 +262,234 @@ mlt_filter filter_glsl_manager_init( mlt_profile profile, mlt_service_type type,
 
 } // extern "C"
 
-Mlt::Properties GlslManager::effect_list( Mlt::Service& service )
+static void deleteChain( GlslChain* chain )
 {
-	char *unique_id =  service.get( "_unique_id" );
-	mlt_properties properties = (mlt_properties) get_data( unique_id );
-	if ( !properties ) {
-		properties = mlt_properties_new();
-		set( unique_id, properties, 0, (mlt_destructor) mlt_properties_close );
+	// The Input* is owned by the EffectChain, but the MltInput* is not.
+	// Thus, we have to delete it here.
+	for (std::map<mlt_producer, MltInput*>::iterator input_it = chain->inputs.begin();
+	     input_it != chain->inputs.end();
+	     ++input_it) {
+		delete input_it->second;
 	}
-	Mlt::Properties p( properties );
-	return p;
-}
-
-static void deleteChain( EffectChain* chain )
-{
+	delete chain->effect_chain;
 	delete chain;
 }
-
-bool GlslManager::init_chain( mlt_service aservice )
+	
+void* GlslManager::get_frame_specific_data( mlt_service service, mlt_frame frame, const char *key, int *length )
 {
-	bool error = true;
-	Mlt::Service service( aservice );
-	EffectChain* chain = (EffectChain*) service.get_data( "movit chain" );
-	if ( !chain ) {
-		mlt_profile profile = mlt_service_profile( aservice );
-		Input* input = new MltInput( profile->width, profile->height );
-		chain = new EffectChain( profile->display_aspect_num, profile->display_aspect_den );
-		chain->add_input( input );
-		service.set( "movit chain", chain, 0, (mlt_destructor) deleteChain );
-		service.set( "movit input", input, 0 );
-		service.set( "_movit finalized", 0 );
-		service.listen( "service-changed", aservice, (mlt_listener) GlslManager::onServiceChanged );
-		service.listen( "property-changed", aservice, (mlt_listener) GlslManager::onPropertyChanged );
-		error = false;
-	}
-	return error;
+	const char *unique_id = mlt_properties_get( MLT_SERVICE_PROPERTIES(service), "_unique_id" );
+	char buf[256];
+	snprintf( buf, sizeof(buf), "%s_%s", key, unique_id );
+	return mlt_properties_get_data( MLT_FRAME_PROPERTIES(frame), buf, length );
 }
 
-EffectChain* GlslManager::get_chain( mlt_service service )
+int GlslManager::set_frame_specific_data( mlt_service service, mlt_frame frame, const char *key, void *value, int length, mlt_destructor destroy, mlt_serialiser serialise )
 {
-	return (EffectChain*) mlt_properties_get_data( MLT_SERVICE_PROPERTIES(service), "movit chain", NULL );
+	const char *unique_id = mlt_properties_get( MLT_SERVICE_PROPERTIES(service), "_unique_id" );
+	char buf[256];
+	snprintf( buf, sizeof(buf), "%s_%s", key, unique_id );
+	return mlt_properties_set_data( MLT_FRAME_PROPERTIES(frame), buf, value, length, destroy, serialise );
 }
 
-MltInput *GlslManager::get_input( mlt_service service )
+void GlslManager::set_chain( mlt_service service, GlslChain* chain )
 {
-	return (MltInput*) mlt_properties_get_data( MLT_SERVICE_PROPERTIES(service), "movit input", NULL );
+	mlt_properties_set_data( MLT_SERVICE_PROPERTIES(service), "_movit chain", chain, 0, (mlt_destructor) deleteChain, NULL );
 }
 
-void GlslManager::reset_finalized( mlt_service service )
+GlslChain* GlslManager::get_chain( mlt_service service )
 {
-	mlt_properties_set_int( MLT_SERVICE_PROPERTIES(service), "_movit finalized", 0 );
+	return (GlslChain*) mlt_properties_get_data( MLT_SERVICE_PROPERTIES(service), "_movit chain", NULL );
+}
+	
+Effect* GlslManager::get_effect( mlt_service service, mlt_frame frame )
+{
+	return (Effect*) get_frame_specific_data( service, frame, "_movit effect", NULL );
 }
 
-Effect* GlslManager::get_effect( mlt_filter filter, mlt_frame frame )
+Effect* GlslManager::set_effect( mlt_service service, mlt_frame frame, Effect* effect )
 {
-	Mlt::Producer producer( mlt_producer_cut_parent( mlt_frame_get_original_producer( frame ) ) );
-	char *unique_id = mlt_properties_get( MLT_FILTER_PROPERTIES(filter), "_unique_id" );
-	return (Effect*) GlslManager::get_instance()->effect_list( producer ).get_data( unique_id );
-}
-
-Effect* GlslManager::add_effect( mlt_filter filter, mlt_frame frame, Effect* effect )
-{
-	Mlt::Producer producer( mlt_producer_cut_parent( mlt_frame_get_original_producer( frame ) ) );
-	EffectChain* chain = (EffectChain*) producer.get_data( "movit chain" );
-	chain->add_effect( effect );
-	char *unique_id = mlt_properties_get( MLT_FILTER_PROPERTIES(filter), "_unique_id" );
-	GlslManager::get_instance()->effect_list( producer ).set( unique_id, effect, 0 );
+	set_frame_specific_data( service, frame, "_movit effect", effect, 0, NULL, NULL );
 	return effect;
 }
 
-Effect* GlslManager::add_effect( mlt_filter filter, mlt_frame frame, Effect* effect, Effect* input_b )
+MltInput* GlslManager::get_input( mlt_producer producer, mlt_frame frame )
 {
-	Mlt::Producer producer( mlt_producer_cut_parent( mlt_frame_get_original_producer( frame ) ) );
-	EffectChain* chain = (EffectChain*) producer.get_data( "movit chain" );
-	chain->add_effect( effect, chain->last_added_effect(),
-		input_b? input_b : chain->last_added_effect() );
-	char *unique_id = mlt_properties_get( MLT_FILTER_PROPERTIES(filter), "_unique_id" );
-	GlslManager::get_instance()->effect_list( producer ).set( unique_id, effect, 0 );
-	return effect;
+	return (MltInput*) get_frame_specific_data( MLT_PRODUCER_SERVICE(producer), frame, "_movit input", NULL );
 }
 
-void GlslManager::render( mlt_service service, void* chain, GLuint fbo, int width, int height )
+MltInput* GlslManager::set_input( mlt_producer producer, mlt_frame frame, MltInput* input )
 {
-	EffectChain* effect_chain = (EffectChain*) chain;
-	mlt_properties properties = MLT_SERVICE_PROPERTIES( service );
-	if ( !mlt_properties_get_int( properties, "_movit finalized" ) ) {
-		mlt_properties_set_int( properties, "_movit finalized", 1 );
-		effect_chain->add_effect( new Mlt::VerticalFlip() );
-		effect_chain->finalize();
+	set_frame_specific_data( MLT_PRODUCER_SERVICE(producer), frame, "_movit input", input, 0, NULL, NULL );
+	return input;
+}
+
+uint8_t* GlslManager::get_input_pixel_pointer( mlt_producer producer, mlt_frame frame )
+{
+	return (uint8_t*) get_frame_specific_data( MLT_PRODUCER_SERVICE(producer), frame, "_movit input pp", NULL );
+}
+
+uint8_t* GlslManager::set_input_pixel_pointer( mlt_producer producer, mlt_frame frame, uint8_t* image )
+{
+	set_frame_specific_data( MLT_PRODUCER_SERVICE(producer), frame, "_movit input pp", image, 0, NULL, NULL );
+	return image;
+}
+
+mlt_service GlslManager::get_effect_input( mlt_service service, mlt_frame frame )
+{
+	return (mlt_service) get_frame_specific_data( service, frame, "_movit effect input", NULL );
+}
+
+void GlslManager::set_effect_input( mlt_service service, mlt_frame frame, mlt_service input_service )
+{
+	set_frame_specific_data( service, frame, "_movit effect input", input_service, 0, NULL, NULL );
+}
+
+void GlslManager::get_effect_secondary_input( mlt_service service, mlt_frame frame, mlt_service *input_service, mlt_frame *input_frame)
+{
+	*input_service = (mlt_service) get_frame_specific_data( service, frame, "_movit effect secondary input", NULL );
+	*input_frame = (mlt_frame) get_frame_specific_data( service, frame, "_movit effect secondary input frame", NULL );
+}
+
+void GlslManager::set_effect_secondary_input( mlt_service service, mlt_frame frame, mlt_service input_service, mlt_frame input_frame )
+{
+	set_frame_specific_data( service, frame, "_movit effect secondary input", input_service, 0, NULL, NULL );
+	set_frame_specific_data( service, frame, "_movit effect secondary input frame", input_frame, 0, NULL, NULL );
+}
+
+void GlslManager::get_effect_third_input( mlt_service service, mlt_frame frame, mlt_service *input_service, mlt_frame *input_frame)
+{
+	*input_service = (mlt_service) get_frame_specific_data( service, frame, "_movit effect third input", NULL );
+	*input_frame = (mlt_frame) get_frame_specific_data( service, frame, "_movit effect third input frame", NULL );
+}
+
+void GlslManager::set_effect_third_input( mlt_service service, mlt_frame frame, mlt_service input_service, mlt_frame input_frame )
+{
+	set_frame_specific_data( service, frame, "_movit effect third input", input_service, 0, NULL, NULL );
+	set_frame_specific_data( service, frame, "_movit effect third input frame", input_frame, 0, NULL, NULL );
+}
+
+int GlslManager::render_frame_texture(EffectChain *chain, mlt_frame frame, int width, int height, uint8_t **image)
+{
+	glsl_texture texture = get_texture( width, height, GL_RGBA8 );
+	if (!texture) {
+		return 1;
 	}
-	effect_chain->render_to_fbo( fbo, width, height );
+
+	GLuint fbo;
+	glGenFramebuffers( 1, &fbo );
+	check_error();
+	glBindFramebuffer( GL_FRAMEBUFFER, fbo );
+	check_error();
+	glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture->texture, 0 );
+	check_error();
+	glBindFramebuffer( GL_FRAMEBUFFER, 0 );
+	check_error();
+
+	lock();
+	while (syncs_to_delete.count() > 0) {
+		GLsync sync = (GLsync) syncs_to_delete.pop_front();
+		glDeleteSync( sync );
+	}
+	unlock();
+
+	// Make sure we never have more than one frame pending at any time.
+	// This ensures we do not swamp the GPU with so much work
+	// that we cannot actually display the frames we generate.
+	if (prev_sync != NULL) {
+		glFlush();
+		glClientWaitSync( prev_sync, 0, GL_TIMEOUT_IGNORED );
+		glDeleteSync( prev_sync );
+	}
+	chain->render_to_fbo( fbo, width, height );
+	prev_sync = glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 );
+	GLsync sync = glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 );
+
+	check_error();
+	glBindFramebuffer( GL_FRAMEBUFFER, 0 );
+	check_error();
+	glDeleteFramebuffers( 1, &fbo );
+	check_error();
+
+	*image = (uint8_t*) &texture->texture;
+	mlt_frame_set_image( frame, *image, 0, NULL );
+	mlt_properties_set_data( MLT_FRAME_PROPERTIES(frame), "movit.convert.texture", texture, 0,
+		(mlt_destructor) GlslManager::release_texture, NULL );
+	mlt_properties_set_data( MLT_FRAME_PROPERTIES(frame), "movit.convert.fence", sync, 0,
+		(mlt_destructor) GlslManager::delete_sync, NULL );
+
+	return 0;
+}
+
+int GlslManager::render_frame_rgba(EffectChain *chain, mlt_frame frame, int width, int height, uint8_t **image)
+{
+	glsl_texture texture = get_texture( width, height, GL_RGBA8 );
+	if (!texture) {
+		return 1;
+	}
+
+	// Use a PBO to hold the data we read back with glReadPixels().
+	// (Intel/DRI goes into a slow path if we don't read to PBO.)
+	int img_size = width * height * 4;
+	glsl_pbo pbo = get_pbo( img_size );
+	if (!pbo) {
+		release_texture(texture);
+		return 1;
+	}
+
+	// Set the FBO
+	GLuint fbo;
+	glGenFramebuffers( 1, &fbo );
+	check_error();
+	glBindFramebuffer( GL_FRAMEBUFFER, fbo );
+	check_error();
+	glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture->texture, 0 );
+	check_error();
+	glBindFramebuffer( GL_FRAMEBUFFER, 0 );
+	check_error();
+
+	chain->render_to_fbo( fbo, width, height );
+
+	// Read FBO into PBO
+	glBindFramebuffer( GL_FRAMEBUFFER, fbo );
+	check_error();
+	glBindBuffer( GL_PIXEL_PACK_BUFFER_ARB, pbo->pbo );
+	check_error();
+	glBufferData( GL_PIXEL_PACK_BUFFER_ARB, img_size, NULL, GL_STREAM_READ );
+	check_error();
+	glReadPixels( 0, 0, width, height, GL_BGRA, GL_UNSIGNED_BYTE, BUFFER_OFFSET(0) );
+	check_error();
+
+	// Copy from PBO
+	uint8_t* buf = (uint8_t*) glMapBuffer( GL_PIXEL_PACK_BUFFER_ARB, GL_READ_ONLY );
+	check_error();
+	*image = (uint8_t*) mlt_pool_alloc( img_size );
+	mlt_frame_set_image( frame, *image, img_size, mlt_pool_release );
+	memcpy( *image, buf, img_size );
+
+	// Convert BGRA to RGBA
+	register uint8_t *p = *image;
+	register int n = width * height + 1;
+	while ( --n ) {
+		uint8_t b = p[0];
+		*p = p[2]; p += 2;
+		*p = b; p += 2;
+	}
+
+	// Release PBO and FBO
+	glUnmapBuffer( GL_PIXEL_PACK_BUFFER_ARB );
+	check_error();
+	glBindBuffer( GL_PIXEL_PACK_BUFFER_ARB, 0 );
+	check_error();
+	glBindFramebuffer( GL_FRAMEBUFFER, 0 );
+	check_error();
+	glBindTexture( GL_TEXTURE_2D, 0 );
+	check_error();
+	mlt_properties_set_data( MLT_FRAME_PROPERTIES(frame), "movit.convert.texture", texture, 0,
+		(mlt_destructor) GlslManager::release_texture, NULL);
+	glDeleteFramebuffers( 1, &fbo );
+	check_error();
+
+	return 0;
 }
 
 void GlslManager::lock_service( mlt_frame frame )

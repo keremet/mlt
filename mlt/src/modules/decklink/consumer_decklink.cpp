@@ -100,7 +100,7 @@ public:
 		m_decklinkFrame = NULL;
 	}
 
-	~DeckLinkConsumer()
+	virtual ~DeckLinkConsumer()
 	{
 		SAFE_RELEASE( m_displayMode );
 		SAFE_RELEASE( m_deckLinkKeyer );
@@ -246,7 +246,8 @@ public:
 		}
 
 		// Set the video output mode
-		if ( S_OK != m_deckLinkOutput->EnableVideoOutput( m_displayMode->GetDisplayMode(), bmdVideoOutputFlagDefault ) )
+		if ( S_OK != m_deckLinkOutput->EnableVideoOutput( m_displayMode->GetDisplayMode(),
+			(BMDVideoOutputFlags) (bmdVideoOutputFlagDefault | bmdVideoOutputRP188 | bmdVideoOutputVITC) ) )
 		{
 			mlt_log_error( getConsumer(), "Failed to enable video output\n" );
 			return false;
@@ -416,9 +417,9 @@ public:
 					// Normal non-keyer playout - needs byte swapping
 					if ( !progressive && m_displayMode->GetFieldDominance() == bmdUpperFieldFirst )
 						// convert lower field first to top field first
-						swab( (char*) image, (char*) buffer + stride, stride * ( height - 1 ) );
+						swab2( (char*) image, (char*) buffer + stride, stride * ( height - 1 ) );
 					else
-						swab( (char*) image, (char*) buffer, stride * height );
+						swab2( (char*) image, (char*) buffer, stride * height );
 				}
 				else if ( !mlt_properties_get_int( MLT_FRAME_PROPERTIES( frame ), "test_image" ) )
 				{
@@ -454,7 +455,28 @@ public:
 			}
 		}
 		if ( m_decklinkFrame )
+		{
+			char* vitc;
+
+			// set timecode
+			vitc = mlt_properties_get( MLT_FRAME_PROPERTIES( frame ), "meta.attr.vitc.markup" );
+			if( vitc )
+			{
+				int h, m, s, f;
+				if ( 4 == sscanf( vitc, "%d:%d:%d:%d", &h, &m, &s, &f ) )
+					m_decklinkFrame->SetTimecodeFromComponents(bmdTimecodeVITC,
+						h, m, s, f, bmdTimecodeFlagDefault);
+			}
+
+			// set userbits
+			vitc = mlt_properties_get( MLT_FRAME_PROPERTIES( frame ), "meta.attr.vitc.userbits" );
+			if( vitc )
+				m_decklinkFrame->SetTimecodeUserBits(bmdTimecodeVITC,
+					mlt_properties_get_int( MLT_FRAME_PROPERTIES( frame ), "meta.attr.vitc.userbits" ));
+
+
 			m_deckLinkOutput->ScheduleVideoFrame( m_decklinkFrame, m_count * m_duration, m_duration, m_timescale );
+		}
 
 		if ( !rendered )
 			mlt_log_verbose( getConsumer(), "dropped video frame %u\n", ++m_dropped );

@@ -63,6 +63,9 @@ typedef struct playlist_entry_s playlist_entry;
  * which is a way to add filters as a playlist entry - useful only in a multitrack. See FxCut on the wiki.
  * \properties \em mix_in
  * \properties \em mix_out
+ * \properties \em hide Set to 1 to hide the video (make it an audio-only track),
+ * 2 to hide the audio (make it a video-only track), or 3 to hide audio and video (hidden track).
+ * This property only applies when using a multitrack or transition.
  * \event \em playlist-next The playlist fires this when it moves to the next item in the list.
  * The listener receives one argument that is the index of the entry that just completed.
  */
@@ -105,6 +108,8 @@ extern int mlt_playlist_split( mlt_playlist self, int clip, mlt_position positio
 extern int mlt_playlist_split_at( mlt_playlist self, mlt_position position, int left );
 extern int mlt_playlist_join( mlt_playlist self, int clip, int count, int merge );
 extern int mlt_playlist_mix( mlt_playlist self, int clip, int length, mlt_transition transition );
+extern int mlt_playlist_mix_in( mlt_playlist self, int clip, int length );
+extern int mlt_playlist_mix_out( mlt_playlist self, int clip, int length );
 extern int mlt_playlist_mix_add( mlt_playlist self, int clip, mlt_transition transition );
 extern mlt_producer mlt_playlist_get_clip( mlt_playlist self, int clip );
 extern mlt_producer mlt_playlist_get_clip_at( mlt_playlist self, mlt_position position );
@@ -113,7 +118,7 @@ extern int mlt_playlist_clip_is_mix( mlt_playlist self, int clip );
 extern void mlt_playlist_consolidate_blanks( mlt_playlist self, int keep_length );
 extern int mlt_playlist_is_blank( mlt_playlist self, int clip );
 extern int mlt_playlist_is_blank_at( mlt_playlist self, mlt_position position );
-extern void mlt_playlist_insert_blank( mlt_playlist self, int clip, int length );
+extern void mlt_playlist_insert_blank( mlt_playlist self, int clip, int out );
 extern void mlt_playlist_pad_blanks( mlt_playlist self, mlt_position position, int length, int find );
 extern mlt_producer mlt_playlist_replace_with_blank( mlt_playlist self, int clip );
 extern int mlt_playlist_insert_at( mlt_playlist self, mlt_position position, mlt_producer producer, int mode );

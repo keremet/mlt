@@ -18,72 +18,21 @@
  */
 
 #include "mlt_movit_input.h"
-#include "fbo_input.h"
 
-MltInput::MltInput(unsigned width, unsigned height)
-	: m_width(width)
-	, m_height(height)
-	, output_linear_gamma(false)
-	, needs_mipmaps(false)
+using namespace movit;
+
+MltInput::MltInput( mlt_image_format format )
+	: m_format(format)
 	, input(0)
 	, isRGB(true)
 {
-	register_int("output_linear_gamma", &output_linear_gamma);
-	register_int("needs_mipmaps", &needs_mipmaps);
 }
 
 MltInput::~MltInput()
 {
-	// XXX: this is crashing when a producer is closed
-	// on Windows when using melt with qglsl.
-//	delete input;
 }
 
-std::string MltInput::output_fragment_shader()
-{
-	assert(input);
-	return input->output_fragment_shader();
-}
-
-void MltInput::set_gl_state(GLuint glsl_program_num, const std::string& prefix, unsigned *sampler_num)
-{
-	assert(input);
-	input->set_gl_state(glsl_program_num, prefix, sampler_num);
-}
-
-Effect::AlphaHandling MltInput::alpha_handling() const
-{
-	assert(input);
-	return input->alpha_handling();
-}
-
-void MltInput::finalize()
-{
-	assert(input);
-	bool ok = input->set_int("output_linear_gamma", output_linear_gamma);
-	ok |= input->set_int("needs_mipmaps", needs_mipmaps);
-	assert(ok);
-	input->finalize();
-}
-
-bool MltInput::can_output_linear_gamma() const
-{
-	assert(input);
-	return input->can_output_linear_gamma();
-}
-
-Colorspace MltInput::get_color_space() const
-{
-	assert(input);
-	return input->get_color_space();
-}
-GammaCurve MltInput::get_gamma_curve() const
-{
-	assert(input);
-	return input->get_gamma_curve();
-}
-
-void MltInput::useFlatInput(EffectChain* chain, MovitPixelFormat pix_fmt, unsigned width, unsigned height)
+void MltInput::useFlatInput(MovitPixelFormat pix_fmt, unsigned width, unsigned height)
 {
 	if (!input) {
 		m_width = width;
@@ -92,33 +41,17 @@ void MltInput::useFlatInput(EffectChain* chain, MovitPixelFormat pix_fmt, unsign
 		image_format.color_space = COLORSPACE_sRGB;
 		image_format.gamma_curve = GAMMA_sRGB;
 		input = new FlatInput(image_format, pix_fmt, GL_UNSIGNED_BYTE, width, height);
-		chain->add_output(image_format, OUTPUT_ALPHA_FORMAT_POSTMULTIPLIED);
-		chain->set_dither_bits(8);
 	}
 }
 
-void MltInput::useYCbCrInput(EffectChain* chain, const ImageFormat& image_format, const YCbCrFormat& ycbcr_format, unsigned width, unsigned height)
+void MltInput::useYCbCrInput(const ImageFormat& image_format, const YCbCrFormat& ycbcr_format, unsigned width, unsigned height)
 {
 	if (!input) {
 		m_width = width;
 		m_height = height;
 		input = new YCbCrInput(image_format, ycbcr_format, width, height);
-		ImageFormat output_format;
-		output_format.color_space = COLORSPACE_sRGB;
-		output_format.gamma_curve = GAMMA_sRGB;
-		chain->add_output(output_format, OUTPUT_ALPHA_FORMAT_POSTMULTIPLIED);
-		chain->set_dither_bits(8);
 		isRGB = false;
 		m_ycbcr_format = ycbcr_format;
-	}
-}
-
-void MltInput::useFBOInput(EffectChain *chain, GLuint texture)
-{
-	if (!input) {
-		FBOInput* fboInput = new FBOInput(m_width, m_height);
-		input = fboInput;
-		fboInput->set_texture(texture);
 	}
 }
 
@@ -133,5 +66,17 @@ void MltInput::set_pixel_data(const unsigned char* data)
 		ycbcr->set_pixel_data(0, data);
 		ycbcr->set_pixel_data(1, &data[m_width * m_height]);
 		ycbcr->set_pixel_data(2, &data[m_width * m_height + (m_width / m_ycbcr_format.chroma_subsampling_x * m_height / m_ycbcr_format.chroma_subsampling_y)]);
+	}
+}
+
+void MltInput::invalidate_pixel_data()
+{
+	assert(input);
+	if (isRGB) {
+		FlatInput* flat = (FlatInput*) input;
+		flat->invalidate_pixel_data();
+	} else {
+		YCbCrInput* ycbcr = (YCbCrInput*) input;
+		ycbcr->invalidate_pixel_data();
 	}
 }

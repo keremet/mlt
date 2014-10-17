@@ -13,7 +13,6 @@ OBJS = factory.o \
 	   producer_loader.o \
 	   producer_melt.o \
 	   producer_noise.o \
-	   producer_ppm.o \
 	   filter_audiochannels.o \
 	   filter_audioconvert.o \
 	   filter_audiowave.o \
@@ -40,6 +39,7 @@ OBJS = factory.o \
 	   transition_luma.o \
 	   transition_mix.o \
 	   transition_region.o \
+	   transition_matte.o \
 	   consumer_multi.o \
 	   consumer_null.o
 

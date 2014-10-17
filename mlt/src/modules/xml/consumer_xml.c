@@ -1,6 +1,6 @@
 /*
  * consumer_xml.c -- a libxml2 serialiser of mlt service networks
- * Copyright (C) 2003-2009 Ushodaya Enterprises Limited
+ * Copyright (C) 2003-2014 Ushodaya Enterprises Limited
  * Author: Dan Dennedy <dan@dennedy.org>
  *
  * This library is free software; you can redistribute it and/or
@@ -392,6 +392,7 @@ static void serialise_multitrack( serialise_context context, mlt_service service
 				xmlNewProp( track, _x("in"), _x( mlt_properties_get_time( properties, "in", context->time_format ) ) );
 				xmlNewProp( track, _x("out"), _x( mlt_properties_get_time( properties, "out", context->time_format ) ) );
 				serialise_store_properties( context, MLT_PRODUCER_PROPERTIES( producer ), track, context->store );
+				serialise_store_properties( context, MLT_PRODUCER_PROPERTIES( producer ), track, "xml_" );
 				if ( !context->no_meta )
 					serialise_store_properties( context, MLT_PRODUCER_PROPERTIES( producer ), track, "meta." );
 				serialise_service_filters( context, MLT_PRODUCER_SERVICE( producer ), track );
@@ -446,6 +447,7 @@ static void serialise_playlist( serialise_context context, mlt_service service, 
 
 		// Store application specific properties
 		serialise_store_properties( context, properties, child, context->store );
+		serialise_store_properties( context, properties, child, "xml_" );
 		if ( !context->no_meta )
 			serialise_store_properties( context, properties, child, "meta." );
 
@@ -485,6 +487,7 @@ static void serialise_playlist( serialise_context context, mlt_service service, 
 					if ( mlt_producer_is_cut( info.cut ) )
 					{
 						serialise_store_properties( context, MLT_PRODUCER_PROPERTIES( info.cut ), entry, context->store );
+						serialise_store_properties( context, MLT_PRODUCER_PROPERTIES( info.cut ), entry, "xml_" );
 						if ( !context->no_meta )
 							serialise_store_properties( context, MLT_PRODUCER_PROPERTIES( info.cut ), entry, "meta." );
 						serialise_service_filters( context, MLT_PRODUCER_SERVICE( info.cut ), entry );
@@ -527,11 +530,14 @@ static void serialise_tractor( serialise_context context, mlt_service service, x
 			xmlNewProp( child, _x("title"), _x(mlt_properties_get( properties, "title" )) );
 		if ( mlt_properties_get( properties, "global_feed" ) )
 			xmlNewProp( child, _x("global_feed"), _x(mlt_properties_get( properties, "global_feed" )) );
-		xmlNewProp( child, _x("in"), _x(mlt_properties_get_time( properties, "in", context->time_format )) );
-		xmlNewProp( child, _x("out"), _x(mlt_properties_get_time( properties, "out", context->time_format )) );
+		if ( mlt_properties_get_position( properties, "in" ) >= 0 )
+			xmlNewProp( child, _x("in"), _x(mlt_properties_get_time( properties, "in", context->time_format )) );
+		if ( mlt_properties_get_position( properties, "out" ) >= 0 )
+			xmlNewProp( child, _x("out"), _x(mlt_properties_get_time( properties, "out", context->time_format )) );
 
 		// Store application specific properties
 		serialise_store_properties( context, MLT_SERVICE_PROPERTIES( service ), child, context->store );
+		serialise_store_properties( context, MLT_SERVICE_PROPERTIES( service ), child, "xml_" );
 		if ( !context->no_meta )
 			serialise_store_properties( context, MLT_SERVICE_PROPERTIES( service ), child, "meta." );
 
@@ -665,6 +671,8 @@ static void serialise_service( serialise_context context, mlt_service service, x
 			else
 			{
 				serialise_producer( context, service, node );
+				if ( mlt_properties_get( properties, "xml" ) != NULL )
+					break;
 			}
 		}
 
@@ -684,6 +692,24 @@ static void serialise_service( serialise_context context, mlt_service service, x
 
 		// Get the next connected service
 		service = mlt_service_producer( service );
+	}
+}
+
+static void serialise_other( mlt_properties properties, struct serialise_context_s *context, xmlNodePtr root )
+{
+	int i;
+	for ( i = 0; i < mlt_properties_count( properties ); i++ )
+	{
+		const char* name = mlt_properties_get_name( properties, i );
+		if ( strlen(name) > 10 && !strncmp( name, "xml_retain", 10 ) )
+		{
+			mlt_service service = mlt_properties_get_data_at( properties, i, NULL );
+			if ( service )
+			{
+				mlt_properties_set_int( MLT_SERVICE_PROPERTIES( service ), "xml_retain", 1 );
+				serialise_service( context, service, root );
+			}
+		}
 	}
 }
 
@@ -768,11 +794,13 @@ xmlDocPtr xml_make_doc( mlt_consumer consumer, mlt_service service )
 
 	// In pass one, we serialise the end producers and playlists,
 	// adding them to a map keyed by address.
+	serialise_other( MLT_SERVICE_PROPERTIES( service ), context, root );
 	serialise_service( context, service, root );
 
 	// In pass two, we serialise the tractor and reference the
 	// producers and playlists
 	context->pass++;
+	serialise_other( MLT_SERVICE_PROPERTIES( service ), context, root );
 	serialise_service( context, service, root );
 
 	// Cleanup resource
@@ -814,6 +842,12 @@ static void output_xml( mlt_consumer this )
 		free( cwd );
 	}
 
+#if !defined(__GLIBC__) && !defined(__DARWIN__)
+	// Get the current locale
+	char *orig_localename = strdup( setlocale( LC_NUMERIC, NULL ) );
+	setlocale( LC_NUMERIC, "C" );
+#endif
+
 	// Make the document
 	doc = xml_make_doc( this, service );
 
@@ -836,8 +870,18 @@ static void output_xml( mlt_consumer this )
 	}
 	else
 	{
+		// Convert file name string encoding.
+		mlt_properties_from_utf8( properties, "resource", "_resource" );
+		resource = mlt_properties_get( properties, "_resource" );
+
 		xmlSaveFormatFileEnc( resource, doc, "utf-8", 1 );
 	}
+
+#if !defined(__GLIBC__) && !defined(__DARWIN__)
+	// Restore the current locale
+	setlocale( LC_NUMERIC, orig_localename );
+	free( orig_localename );
+#endif
 
 	// Close the document
 	xmlFreeDoc( doc );
@@ -918,6 +962,9 @@ static void *consumer_thread( void *arg )
 	// Frame and size
 	mlt_frame frame = NULL;
 
+	int video_off = mlt_properties_get_int( properties, "video_off" );
+	int audio_off = mlt_properties_get_int( properties, "audio_off" );
+
 	// Loop while running
 	while( !terminated && mlt_properties_get_int( properties, "running" ) )
 	{
@@ -939,8 +986,10 @@ static void *consumer_thread( void *arg )
 			mlt_audio_format aformat = mlt_audio_s16;
 			uint8_t *buffer;
 
-			mlt_frame_get_image( frame, &buffer, &iformat, &width, &height, 0 );
-			mlt_frame_get_audio( frame, (void**) &buffer, &aformat, &frequency, &channels, &samples );
+			if ( !video_off )
+				mlt_frame_get_image( frame, &buffer, &iformat, &width, &height, 0 );
+			if ( !audio_off )
+				mlt_frame_get_audio( frame, (void**) &buffer, &aformat, &frequency, &channels, &samples );
 
 			// Close the frame
 			mlt_events_fire( properties, "consumer-frame-show", frame, NULL );

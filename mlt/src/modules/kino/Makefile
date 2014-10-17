@@ -1,10 +1,10 @@
-CFLAGS += -I../../
-CXXFLAGS += $(CFLAGS) -Wno-deprecated
-
-LDFLAGS += -L../../framework -lmlt -lpthread
-
 include ../../../config.mak
 include config.mak
+
+CFLAGS := -I../../ $(CFLAGS)
+CXXFLAGS := $(CFLAGS) -Wno-deprecated $(CXXFLAGS)
+
+LDFLAGS := -L../../framework -lmlt -lpthread $(LDFLAGS)
 
 TARGET = ../libmltkino.so
 
