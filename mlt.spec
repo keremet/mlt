@@ -20,7 +20,7 @@ Packager: Maxim Ivanov <redbaron@altlinux.org>
 
 Source: %name-%version.tar
 Source1: mlt++-config.h
-Patch1: mlt-0.5.4-alt-configure-mmx.patch
+Patch1: mlt-0.9.2-alt-configure-mmx.patch
 Patch2: mlt-0.8.8-alt-fix-compile.patch
 Patch3: mlt-0.9.0-alt-no-version-script.patch
 # SuSE

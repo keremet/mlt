@@ -1,8 +1,8 @@
---- mlt-0.5.4/configure~	2010-06-17 09:01:27.000000000 +0400
-+++ mlt-0.5.4/configure	2010-06-17 09:01:58.000000000 +0400
-@@ -204,63 +204,6 @@ done
- [ "$datadir" = "" ] && datadir=$prefix/share
- [ "$mandir" = "" ] && mandir=$prefix/share/man
+--- mlt-0.9.2/configure~	2014-10-17 15:40:03.000000000 +0400
++++ mlt-0.9.2/configure	2014-10-17 15:41:38.368000000 +0400
+@@ -292,63 +292,6 @@ export moduledir=${libdir}/mlt-${soversi
+ export mltdatadir=${datadir}/mlt-${soversion}
+ fi
  
 -# Double check MMX (Darwin, Linux and FreeBSD supported, may end up disabling MMX on other platforms incorrectly)
 -if [ "$mmx" = "true" ]
@@ -15,7 +15,7 @@
 -		grep mmx /proc/cpuinfo > /dev/null 2>&1 || mmx=false
 -		;;
 -		FreeBSD)
--		[ "$(make -V MACHINE_CPU:Mmmx)" ] || mmx=false
+-		[ "$(make -V MACHINE_CPU:Mmmx -f /dev/null)" ] || mmx=false
 -		;;
 -		*)
 -		grep mmx /proc/cpuinfo > /dev/null 2>&1 || mmx=false
@@ -34,7 +34,7 @@
 -		grep sse /proc/cpuinfo > /dev/null 2>&1 || sse=false
 -		;;
 -		FreeBSD)
--		[ "$(make -V MACHINE_CPU:Msse)" ] || sse=false
+-		[ "$(make -V MACHINE_CPU:Msse -f /dev/null)" ] || sse=false
 -		;;
 -		*)
 -		grep sse /proc/cpuinfo > /dev/null 2>&1 || sse=false
@@ -53,7 +53,7 @@
 -		grep sse2 /proc/cpuinfo > /dev/null 2>&1 || sse2=false
 -		;;
 -		FreeBSD)
--		[ "$(make -V MACHINE_CPU:Msse2)" ] || sse2=false
+-		[ "$(make -V MACHINE_CPU:Msse2 -f /dev/null)" ] || sse2=false
 -		;;
 -		*)
 -		grep sse2 /proc/cpuinfo > /dev/null 2>&1 || sse2=false
