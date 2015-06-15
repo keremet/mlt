@@ -31,6 +31,8 @@ Patch1: mlt-0.9.2-alt-configure-mmx.patch
 Patch2: mlt-0.9.0-alt-no-version-script.patch
 # SuSE
 Patch10: libmlt-0.8.2-vdpau.patch
+# Debian
+Patch20: 01-changed-preset-path.diff
 
 BuildRequires: ImageMagick-tools gcc-c++ jackit-devel ladspa_sdk libSDL-devel
 BuildRequires: libSDL_image-devel libX11-devel libavdevice-devel libavformat-devel
@@ -96,6 +98,7 @@ This module allows to work with %Name using python..
 %patch1 -p1
 %patch2 -p1
 %patch10 -p0
+%patch20 -p1
 
 [ -f src/mlt++/config.h ] || \
     install -m 0644 %SOURCE1 src/mlt++/config.h

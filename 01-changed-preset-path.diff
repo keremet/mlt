@@ -1,0 +1,36 @@
+# The path and naming schema of the preset files has been changed from:
+# /usr/share/ffpresets/*.ffpreset
+# to:
+# /usr/share/avconv/*.avpreset
+# Closes: #681339
+
+diff -Naur mlt-0.9.2.orig/src/modules/avformat/configure mlt-0.9.2/src/modules/avformat/configure
+--- mlt-0.9.2.orig/src/modules/avformat/configure	2014-06-29 22:23:17.000000000 +0200
++++ mlt-0.9.2/src/modules/avformat/configure	2014-07-09 09:40:26.572402187 +0200
+@@ -84,7 +84,7 @@
+ 	then 
+ 		if [ -d "$static_ffmpeg" ]
+ 		then
+-			echo "CFLAGS+=-DAVDATADIR=\\\"${static_ffmpeg}/ffpresets/\\\"" >> config.mak
++			echo "CFLAGS+=-DAVDATADIR=\\\"${static_ffmpeg}/avconv/\\\"" >> config.mak
+ 			echo "CFLAGS+=-I$static_ffmpeg" >> config.mak
+ 			echo "LDFLAGS+=-L$static_ffmpeg/libavformat -L$static_ffmpeg/libavcodec -L$static_ffmpeg/libavutil" >> config.mak
+ 			echo "LDFLAGS+=-L$static_ffmpeg/libswscale" >> config.mak
+diff -Naur mlt-0.9.2.orig/src/modules/avformat/consumer_avformat.c mlt-0.9.2/src/modules/avformat/consumer_avformat.c
+--- mlt-0.9.2.orig/src/modules/avformat/consumer_avformat.c	2014-06-29 22:23:17.000000000 +0200
++++ mlt-0.9.2/src/modules/avformat/consumer_avformat.c	2014-07-09 09:40:26.572402187 +0200
+@@ -805,12 +805,12 @@
+ 				AVCodec *codec = avcodec_find_encoder( c->codec_id );
+ 				if ( codec )
+ 				{
+-					char *path = malloc( strlen(AVDATADIR) + strlen(codec->name) + strlen(vpre) + strlen(".ffpreset") + 2 );
++					char *path = malloc( strlen(AVDATADIR) + strlen(codec->name) + strlen(vpre) + strlen(".avpreset") + 2 );
+ 					strcpy( path, AVDATADIR );
+ 					strcat( path, codec->name );
+ 					strcat( path, "-" );
+ 					strcat( path, vpre );
+-					strcat( path, ".ffpreset" );
++					strcat( path, ".avpreset" );
+ 					
+ 					mlt_properties_close( p );
+ 					p = mlt_properties_load( path );
