@@ -3,8 +3,7 @@
  * \brief memory pooling functionality
  * \see mlt_pool_s
  *
- * Copyright (C) 2003-2009 Ushodaya Enterprises Limited
- * \author Charles Yates <charles.yates@pandora.be>
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -23,6 +22,7 @@
 
 #include "mlt_properties.h"
 #include "mlt_deque.h"
+#include "mlt_log.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -31,6 +31,19 @@
 // Not nice - memalign is defined here apparently?
 #ifdef linux
 #include <malloc.h>
+#endif
+
+// Macros to re-assign system functions.
+#ifdef WIN32
+#  define mlt_free _aligned_free
+#  define mlt_alloc(X) _aligned_malloc( (X), 16 )
+#else
+#  define mlt_free free
+#  ifdef linux
+#    define mlt_alloc(X) memalign( 16, (X) )
+#  else
+#    define mlt_alloc(X) malloc( (X) )
+#  endif
 #endif
 
 /** global singleton for tracking pools */
@@ -121,11 +134,15 @@ static void *pool_fetch( mlt_pool self )
 		else
 		{
 			// We need to generate a release item
-#ifdef linux
-			mlt_release release = memalign( 16, self->size );
-#else
-			mlt_release release = malloc( self->size );
-#endif
+			mlt_release release = mlt_alloc( self->size );
+
+			// If out of memory, log it, reclaim memory, and try again.
+			if ( !release && self->size > 0 )
+			{
+				mlt_log_fatal( NULL, "[mlt_pool] out of memory\n" );
+				mlt_pool_purge();
+				release = mlt_alloc( self->size );
+			}
 
 			// Initialise it
 			if ( release != NULL )
@@ -180,16 +197,11 @@ static void pool_return( void *ptr )
 			// Unlock the pool
 			pthread_mutex_unlock( &self->lock );
 
-			// Ensure that we don't clean up
-			ptr = NULL;
+			return;
 		}
-	}
 
-	// Tidy up - this will only occur if the returned item is incorrect
-	if ( ptr != NULL )
-	{
 		// Free the release itself
-		free( ( char * )ptr - sizeof( struct mlt_release_s ) );
+		mlt_free( ( char * )ptr - sizeof( struct mlt_release_s ) );
 	}
 }
 
@@ -210,7 +222,7 @@ static void pool_close( mlt_pool self )
 		while ( ( release = mlt_deque_pop_back( self->stack ) ) != NULL )
 		{
 			// We'll free this item now
-			free( ( char * )release - sizeof( struct mlt_release_s ) );
+			mlt_free( ( char * )release - sizeof( struct mlt_release_s ) );
 		}
 
 		// We can now close the stack
@@ -349,7 +361,10 @@ void mlt_pool_purge( )
 
 		// We'll free all unused items now
 		while ( ( release = mlt_deque_pop_back( self->stack ) ) != NULL )
-			free( ( char * )release - sizeof( struct mlt_release_s ) );
+		{
+			mlt_free( ( char * )release - sizeof( struct mlt_release_s ) );
+			self->count--;
+		}
 
 		// Unlock the pool
 		pthread_mutex_unlock( &self->lock );
@@ -376,19 +391,32 @@ void mlt_pool_release( void *release )
 void mlt_pool_close( )
 {
 #ifdef _MLT_POOL_CHECKS_
-	// Stats dump on close
-	int i = 0;
-	for ( i = 0; i < mlt_properties_count( pools ); i ++ )
-	{
-		mlt_pool pool = mlt_properties_get_data_at( pools, i, NULL );
-		if ( pool->count )
-			mlt_log( NULL, MLT_LOG_DEBUG, "%s: size %d allocated %d returned %d %c\n", __FUNCTION__,
-				pool->size, pool->count, mlt_deque_count( pool->stack ),
-				pool->count !=  mlt_deque_count( pool->stack ) ? '*' : ' ' );
-	}
+	mlt_pool_stat( );
 #endif
 
 	// Close the properties
 	mlt_properties_close( pools );
 }
 
+void mlt_pool_stat( )
+{
+	// Stats dump
+	int64_t allocated = 0, used = 0;
+	int i = 0, c = mlt_properties_count( pools );
+
+	mlt_log( NULL, MLT_LOG_VERBOSE, "%s: count %d\n", __FUNCTION__, c);
+
+	for ( i = 0; i < c; i ++ )
+	{
+		mlt_pool pool = mlt_properties_get_data_at( pools, i, NULL );
+		if ( pool->count )
+			mlt_log_verbose( NULL, "%s: size %d allocated %d returned %d %c\n", __FUNCTION__,
+				pool->size, pool->count, mlt_deque_count( pool->stack ),
+				pool->count !=  mlt_deque_count( pool->stack ) ? '*' : ' ' );
+		allocated += pool->count * pool->size;
+		used += ( pool->count - mlt_deque_count( pool->stack ) ) * pool->size;
+	}
+
+	mlt_log_verbose( NULL, "%s: allocated %"PRId64" bytes, used %"PRId64" bytes \n",
+		__FUNCTION__, allocated, used );
+}

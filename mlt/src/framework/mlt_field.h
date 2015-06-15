@@ -3,8 +3,7 @@
  * \brief a field for planting multiple transitions and services
  * \see mlt_field_s
  *
- * Copyright (C) 2003-2009 Ushodaya Enterprises Limited
- * \author Charles Yates <charles.yates@pandora.be>
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -21,8 +20,8 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef _MLT_FIELD_H_
-#define _MLT_FIELD_H_
+#ifndef MLT_FIELD_H
+#define MLT_FIELD_H
 
 #include "mlt_types.h"
 

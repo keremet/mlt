@@ -1,7 +1,6 @@
 /*
  * filter_data_show.c -- data feed filter
- * Copyright (C) 2004-2005 Ushodaya Enterprises Limited
- * Author: Charles Yates <charles.yates@pandora.be>
+ * Copyright (C) 2004-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -196,22 +195,23 @@ static int process_feed( mlt_properties feed, mlt_filter filter, mlt_frame frame
 									if ( keywords[ strlen( keywords ) -1 ] == '\\' )
 									{
 										// keep characters except backslash
-										strncat( result, keywords, strlen( keywords ) -1 );
+										strncat( result, keywords, sizeof( result ) - strlen( result ) - 2 );
 										strcat( result, "#" );
 										ct++;
 									}
 									else
 									{
-										strcat( result, keywords );
+										strncat( result, keywords, sizeof( result ) - strlen( result ) - 1 );
 									}
 								}
 								else if ( !strcmp( keywords, "timecode" ) )
 								{
 									// special case: replace #timecode# with current frame timecode
-									int pos = mlt_properties_get_int( feed, "position" );
-									char *tc = frame_to_timecode( pos, mlt_profile_fps( mlt_service_profile( MLT_FILTER_SERVICE( filter ) ) ) );
-									strncat( result, tc, sizeof( result ) - strlen( result ) - 1 );
-									free( tc );
+									mlt_position frames = mlt_properties_get_position( feed, "position" );
+									mlt_properties properties = MLT_FILTER_PROPERTIES( filter );
+									char *s = mlt_properties_frames_to_time( properties, frames, mlt_time_smpte_df );
+									if ( s )
+										strncat( result, s, sizeof( result ) - strlen( result ) - 1 );
 								}
 								else if ( !strcmp( keywords, "frame" ) )
 								{
@@ -220,7 +220,7 @@ static int process_feed( mlt_properties feed, mlt_filter filter, mlt_frame frame
 									char s[12];
 									snprintf( s, sizeof(s) - 1, "%d", pos );
 									s[sizeof( s ) - 1] = '\0';
-									strcat( result, s );
+									strncat( result, s, sizeof( result ) - strlen( result ) - 1 );
 								}
 								else
 								{

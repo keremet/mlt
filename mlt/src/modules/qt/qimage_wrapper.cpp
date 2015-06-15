@@ -56,7 +56,7 @@ static void qimage_delete( void *data )
 	delete image;
 	image = NULL;
 #if defined(USE_KDE4)
-	if (instance) delete instance;
+	delete instance;
 	instance = 0L;
 #endif
 
@@ -154,10 +154,6 @@ int refresh_qimage( producer_qimage self, mlt_frame frame )
 
 	// Image index
 	int image_idx = ( int )floor( ( double )position / ttl ) % self->count;
-
-	// Key for the cache
-	char image_key[ 10 ];
-	sprintf( image_key, "%d", image_idx );
 
 	int disable_exif = mlt_properties_get_int( producer_props, "disable_exif" );
 

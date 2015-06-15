@@ -2,8 +2,7 @@
  * \file mlt_factory.c
  * \brief the factory method interfaces
  *
- * Copyright (C) 2003-2009 Ushodaya Enterprises Limited
- * \author Charles Yates <charles.yates@pandora.be>
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -29,7 +28,16 @@
 #include <locale.h>
 #include <libgen.h>
 
+/** the default subdirectory of the datadir for holding presets */
+#define PRESETS_DIR "/presets"
+
 #ifdef WIN32
+#ifdef PREFIX_LIB
+#undef PREFIX_LIB
+#endif
+#ifdef PREFIX_DATA
+#undef PREFIX_DATA
+#endif
 #include <windows.h>
 /** the default subdirectory of the libdir for holding modules (plugins) */
 #define PREFIX_LIB "\\lib\\mlt"
@@ -86,18 +94,6 @@ static void mlt_factory_create_done( mlt_listener listener, mlt_properties owner
 
 /** Construct the repository and factories.
  *
- * The environment variable MLT_PRODUCER is the name of a default producer often used by other services, defaults to "loader".
- *
- * The environment variable MLT_CONSUMER is the name of a default consumer, defaults to "sdl".
- *
- * The environment variable MLT_TEST_CARD is the name of a producer or file to be played when nothing is available (all tracks blank).
- *
- * The environment variable MLT_DATA overrides the default full path to the MLT and module supplemental data files, defaults to \p PREFIX_DATA.
- *
- * The environment variable MLT_PROFILE defaults to "dv_pal."
- *
- * The environment variable MLT_REPOSITORY overrides the default location of the plugin modules, defaults to \p PREFIX_LIB.
- *
  * \param directory an optional full path to a directory containing the modules that overrides the default and
  * the MLT_REPOSITORY environment variable
  * \return the repository
@@ -120,6 +116,7 @@ mlt_repository mlt_factory_init( const char *directory )
 		mlt_properties_set( global_properties, "MLT_TEST_CARD", getenv( "MLT_TEST_CARD" ) );
 		mlt_properties_set_or_default( global_properties, "MLT_PROFILE", getenv( "MLT_PROFILE" ), "dv_pal" );
 		mlt_properties_set_or_default( global_properties, "MLT_DATA", getenv( "MLT_DATA" ), PREFIX_DATA );
+
 #if defined(WIN32)
 		char path[1024];
 		DWORD size = sizeof( path );
@@ -140,10 +137,11 @@ mlt_repository mlt_factory_init( const char *directory )
 	// Only initialise once
 	if ( mlt_directory == NULL )
 	{
-		// Allow user over rides
+#if !defined(WIN32) && !(defined(__DARWIN__) && defined(RELOCATABLE))
+		// Allow user overrides
 		if ( directory == NULL || !strcmp( directory, "" ) )
 			directory = getenv( "MLT_REPOSITORY" );
-
+#endif
 		// If no directory is specified, default to install directory
 		if ( directory == NULL )
 			directory = PREFIX_LIB;
@@ -187,6 +185,23 @@ mlt_repository mlt_factory_init( const char *directory )
 
 		// Force a clean up when app closes
 		atexit( mlt_factory_close );
+	}
+
+	if ( global_properties )
+	{
+		char *path = getenv( "MLT_PRESETS_PATH" );
+		if ( path )
+		{
+			mlt_properties_set( global_properties, "MLT_PRESETS_PATH", path );
+		}
+		else
+		{
+			path = malloc( strlen( mlt_environment( "MLT_DATA" ) ) + strlen( PRESETS_DIR ) + 1 );
+			strcpy( path, mlt_environment( "MLT_DATA" ) );
+			strcat( path, PRESETS_DIR );
+			mlt_properties_set( global_properties, "MLT_PRESETS_PATH", path );
+			free( path );
+		}
 	}
 
 	return repository;
@@ -263,13 +278,17 @@ static void set_common_properties( mlt_properties properties, mlt_profile profil
 
 /** Fetch a producer from the repository.
  *
+ * If you give NULL to \p service, then it will use core module's special
+ * "loader"producer to load \p resource. One can override this default producer
+ * by setting the environment variable MLT_PRODUCER.
+ *
  * \param profile the \p mlt_profile to use
  * \param service the name of the producer (optional, defaults to MLT_PRODUCER)
- * \param input an optional argument to the producer constructor, typically a string
+ * \param resource an optional argument to the producer constructor, typically a string
  * \return a new producer
  */
 
-mlt_producer mlt_factory_producer( mlt_profile profile, const char *service, const void *input )
+mlt_producer mlt_factory_producer( mlt_profile profile, const char *service, const void *resource )
 {
 	mlt_producer obj = NULL;
 
@@ -278,13 +297,13 @@ mlt_producer mlt_factory_producer( mlt_profile profile, const char *service, con
 		service = mlt_environment( "MLT_PRODUCER" );
 
 	// Offer the application the chance to 'create'
-	mlt_events_fire( event_object, "producer-create-request", service, input, &obj, NULL );
+	mlt_events_fire( event_object, "producer-create-request", service, resource, &obj, NULL );
 
 	// Try to instantiate via the specified service
 	if ( obj == NULL )
 	{
-		obj = mlt_repository_create( repository, profile, producer_type, service, input );
-		mlt_events_fire( event_object, "producer-create-done", service, input, obj, NULL );
+		obj = mlt_repository_create( repository, profile, producer_type, service, resource );
+		mlt_events_fire( event_object, "producer-create-done", service, resource, obj, NULL );
 		if ( obj != NULL )
 		{
 			mlt_properties properties = MLT_PRODUCER_PROPERTIES( obj );

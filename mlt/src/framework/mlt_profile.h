@@ -3,8 +3,7 @@
  * \brief video output definition
  * \see mlt_profile_s
  *
- * Copyright (C) 2007-2009 Ushodaya Enterprises Limited
- * \author Dan Dennedy <dan@dennedy.org>
+ * Copyright (C) 2007-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -21,13 +20,15 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef _MLT_PROFILE_H
-#define _MLT_PROFILE_H
+#ifndef MLT_PROFILE_H
+#define MLT_PROFILE_H
 
 #include "mlt_types.h"
 
 /** \brief Profile class
  *
+ * \envvar \em MLT_PROFILES_PATH overrides the default full path to the profile preset files, defaults to \p MLT_DATA/profiles
+ * \envvar \em MLT_PROFILE the profile preset to use, defaults to "dv_pal"
  */
 
 struct mlt_profile_s

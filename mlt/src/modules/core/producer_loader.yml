@@ -3,7 +3,7 @@ type: producer
 identifier: loader
 title: Loader
 version: 1
-copyright: Ushodaya Enterprises Limited
+copyright: Meltytech, LLC
 creator: Charles Yates
 license: LGPLv2.1
 language: en
@@ -28,5 +28,4 @@ parameters:
     description: The file for the producer to be based on.
     required: no
     readonly: no
-    default: unset
     widget: fileopen

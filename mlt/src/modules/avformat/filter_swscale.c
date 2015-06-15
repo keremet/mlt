@@ -1,7 +1,6 @@
 /*
  * filter_swscale.c -- image scaling filter
- * Copyright (C) 2008-2009 Ushodaya Enterprises Limited
- * Author: Dan Dennedy <dan@dennedy.org>
+ * Copyright (C) 2008-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -127,13 +126,7 @@ static int filter_scale( mlt_frame frame, uint8_t **image, mlt_image_format *for
 	avpicture_fill( &output, outbuf, avformat, owidth, oheight );
 
 	// Create the context and output image
-	owidth = owidth > 5120 ? 5120 : owidth;
 	struct SwsContext *context = sws_getContext( iwidth, iheight, avformat, owidth, oheight, avformat, interp, NULL, NULL, NULL);
-	if ( !context )
-	{
-		owidth = owidth > 2048 ? 2048 : owidth;
-		context = sws_getContext( iwidth, iheight, avformat, owidth, oheight, avformat, interp, NULL, NULL, NULL);
-	}
 	if ( context )
 	{
 		// Perform the scaling
@@ -152,7 +145,7 @@ static int filter_scale( mlt_frame frame, uint8_t **image, mlt_image_format *for
 		if ( alpha_size > 0 && alpha_size != ( owidth * oheight ) )
 		{
 			// Create the context and output image
-			uint8_t *alpha = mlt_frame_get_alpha_mask( frame );
+			uint8_t *alpha = mlt_frame_get_alpha( frame );
 			if ( alpha )
 			{
 				avformat = PIX_FMT_GRAY8;

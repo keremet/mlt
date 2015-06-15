@@ -3,8 +3,7 @@
  * \brief event handling
  * \see mlt_events_struct
  *
- * Copyright (C) 2004-2009 Ushodaya Enterprises Limited
- * \author Charles Yates <charles.yates@pandora.be>
+ * Copyright (C) 2004-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -21,8 +20,8 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef _MLT_EVENTS_H_
-#define _MLT_EVENTS_H_
+#ifndef MLT_EVENTS_H
+#define MLT_EVENTS_H
 
 #include "mlt_types.h"
 

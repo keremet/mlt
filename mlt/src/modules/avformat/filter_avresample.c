@@ -1,7 +1,6 @@
 /*
  * filter_avresample.c -- adjust audio sample frequency
- * Copyright (C) 2003-2004 Ushodaya Enterprises Limited
- * Author: Charles Yates <charles.yates@pandora.be>
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -30,7 +29,7 @@
 #include <libavformat/avformat.h>
 #include <libavutil/samplefmt.h>
 
-#if defined(FFUDIV) || (LIBAVCODEC_VERSION_INT < ((54<<16)+(26<<8)+0))
+#if defined(FFUDIV)
 
 #define MAX_AUDIO_FRAME_SIZE (192000) // 1 second of 48khz 32bit audio
 
@@ -173,4 +172,4 @@ mlt_filter filter_avresample_init( char *arg )
 	return filter;
 }
 
-#endif // defined(FFUDIV) || (LIBAVCODEC_VERSION_INT < ((54<<16)+(26<<8)+0))
+#endif // defined(FFUDIV)

@@ -1,7 +1,7 @@
 /**
  * MltTractor.h - Tractor wrapper
- * Copyright (C) 2004-2005 Charles Yates
- * Author: Charles Yates <charles.yates@pandora.be>
+ * Copyright (C) 2004-2015 Meltytech, LLC
+ * Author: Charles Yates <charles.yates@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,8 +18,8 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef _MLTPP_TRACTOR_H_
-#define _MLTPP_TRACTOR_H_
+#ifndef MLTPP_TRACTOR_H
+#define MLTPP_TRACTOR_H
 
 #include "config.h"
 
@@ -42,6 +42,7 @@ namespace Mlt
 			mlt_tractor instance;
 		public:
 			Tractor( );
+			Tractor( Profile& profile );
 			Tractor( Service &tractor );
 			Tractor( mlt_tractor tractor );
 			Tractor( Tractor &tractor );

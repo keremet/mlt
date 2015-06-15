@@ -1,8 +1,8 @@
 /**
  * MltFactory.h - MLT Wrapper
- * Copyright (C) 2004-2005 Charles Yates
+ * Copyright (C) 2004-2015 Meltytech, LLC
  * Copyright (C) 2008 Dan Dennedy <dan@dennedy.org>
- * Author: Charles Yates <charles.yates@pandora.be>
+ * Author: Charles Yates <charles.yates@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -19,8 +19,8 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef _MLTPP_FACTORY_H_
-#define _MLTPP_FACTORY_H_
+#ifndef MLTPP_FACTORY_H
+#define MLTPP_FACTORY_H
 
 #include "config.h"
 

@@ -3,8 +3,7 @@
  * \brief string tokeniser
  * \see mlt_tokeniser_s
  *
- * Copyright (C) 2002-2009 Ushodaya Enterprises Limited
- * \author Charles Yates <charles.yates@pandora.be>
+ * Copyright (C) 2002-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -33,7 +32,12 @@
 
 mlt_tokeniser mlt_tokeniser_init( )
 {
-	return calloc( 1, sizeof( mlt_tokeniser_t ) );
+	mlt_tokeniser tokeniser = calloc( 1, sizeof( mlt_tokeniser_t ) );
+	tokeniser->input = NULL;
+	tokeniser->tokens = NULL;
+	tokeniser->count = 0;
+	tokeniser->size = 0;
+	return tokeniser;
 }
 
 /** Clear the tokeniser.
@@ -79,6 +83,7 @@ static int mlt_tokeniser_append( mlt_tokeniser tokeniser, char *token )
 
 int mlt_tokeniser_parse_new( mlt_tokeniser tokeniser, char *string, const char *delimiter )
 {
+	if ( !string || !delimiter ) return 0;
 	int count = 0;
 	int length = strlen( string );
 	int delimiter_size = strlen( delimiter );

@@ -2,8 +2,7 @@
  * \file mlt_types.h
  * \brief Provides forward definitions of all public types
  *
- * Copyright (C) 2003-2012 Ushodaya Enterprises Limited
- * \author Charles Yates <charles.yates@pandora.be>
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,8 +19,8 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef _MLT_TYPES_H_
-#define _MLT_TYPES_H_
+#ifndef MLT_TYPES_H
+#define MLT_TYPES_H
 
 #ifndef GCC_VERSION
 #define GCC_VERSION (__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__)
@@ -71,7 +70,9 @@ typedef enum
 {
 	mlt_time_frames = 0, /**< frame count */
 	mlt_time_clock,      /**< SMIL clock-value as [[hh:]mm:]ss[.fraction] */
-	mlt_time_smpte       /**< SMPTE timecode as [[[hh:]mm:]ss:]frames */
+	mlt_time_smpte_df,   /**< SMPTE timecode as [[[hh:]mm:]ss{:|;}]frames */
+	mlt_time_smpte = mlt_time_smpte_df,   /**< Deprecated */
+	mlt_time_smpte_ndf   /**< SMPTE NDF timecode as [[[hh:]mm:]ss:]frames */
 }
 mlt_time_format;
 
@@ -183,7 +184,9 @@ typedef char *( *mlt_serialiser )( void *, int length );/**< pointer to serializ
 #include <pthread.h>
 /* Win32 compatibility function declarations */
 extern int usleep(unsigned int useconds);
+#ifndef WIN_PTHREADS_TIME_H
 extern int nanosleep( const struct timespec * rqtp, struct timespec * rmtp );
+#endif
 extern int setenv(const char *name, const char *value, int overwrite);
 #endif
 

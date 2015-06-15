@@ -1,7 +1,7 @@
 /**
  * MltFilter.cpp - MLT Wrapper
- * Copyright (C) 2004-2005 Charles Yates
- * Author: Charles Yates <charles.yates@pandora.be>
+ * Copyright (C) 2004-2015 Meltytech, LLC
+ * Author: Charles Yates <charles.yates@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -129,4 +129,9 @@ int Filter::get_position( Frame &frame )
 double Filter::get_progress( Frame &frame )
 {
 	return mlt_filter_get_progress( get_filter( ), frame.get_frame( ) );
+}
+
+void Filter::process( Frame &frame )
+{
+	mlt_filter_process( get_filter( ), frame.get_frame() );
 }

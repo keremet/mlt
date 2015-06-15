@@ -1,7 +1,6 @@
 /*
  * factory.c -- the factory method interfaces
- * Copyright (C) 2003-2004 Ushodaya Enterprises Limited
- * Author: Charles Yates <charles.yates@pandora.be>
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -53,6 +52,7 @@ extern mlt_producer producer_loader_init( mlt_profile profile, mlt_service_type 
 extern mlt_producer producer_melt_file_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
 extern mlt_producer producer_melt_init( mlt_profile profile, mlt_service_type type, const char *id, char **argv );
 extern mlt_producer producer_noise_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
+extern mlt_producer producer_tone_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
 #include "transition_composite.h"
 extern mlt_transition transition_luma_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
 extern mlt_transition transition_mix_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
@@ -103,6 +103,7 @@ MLT_REPOSITORY
 	MLT_REGISTER( producer_type, "melt", producer_melt_init );
 	MLT_REGISTER( producer_type, "melt_file", producer_melt_file_init );
 	MLT_REGISTER( producer_type, "noise", producer_noise_init );
+	MLT_REGISTER( producer_type, "tone", producer_tone_init );
 	MLT_REGISTER( transition_type, "composite", transition_composite_init );
 	MLT_REGISTER( transition_type, "luma", transition_luma_init );
 	MLT_REGISTER( transition_type, "mix", transition_mix_init );
@@ -138,6 +139,7 @@ MLT_REPOSITORY
 	MLT_REGISTER_METADATA( producer_type, "melt", metadata, "producer_melt.yml" );
 	MLT_REGISTER_METADATA( producer_type, "melt_file", metadata, "producer_melt_file.yml" );
 	MLT_REGISTER_METADATA( producer_type, "noise", metadata, "producer_noise.yml" );
+	MLT_REGISTER_METADATA( producer_type, "tone", metadata, "producer_tone.yml" );
 	MLT_REGISTER_METADATA( transition_type, "composite", metadata, "transition_composite.yml" );
 	MLT_REGISTER_METADATA( transition_type, "luma", metadata, "transition_luma.yml" );
 	MLT_REGISTER_METADATA( transition_type, "mix", metadata, "transition_mix.yml" );

@@ -3,8 +3,7 @@
  * \brief abstraction for all producer services
  * \see mlt_producer_s
  *
- * Copyright (C) 2003-2009 Ushodaya Enterprises Limited
- * \author Charles Yates <charles.yates@pandora.be>
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -21,8 +20,8 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef _MLT_PRODUCER_H_
-#define _MLT_PRODUCER_H_
+#ifndef MLT_PRODUCER_H
+#define MLT_PRODUCER_H
 
 #include "mlt_service.h"
 #include "mlt_filter.h"
@@ -56,6 +55,14 @@
  * \properties \em _clone.{N} holds a reference to the N'th clone of the producer, as created by mlt_producer_optimise
  * \properties \em meta.* holds metadata - there is a loose taxonomy to be defined
  * \properties \em set.* holds properties to set on a frame produced
+ * \envvar \em MLT_DEFAULT_PRODUCER_LENGTH - the default duration of the producer in frames, defaults to 15000.
+ * Most producers will set the producer length to something appropriate
+ * like the real duration of an audio or video clip. However, some other things
+ * like still images and generators do not have an intrinsic length besides one
+ * or infinity. Those producers tend to not override the default length and one
+ * expect the app or user to set the length. The default value of 15000 was chosen
+ * to provide something useful - not too long or short and convenient to simply
+ * set an out point without necessarily nedding to extend the length.
  * \todo define the media metadata taxonomy
  */
 

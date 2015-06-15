@@ -3,8 +3,7 @@
  * \brief video output definition
  * \see mlt_profile_s
  *
- * Copyright (C) 2007-2009 Ushodaya Enterprises Limited
- * \author Dan Dennedy <dan@dennedy.org>
+ * Copyright (C) 2007-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -305,8 +304,7 @@ void mlt_profile_close( mlt_profile profile )
 {
 	if ( profile )
 	{
-		if ( profile->description )
-			free( profile->description );
+		free( profile->description );
 		profile->description = NULL;
 		free( profile );
 		profile = NULL;
@@ -384,8 +382,7 @@ mlt_properties mlt_profile_list( )
 		}
 	}
 	mlt_properties_close( dir );
-	if ( filename )
-		free( filename );
+	free( filename );
 
 	return properties;
 }

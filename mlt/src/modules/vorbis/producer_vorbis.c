@@ -1,7 +1,6 @@
 /*
  * producer_vorbis.c -- vorbis producer
- * Copyright (C) 2003-2004 Ushodaya Enterprises Limited
- * Author: Charles Yates <charles.yates@pandora.be>
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -154,10 +153,8 @@ static int producer_open( mlt_producer this, mlt_profile profile, char *file )
 				metadata = vorbis_metadata_from_str (*ptr);
 				if (metadata != NULL) {
 					mlt_properties_set(properties, metadata->name, metadata->content);
-					if (metadata->name)
-						free(metadata->name);
-					if (metadata->content)
-						free(metadata->content);
+					free(metadata->name);
+					free(metadata->content);
 					free(metadata);
 				}
 				++ptr;

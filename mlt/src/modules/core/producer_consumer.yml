@@ -3,7 +3,7 @@ type: producer
 identifier: consumer
 title: Consumer as Producer
 version: 2
-copyright: Ushodaya Enterprises Limited
+copyright: Meltytech, LLC
 creator: Dan Dennedy
 license: LGPLv2.1
 language: en
@@ -32,3 +32,15 @@ parameters:
     minimum: 0
     maximum: 1
     default: 0
+
+  - identifier: producer.*
+    title: Producer properties
+    description: A property and its value to apply to the encapsulated producer.
+    type: properties
+    mutable: yes
+
+  - identifier: consumer.*
+    title: Consumer properties
+    description: A property and its value to apply to the encapsulated consumer.
+    type: properties
+    mutable: yes

@@ -1,7 +1,6 @@
 /*
  * filter_affine.c -- affine filter
- * Copyright (C) 2003-2004 Ushodaya Enterprises Limited
- * Author: Charles Yates <charles.yates@pandora.be>
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -82,6 +81,9 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 			mlt_properties_pass( MLT_TRANSITION_PROPERTIES( transition ), properties, "transition." );
 			mlt_service_get_frame( MLT_PRODUCER_SERVICE( producer ), &a_frame, 0 );
 			mlt_frame_set_position( a_frame, in + position );
+
+			// Set the rescale interpolation to match the frame
+			mlt_properties_set( MLT_FRAME_PROPERTIES( a_frame ), "rescale.interp", mlt_properties_get( frame_properties, "rescale.interp" ) );
 
 			// Special case - aspect_ratio = 0
 			if ( mlt_frame_get_aspect_ratio( frame ) == 0 )

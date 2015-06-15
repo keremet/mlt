@@ -3,9 +3,7 @@
  * \brief interface for all frame classes
  * \see mlt_frame_s
  *
- * Copyright (C) 2003-2013 Ushodaya Enterprises Limited
- * \author Charles Yates <charles.yates@pandora.be>
- * \author Dan Dennedy <dan@dennedy.org>
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -22,8 +20,8 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef _MLT_FRAME_H_
-#define _MLT_FRAME_H_
+#ifndef MLT_FRAME_H
+#define MLT_FRAME_H
 
 #include "mlt_properties.h"
 #include "mlt_deque.h"
@@ -58,8 +56,9 @@ typedef int ( *mlt_get_audio )( mlt_frame self, void **buffer, mlt_audio_format 
  * (no speed factor applied, only available when \em _need_previous_next is set on the producer)
  * \properties \em next \em frame a reference to the unfiltered following frame
  * (no speed factor applied, only available when \em _need_previous_next is set on the producer)
- * \properties \em colorspace the standard for luma coefficients
+ * \properties \em colorspace the standard for the YUV coefficients
  * \properties \em force_full_luma luma range handling, set to -1 for pass-through, 1 for full range, 0 for scaling
+ * \properties \em color_trc the color transfer characteristic (gamma)
  * \properties \em audio_frequency the sample rate of the audio
  * \properties \em audio_channels the number of audio channels
  * \properties \em audio_samples the number of audio samples
@@ -123,6 +122,7 @@ extern int mlt_frame_set_alpha( mlt_frame self, uint8_t *alpha, int size, mlt_de
 extern void mlt_frame_replace_image( mlt_frame self, uint8_t *image, mlt_image_format format, int width, int height );
 extern int mlt_frame_get_image( mlt_frame self, uint8_t **buffer, mlt_image_format *format, int *width, int *height, int writable );
 extern uint8_t *mlt_frame_get_alpha_mask( mlt_frame self );
+extern uint8_t *mlt_frame_get_alpha( mlt_frame self );
 extern int mlt_frame_get_audio( mlt_frame self, void **buffer, mlt_audio_format *format, int *frequency, int *channels, int *samples );
 extern int mlt_frame_set_audio( mlt_frame self, void *buffer, mlt_audio_format, int size, mlt_destructor );
 extern unsigned char *mlt_frame_get_waveform( mlt_frame self, int w, int h );

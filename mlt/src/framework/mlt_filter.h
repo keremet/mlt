@@ -3,8 +3,7 @@
  * \brief abstraction for all filter services
  * \see mlt_filter_s
  *
- * Copyright (C) 2003-2009 Ushodaya Enterprises Limited
- * \author Charles Yates <charles.yates@pandora.be>
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -21,8 +20,8 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef _MLT_FILTER_H_
-#define _MLT_FILTER_H_
+#ifndef MLT_FILTER_H
+#define MLT_FILTER_H
 
 #include "mlt_service.h"
 

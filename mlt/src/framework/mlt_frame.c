@@ -3,9 +3,7 @@
  * \brief interface for all frame classes
  * \see mlt_frame_s
  *
- * Copyright (C) 2003-2013 Ushodaya Enterprises Limited
- * \author Charles Yates <charles.yates@pandora.be>
- * \author Dan Dennedy <dan@dennedy.org>
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -91,7 +89,10 @@ mlt_properties mlt_frame_properties( mlt_frame self )
 
 int mlt_frame_is_test_card( mlt_frame self )
 {
-	return mlt_deque_count( self->stack_image ) == 0 || mlt_properties_get_int( MLT_FRAME_PROPERTIES( self ), "test_image" );
+	mlt_properties properties = MLT_FRAME_PROPERTIES( self );
+	return ( mlt_deque_count( self->stack_image ) == 0
+			 && !mlt_properties_get_data( properties, "image", NULL ) )
+			|| mlt_properties_get_int( properties, "test_image" );
 }
 
 /** Determine if the frame will produce audio from a test card.
@@ -103,7 +104,10 @@ int mlt_frame_is_test_card( mlt_frame self )
 
 int mlt_frame_is_test_audio( mlt_frame self )
 {
-	return mlt_deque_count( self->stack_audio ) == 0 || mlt_properties_get_int( MLT_FRAME_PROPERTIES( self ), "test_audio" );
+	mlt_properties properties = MLT_FRAME_PROPERTIES( self );
+	return ( mlt_deque_count( self->stack_audio ) == 0
+			 && !mlt_properties_get_data( properties, "audio", NULL ) )
+			|| mlt_properties_get_int( properties, "test_audio" );
 }
 
 /** Get the sample aspect ratio of the frame.
@@ -614,6 +618,9 @@ int mlt_frame_get_image( mlt_frame self, uint8_t **buffer, mlt_image_format *for
 
 /** Get the alpha channel associated to the frame.
  *
+ * Unlike mlt_frame_get_alpha(), this function WILL create an opaque alpha
+ * channel if one does not already exist.
+ *
  * \public \memberof mlt_frame_s
  * \param self a frame
  * \return the alpha channel
@@ -635,6 +642,29 @@ uint8_t *mlt_frame_get_alpha_mask( mlt_frame self )
 			memset( alpha, 255, size );
 			mlt_properties_set_data( &self->parent, "alpha", alpha, size, mlt_pool_release, NULL );
 		}
+	}
+	return alpha;
+}
+
+/** Get the alpha channel associated to the frame (without creating if it has not).
+ *
+ * Unlike mlt_frame_get_alpha_mask(), this function does NOT create an alpha
+ * channel if one does not already exist.
+ *
+ * \public \memberof mlt_frame_s
+ * \param self a frame
+ * \return the alpha channel or NULL
+ */
+
+uint8_t *mlt_frame_get_alpha( mlt_frame self )
+{
+	uint8_t *alpha = NULL;
+	if ( self != NULL )
+	{
+		if ( self->get_alpha_mask != NULL )
+			alpha = self->get_alpha_mask( self );
+		if ( alpha == NULL )
+			alpha = mlt_properties_get_data( &self->parent, "alpha", NULL );
 	}
 	return alpha;
 }

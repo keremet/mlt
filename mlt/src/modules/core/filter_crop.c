@@ -1,7 +1,6 @@
 /*
  * filter_crop.c -- cropping filter
- * Copyright (C) 2009 Ushodaya Enterprises Limited
- * Author: Dan Dennedy <dan@dennedy.org>
+ * Copyright (C) 2009-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -113,7 +112,7 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 		}
 
 		// We should resize the alpha too
-		uint8_t *alpha = mlt_frame_get_alpha_mask( frame );
+		uint8_t *alpha = mlt_frame_get_alpha( frame );
 		int alpha_size = 0;
 		mlt_properties_get_data( properties, "alpha", &alpha_size );
 		if ( alpha && alpha_size >= ( *width * *height ) )

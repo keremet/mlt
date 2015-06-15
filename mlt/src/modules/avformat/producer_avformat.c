@@ -1,9 +1,6 @@
 /*
  * producer_avformat.c -- avformat producer
- * Copyright (C) 2003-2014 Ushodaya Enterprises Limited
- * Author: Charles Yates <charles.yates@pandora.be>
- * Author: Dan Dennedy <dan@dennedy.org>
- * Much code borrowed from ffmpeg.c: Copyright (c) 2000-2003 Fabrice Bellard
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -34,12 +31,11 @@
 #include <libswscale/swscale.h>
 #include <libavutil/samplefmt.h>
 #include <libavutil/pixdesc.h>
+#include <libavutil/dict.h>
+#include <libavutil/opt.h>
 
 #ifdef VDPAU
 #  include <libavcodec/vdpau.h>
-#endif
-#if (LIBAVUTIL_VERSION_INT >= ((51<<16)+(8<<8)+0))
-#  include <libavutil/dict.h>
 #endif
 
 // System header files
@@ -47,18 +43,9 @@
 #include <string.h>
 #include <pthread.h>
 #include <limits.h>
-
-#if LIBAVCODEC_VERSION_MAJOR >= 53
-#include <libavutil/opt.h>
-#define CODEC_TYPE_VIDEO      AVMEDIA_TYPE_VIDEO
-#define CODEC_TYPE_AUDIO      AVMEDIA_TYPE_AUDIO
-#define PKT_FLAG_KEY AV_PKT_FLAG_KEY
-#else
-#include <libavcodec/opt.h>
-#endif
+#include <math.h>
 
 #if LIBAVCODEC_VERSION_MAJOR < 55
-#define AV_CODEC_ID_DVVIDEO CODEC_ID_DVVIDEO
 #define AV_CODEC_ID_H264    CODEC_ID_H264
 #endif
 
@@ -102,7 +89,7 @@ struct producer_avformat_s
 	unsigned int invalid_pts_counter;
 	unsigned int invalid_dts_counter;
 	mlt_cache image_cache;
-	int yuv_colorspace, color_primaries;
+	int yuv_colorspace, color_primaries, color_trc;
 	int full_luma;
 	pthread_mutex_t video_mutex;
 	pthread_mutex_t audio_mutex;
@@ -146,6 +133,7 @@ static void apply_properties( void *obj, mlt_properties properties, int flags );
 static int video_codec_init( producer_avformat self, int index, mlt_properties properties );
 static void get_audio_streams_info( producer_avformat self );
 static mlt_audio_format pick_audio_format( int sample_fmt );
+static int pick_av_pixel_format( int *pix_fmt );
 
 #ifdef VDPAU
 #include "vdpau.c"
@@ -185,6 +173,10 @@ mlt_producer producer_avformat_init( mlt_profile profile, const char *service, c
 			// Register our get_frame implementation
 			producer->get_frame = producer_get_frame;
 
+			// Force the duration to be computed unless explicitly provided.
+			mlt_properties_set_position( properties, "length", 0 );
+			mlt_properties_set_position( properties, "out", 0 );
+
 			if ( strcmp( service, "avformat-novalidate" ) )
 			{
 				// Open the file
@@ -199,17 +191,10 @@ mlt_producer producer_avformat_init( mlt_profile profile, const char *service, c
 				else if ( self->seekable )
 				{
 					// Close the file to release resources for large playlists - reopen later as needed
-#if LIBAVFORMAT_VERSION_INT >= ((53<<16)+(17<<8)+0)
 					if ( self->audio_format )
 						avformat_close_input( &self->audio_format );
 					if ( self->video_format )
 						avformat_close_input( &self->video_format );
-#else
-					if ( self->audio_format )
-						av_close_input_file( self->audio_format );
-					if ( self->video_format )
-						av_close_input_file( self->video_format );
-#endif
 					self->audio_format = NULL;
 					self->video_format = NULL;
 				}
@@ -223,6 +208,8 @@ mlt_producer producer_avformat_init( mlt_profile profile, const char *service, c
 				mlt_service_cache_set_size( MLT_PRODUCER_SERVICE(producer), "producer_avformat", 5 );
 #endif
 				mlt_service_cache_put( MLT_PRODUCER_SERVICE(producer), "producer_avformat", self, 0, (mlt_destructor) producer_avformat_close );
+
+				mlt_properties_set_int( properties, "mute_on_pause",  1 );
 			}
 		}
 	}
@@ -248,7 +235,7 @@ int list_components( char* file )
 		fprintf( stderr, "---\naudio_codecs:\n" );
 		AVCodec *codec = NULL;
 		while ( ( codec = av_codec_next( codec ) ) )
-			if ( codec->decode && codec->type == CODEC_TYPE_AUDIO )
+			if ( codec->decode && codec->type == AVMEDIA_TYPE_AUDIO )
 				fprintf( stderr, "  - %s\n", codec->name );
 		fprintf( stderr, "...\n" );
 		skip = 1;
@@ -258,7 +245,7 @@ int list_components( char* file )
 		fprintf( stderr, "---\nvideo_codecs:\n" );
 		AVCodec *codec = NULL;
 		while ( ( codec = av_codec_next( codec ) ) )
-			if ( codec->decode && codec->type == CODEC_TYPE_VIDEO )
+			if ( codec->decode && codec->type == AVMEDIA_TYPE_VIDEO )
 				fprintf( stderr, "  - %s\n", codec->name );
 		fprintf( stderr, "...\n" );
 		skip = 1;
@@ -275,7 +262,7 @@ static int first_video_index( producer_avformat self )
 	if ( context ) {
 		for ( i = 0; i < context->nb_streams; i++ ) {
 			if ( context->streams[i]->codec &&
-			     context->streams[i]->codec->codec_type == CODEC_TYPE_VIDEO )
+				 context->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO )
 				break;
 		}
 		if ( i == context->nb_streams )
@@ -291,11 +278,7 @@ static mlt_properties find_default_streams( producer_avformat self )
 {
 	int i;
 	char key[200];
-#if LIBAVUTIL_VERSION_INT >= ((51<<16)+(8<<8)+0)
 	AVDictionaryEntry *tag = NULL;
-#else
-	AVMetadataTag *tag = NULL;
-#endif
 	AVFormatContext *context = self->video_format;
 	mlt_properties meta_media = MLT_PRODUCER_PROPERTIES( self->parent );
 
@@ -321,7 +304,7 @@ static mlt_properties find_default_streams( producer_avformat self )
 		// Determine the type and obtain the first index of each type
 		switch( codec_context->codec_type )
 		{
-			case CODEC_TYPE_VIDEO:
+			case AVMEDIA_TYPE_VIDEO:
 				// Use first video stream
 				if ( self->video_index < 0 )
 					self->video_index = i;
@@ -344,11 +327,7 @@ static mlt_properties find_default_streams( producer_avformat self )
 				AVRational frame_rate = { codec_context->time_base.den, codec_context->time_base.num * codec_context->ticks_per_frame };
 				mlt_properties_set_double( meta_media, key, av_q2d( frame_rate ) );
 				snprintf( key, sizeof(key), "meta.media.%d.codec.pix_fmt", i );
-#if LIBAVUTIL_VERSION_INT >= ((51<<16)+(3<<8)+0)
 				mlt_properties_set( meta_media, key, av_get_pix_fmt_name( codec_context->pix_fmt ) );
-#else
-				mlt_properties_set( meta_media, key, avcodec_get_pix_fmt_name( codec_context->pix_fmt ) );
-#endif
 				snprintf( key, sizeof(key), "meta.media.%d.codec.sample_aspect_ratio", i );
 				mlt_properties_set_double( meta_media, key, av_q2d( codec_context->sample_aspect_ratio ) );
 				snprintf( key, sizeof(key), "meta.media.%d.codec.colorspace", i );
@@ -369,8 +348,13 @@ static mlt_properties find_default_streams( producer_avformat self )
 					mlt_properties_set_int( meta_media, key, codec_context->width * codec_context->height > 750000 ? 709 : 601 );
 					break;
 				}
+				if ( codec_context->color_trc && codec_context->color_trc != 2 )
+				{
+					snprintf( key, sizeof(key), "meta.media.%d.codec.color_trc", i );
+					mlt_properties_set_double( meta_media, key, codec_context->color_trc );
+				}
 				break;
-			case CODEC_TYPE_AUDIO:
+			case AVMEDIA_TYPE_AUDIO:
 				if ( !codec_context->channels )
 					break;
 				// Use first audio stream
@@ -404,11 +388,7 @@ static mlt_properties find_default_streams( producer_avformat self )
 //		mlt_properties_set_int( meta_media, key, codec_context->level );
 
 		// Read Metadata
-#if LIBAVUTIL_VERSION_INT >= ((51<<16)+(8<<8)+0)
 		while ( ( tag = av_dict_get( stream->metadata, "", tag, AV_DICT_IGNORE_SUFFIX ) ) )
-#else
-		while ( ( tag = av_metadata_get( stream->metadata, "", tag, AV_METADATA_IGNORE_SUFFIX ) ) )
-#endif
 		{
 			if ( tag->value && strcmp( tag->value, "" ) && strcmp( tag->value, "und" ) )
 			{
@@ -417,11 +397,7 @@ static mlt_properties find_default_streams( producer_avformat self )
 			}
 		}
 	}
-#if LIBAVUTIL_VERSION_INT >= ((51<<16)+(8<<8)+0)
 	while ( ( tag = av_dict_get( context->metadata, "", tag, AV_DICT_IGNORE_SUFFIX ) ) )
-#else
-	while ( ( tag = av_metadata_get( context->metadata, "", tag, AV_METADATA_IGNORE_SUFFIX ) ) )
-#endif
 	{
 		if ( tag->value && strcmp( tag->value, "" ) && strcmp( tag->value, "und" ) )
 		{
@@ -445,11 +421,7 @@ static void get_aspect_ratio( mlt_properties properties, AVStream *stream, AVCod
 	mlt_properties_set_double( properties, "aspect_ratio", av_q2d( sar ) );
 }
 
-#if LIBAVFORMAT_VERSION_INT > ((53<<16)+(6<<8)+0)
 static char* parse_url( mlt_profile profile, const char* URL, AVInputFormat **format, AVDictionary **params )
-#else
-static char* parse_url( mlt_profile profile, const char* URL, AVInputFormat **format, AVFormatParameters *params )
-#endif
 {
 	if ( !URL ) return NULL;
 
@@ -458,11 +430,7 @@ static char* parse_url( mlt_profile profile, const char* URL, AVInputFormat **fo
 	char *url = strchr( protocol, ':' );
 
 	// Only if there is not a protocol specification that avformat can handle
-#if LIBAVFORMAT_VERSION_MAJOR >= 53
 	if ( url && avio_check( URL, 0 ) < 0 )
-#else
-	if ( url && !url_exist( URL ) )
-#endif
 	{
 		// Truncate protocol string
 		url[0] = 0;
@@ -476,19 +444,9 @@ static char* parse_url( mlt_profile profile, const char* URL, AVInputFormat **fo
 
 		if ( *format )
 		{
-#if LIBAVFORMAT_VERSION_INT > ((53<<16)+(6<<8)+0)
 			// support for legacy width and height parameters
 			char *width = NULL;
 			char *height = NULL;
-#else
-			// These are required by video4linux2 (defaults)
-			params->width = profile->width;
-			params->height = profile->height;
-			if ( !strstr( URL, "&frame_rate" ) )
-				params->time_base = (AVRational){ profile->frame_rate_den, profile->frame_rate_num };
-			params->channels = 2;
-			params->sample_rate = 48000;
-#endif
 
 			// Parse out params
 			url = strchr( url, '?' );
@@ -507,7 +465,6 @@ static char* parse_url( mlt_profile profile, const char* URL, AVInputFormat **fo
 					char *t = strchr( value, '&' );
 					if ( t )
 						t[0] = 0;
-#if LIBAVFORMAT_VERSION_INT > ((53<<16)+(6<<8)+0)
 					// translate old parameters to new av_dict names
 					if ( !strcmp( name, "frame_rate" ) )
 						av_dict_set( params, "framerate", value, 0 );
@@ -520,31 +477,10 @@ static char* parse_url( mlt_profile profile, const char* URL, AVInputFormat **fo
 					else
 						// generic demux/device option support
 						av_dict_set( params, name, value, 0 );
-#else
-					if ( !strcmp( name, "frame_rate" ) )
-						params->time_base.den = atoi( value );
-					else if ( !strcmp( name, "frame_rate_base" ) )
-						params->time_base.num = atoi( value );
-					else if ( !strcmp( name, "sample_rate" ) )
-						params->sample_rate = atoi( value );
-					else if ( !strcmp( name, "channel" ) )
-						params->channel = atoi( value );
-					else if ( !strcmp( name, "channels" ) )
-						params->channels = atoi( value );
-					else if ( !strcmp( name, "pix_fmt" ) )
-						params->pix_fmt = av_get_pix_fmt( value );
-					else if ( !strcmp( name, "width" ) )
-						params->width = atoi( value );
-					else if ( !strcmp( name, "height" ) )
-						params->height = atoi( value );
-					else if ( !strcmp( name, "standard" ) )
-						params->standard = strdup( value );
-#endif
 				}
 				free( name );
 				url = strchr( url, '&' );
 			}
-#if LIBAVFORMAT_VERSION_INT > ((53<<16)+(6<<8)+0)
 			// continued support for legacy width and height parameters
 			if ( width && height )
 			{
@@ -555,9 +491,8 @@ static char* parse_url( mlt_profile profile, const char* URL, AVInputFormat **fo
 				av_dict_set( params, "video_size", s, 0 );
 				free( s );
 			}
-			if ( width ) free( width );
-			if ( height ) free ( height );
-#endif
+			free( width );
+			free ( height );
 		}
 		result = strdup( result );
 	}
@@ -597,27 +532,27 @@ static int get_basic_info( producer_avformat self, mlt_profile profile, const ch
 	AVFormatContext *format = self->video_format;
 
 	// Get the duration
-	if ( !mlt_properties_get_int( properties, "_length_computed" ) )
+	if ( mlt_properties_get_position( properties, "length" ) <= 0 ||
+		 mlt_properties_get_position( properties, "out" ) <= 0 )
 	{
-		// The _length_computed flag prevents overwriting explicity set length/out/eof properties
-		// when producer_open is called after initial call when restoring or reseting the producer.
 		if ( format->duration != AV_NOPTS_VALUE )
 		{
 			// This isn't going to be accurate for all formats
 			// We will treat everything with the producer fps.
-			mlt_position frames = ( mlt_position )( int )( format->duration *
-				profile->frame_rate_num / profile->frame_rate_den / AV_TIME_BASE);
-			mlt_properties_set_position( properties, "out", frames - 1 );
-			mlt_properties_set_position( properties, "length", frames );
-			mlt_properties_set_int( properties, "_length_computed", 1 );
+			mlt_position frames = ( mlt_position ) lrint( format->duration * mlt_profile_fps( profile ) / AV_TIME_BASE );
+			if ( mlt_properties_get_position( properties, "out" ) <= 0 )
+				mlt_properties_set_position( properties, "out", frames - 1 );
+			if ( mlt_properties_get_position( properties, "length" ) <= 0 )
+				mlt_properties_set_position( properties, "length", frames );
 		}
 		else
 		{
 			// Set live sources to run forever
-			mlt_properties_set_position( properties, "length", INT_MAX );
-			mlt_properties_set_position( properties, "out", INT_MAX - 1 );
+			if ( mlt_properties_get_position( properties, "length" ) <= 0 )
+				mlt_properties_set_position( properties, "length", INT_MAX );
+			if ( mlt_properties_get_position( properties, "out" ) <= 0 )
+				mlt_properties_set_position( properties, "out", INT_MAX - 1 );
 			mlt_properties_set( properties, "eof", "loop" );
-			mlt_properties_set_int( properties, "_length_computed", 1 );
 		}
 	}
 
@@ -627,13 +562,7 @@ static int get_basic_info( producer_avformat self, mlt_profile profile, const ch
 	if ( format->pb )
 	{
 		// protocols can indicate if they support seeking
-#if LIBAVFORMAT_VERSION_MAJOR >= 53
 		self->seekable = format->pb->seekable;
-#else
-		URLContext *uc = url_fileno( format->pb );
-		if ( uc )
-			self->seekable = !uc->is_streamed;
-#endif
 	}
 	if ( self->seekable )
 	{
@@ -641,14 +570,9 @@ static int get_basic_info( producer_avformat self, mlt_profile profile, const ch
 		self->seekable = av_seek_frame( format, -1, format->start_time, AVSEEK_FLAG_BACKWARD ) >= 0;
 		mlt_properties_set_int( properties, "seekable", self->seekable );
 		self->dummy_context = format;
-#if LIBAVFORMAT_VERSION_INT > ((53<<16)+(6<<8)+0)
 		self->video_format = NULL;
 		avformat_open_input( &self->video_format, filename, NULL, NULL );
 		avformat_find_stream_info( self->video_format, NULL );
-#else
-		av_open_input_file( &self->video_format, filename, NULL, 0, NULL );
-		av_find_stream_info( self->video_format );
-#endif
 		format = self->video_format;
 	}
 
@@ -660,8 +584,10 @@ static int get_basic_info( producer_avformat self, mlt_profile profile, const ch
 		mlt_properties_set_int( properties, "height", codec_context->height );
 		get_aspect_ratio( properties, format->streams[ self->video_index ], codec_context );
 
+		int pix_fmt = codec_context->pix_fmt;
+		pick_av_pixel_format( &pix_fmt );
 		// Verify that we can convert this to YUV 4:2:2
-		struct SwsContext *context = sws_getContext( codec_context->width, codec_context->height, codec_context->pix_fmt,
+		struct SwsContext *context = sws_getContext( codec_context->width, codec_context->height, pix_fmt,
 			codec_context->width, codec_context->height, pick_pix_fmt( codec_context->pix_fmt ), SWS_BILINEAR, NULL, NULL, NULL);
 		if ( context )
 			sws_freeContext( context );
@@ -699,26 +625,14 @@ static int producer_open( producer_avformat self, mlt_profile profile, const cha
 
 	// Parse URL
 	AVInputFormat *format = NULL;
-#if LIBAVFORMAT_VERSION_INT > ((53<<16)+(6<<8)+0)
 	AVDictionary *params = NULL;
-#else
-	AVFormatParameters params;
-	memset( &params, 0, sizeof(params) );
-#endif
 	char *filename = parse_url( profile, URL, &format, &params );
 
 	// Now attempt to open the file or device with filename
-#if LIBAVFORMAT_VERSION_INT > ((53<<16)+(6<<8)+0)
 	error = avformat_open_input( &self->video_format, filename, format, &params ) < 0;
 	if ( error )
 		// If the URL is a network stream URL, then we probably need to open with full URL
 		error = avformat_open_input( &self->video_format, URL, format, &params ) < 0;
-#else
-	error = av_open_input_file( &self->video_format, filename, format, 0, &params ) < 0;
-	if ( error )
-		// If the URL is a network stream URL, then we probably need to open with full URL
-		error = av_open_input_file( &self->video_format, URL, format, 0, &params ) < 0;
-#endif
 
 	// Set MLT properties onto video AVFormatContext
 	if ( !error && self->video_format )
@@ -728,23 +642,13 @@ static int producer_open( producer_avformat self, mlt_profile profile, const cha
 			apply_properties( self->video_format->priv_data, properties, AV_OPT_FLAG_DECODING_PARAM );
 	}
 
-#if LIBAVFORMAT_VERSION_INT > ((53<<16)+(6<<8)+0)
 	av_dict_free( &params );
-#else
-	// Cleanup AVFormatParameters
-	if ( params.standard )
-		free( (void*) params.standard );
-#endif
 
 	// If successful, then try to get additional info
 	if ( !error && self->video_format )
 	{
 		// Get the stream info
-#if LIBAVFORMAT_VERSION_INT > ((53<<16)+(6<<8)+0)
 		error = avformat_find_stream_info( self->video_format, NULL ) < 0;
-#else
-		error = av_find_stream_info( self->video_format ) < 0;
-#endif
 
 		// Continue if no error
 		if ( !error && self->video_format )
@@ -767,21 +671,11 @@ static int producer_open( producer_avformat self, mlt_profile profile, const cha
 					if ( self->seekable )
 					{
 						// And open again for our audio context
-#if LIBAVFORMAT_VERSION_INT > ((53<<16)+(6<<8)+0)
 						avformat_open_input( &self->audio_format, filename, NULL, NULL );
 						apply_properties( self->audio_format, properties, AV_OPT_FLAG_DECODING_PARAM );
 						if ( self->audio_format->iformat && self->audio_format->iformat->priv_class && self->audio_format->priv_data )
 							apply_properties( self->audio_format->priv_data, properties, AV_OPT_FLAG_DECODING_PARAM );
 						avformat_find_stream_info( self->audio_format, NULL );
-#else
-						av_open_input_file( &self->audio_format, filename, NULL, 0, NULL );
-						apply_properties( self->audio_format, properties, AV_OPT_FLAG_DECODING_PARAM );
-#if LIBAVFORMAT_VERSION_INT >= ((52<<16)+(110<<8)+0)
-                        if ( self->audio_format->iformat && self->audio_format->iformat->priv_class && self->audio_format->priv_data )
-                            apply_properties( self->audio_format->priv_data, properties, AV_OPT_FLAG_DECODING_PARAM );
-#endif
-						av_find_stream_info( self->audio_format );
-#endif
 					}
 					else
 					{
@@ -804,8 +698,7 @@ static int producer_open( producer_avformat self, mlt_profile profile, const cha
 			}
 		}
 	}
-	if ( filename )
-		free( filename );
+	free( filename );
 	if ( !error )
 	{
 		self->apackets = mlt_deque_init();
@@ -815,11 +708,7 @@ static int producer_open( producer_avformat self, mlt_profile profile, const cha
 	if ( self->dummy_context )
 	{
 		pthread_mutex_lock( &self->open_mutex );
-#if LIBAVFORMAT_VERSION_INT >= ((53<<16)+(17<<8)+0)
 		avformat_close_input( &self->dummy_context );
-#else
-		av_close_input_file( self->dummy_context );
-#endif
 		self->dummy_context = NULL;
 		pthread_mutex_unlock( &self->open_mutex );
 	}
@@ -856,17 +745,10 @@ static void prepare_reopen( producer_avformat self )
 		avcodec_close( self->video_codec );
 	self->video_codec = NULL;
 
-#if LIBAVFORMAT_VERSION_INT >= ((53<<16)+(17<<8)+0)
 	if ( self->seekable && self->audio_format )
 		avformat_close_input( &self->audio_format );
 	if ( self->video_format )
 		avformat_close_input( &self->video_format );
-#else
-	if ( self->seekable && self->audio_format )
-		av_close_input_file( self->audio_format );
-	if ( self->video_format )
-		av_close_input_file( self->video_format );
-#endif
 	self->audio_format = NULL;
 	self->video_format = NULL;
 	pthread_mutex_unlock( &self->open_mutex );
@@ -919,7 +801,7 @@ static void find_first_pts( producer_avformat self, int video_index )
 	while ( ret >= 0 && toscan-- > 0 )
 	{
 		ret = av_read_frame( context, &pkt );
-		if ( ret >= 0 && pkt.stream_index == video_index && ( pkt.flags & PKT_FLAG_KEY ) )
+		if ( ret >= 0 && pkt.stream_index == video_index && ( pkt.flags & AV_PKT_FLAG_KEY ) )
 		{
 			mlt_log_debug( MLT_PRODUCER_SERVICE(self->parent),
 				"first_pts %"PRId64" dts %"PRId64" pts_dts_delta %d\n",
@@ -1017,18 +899,14 @@ static void get_audio_streams_info( producer_avformat self )
 		  i < context->nb_streams;
 		  i++ )
 	{
-		if ( context->streams[i]->codec->codec_type == CODEC_TYPE_AUDIO )
+		if ( context->streams[i]->codec->codec_type == AVMEDIA_TYPE_AUDIO )
 		{
 			AVCodecContext *codec_context = context->streams[i]->codec;
 			AVCodec *codec = avcodec_find_decoder( codec_context->codec_id );
 
 			// If we don't have a codec and we can't initialise it, we can't do much more...
 			pthread_mutex_lock( &self->open_mutex );
-#if LIBAVCODEC_VERSION_INT >= ((53<<16)+(8<<8)+0)
 			if ( codec && avcodec_open2( codec_context, codec, NULL ) >= 0 )
-#else
-			if ( codec && avcodec_open( codec_context, codec ) >= 0 )
-#endif
 			{
 				self->audio_streams++;
 				self->audio_max_stream = i;
@@ -1046,13 +924,16 @@ static void get_audio_streams_info( producer_avformat self )
 		self->audio_streams, self->audio_max_stream, self->total_channels, self->max_channel );
 }
 
-static int set_luma_transfer( struct SwsContext *context, int src_colorspace, int dst_colorspace, int full_range )
+static int set_luma_transfer( struct SwsContext *context, int src_colorspace,
+	int dst_colorspace, int src_full_range, int dst_full_range )
 {
 	const int *src_coefficients = sws_getCoefficients( SWS_CS_DEFAULT );
 	const int *dst_coefficients = sws_getCoefficients( SWS_CS_DEFAULT );
 	int brightness = 0;
 	int contrast = 1 << 16;
 	int saturation = 1  << 16;
+	int src_range = src_full_range ? 1 : 0;
+	int dst_range = dst_full_range ? 1 : 0;
 
 	switch ( src_colorspace )
 	{
@@ -1088,7 +969,7 @@ static int set_luma_transfer( struct SwsContext *context, int src_colorspace, in
 	default:
 		break;
 	}
-	return sws_setColorspaceDetails( context, src_coefficients, full_range, dst_coefficients, full_range,
+	return sws_setColorspaceDetails( context, src_coefficients, src_range, dst_coefficients, dst_range,
 		brightness, contrast, saturation );
 }
 
@@ -1135,7 +1016,6 @@ static mlt_audio_format pick_audio_format( int sample_fmt )
 	case AV_SAMPLE_FMT_FLT:
 		return mlt_audio_f32le;
 	// planar - this producer converts planar to interleaved
-#if LIBAVUTIL_VERSION_INT >= ((51<<16)+(17<<8)+0)
 	case AV_SAMPLE_FMT_U8P:
 		return mlt_audio_u8;
 	case AV_SAMPLE_FMT_S16P:
@@ -1144,10 +1024,40 @@ static mlt_audio_format pick_audio_format( int sample_fmt )
 		return mlt_audio_s32le;
 	case AV_SAMPLE_FMT_FLTP:
 		return mlt_audio_f32le;
-#endif
 	default:
 		return mlt_audio_none;
 	}
+}
+
+/**
+ * Handle deprecated pixel format (JPEG range in YUV420P for exemple).
+ *
+ * Replace pix_fmt with the official pixel format to use.
+ * @return 0 if no pix_fmt replacement, 1 otherwise
+ */
+static int pick_av_pixel_format( int *pix_fmt )
+{
+#if defined(FFUDIV) && (LIBAVFORMAT_VERSION_INT >= ((55<<16)+(48<<8)+100))
+	switch (*pix_fmt)
+	{
+	case AV_PIX_FMT_YUVJ420P:
+		*pix_fmt = AV_PIX_FMT_YUV420P;
+		return 1;
+	case AV_PIX_FMT_YUVJ411P:
+		*pix_fmt = AV_PIX_FMT_YUV411P;
+		return 1;
+	case AV_PIX_FMT_YUVJ422P:
+		*pix_fmt = AV_PIX_FMT_YUV422P;
+		return 1;
+	case AV_PIX_FMT_YUVJ444P:
+		*pix_fmt = AV_PIX_FMT_YUV444P;
+		return 1;
+	case AV_PIX_FMT_YUVJ440P:
+		*pix_fmt = AV_PIX_FMT_YUV440P;
+		return 1;
+	}
+#endif
+	return 0;
 }
 
 // returns resulting YUV colorspace
@@ -1171,7 +1081,7 @@ static int convert_image( producer_avformat self, AVFrame *frame, uint8_t *buffe
 
 	// extract alpha from planar formats
 	if ( ( pix_fmt == PIX_FMT_YUVA420P
-#if defined(FFUDIV) && LIBAVUTIL_VERSION_INT >= ((51<<16)+(35<<8)+101)
+#if defined(FFUDIV)
 			|| pix_fmt == PIX_FMT_YUVA444P
 #endif
 			) &&
@@ -1188,11 +1098,22 @@ static int convert_image( producer_avformat self, AVFrame *frame, uint8_t *buffe
 			memcpy( dst, src, FFMIN( width, frame->linesize[3] ) );
 	}
 
+	int src_pix_fmt = pix_fmt;
+	pick_av_pixel_format( &src_pix_fmt );
 	if ( *format == mlt_image_yuv420p )
 	{
+		// This is a special case. Movit wants the full range, if available.
+		// Thankfully, there is not much other use of yuv420p except consumer
+		// avformat with no filters and explicitly requested.
+#if defined(FFUDIV) && (LIBAVFORMAT_VERSION_INT >= ((55<<16)+(48<<8)+100))
+		struct SwsContext *context = sws_getContext(width, height, src_pix_fmt,
+			width, height, PIX_FMT_YUV420P, flags, NULL, NULL, NULL);
+#else
 		struct SwsContext *context = sws_getContext( width, height, pix_fmt,
-			width, height, self->full_luma ? PIX_FMT_YUVJ420P : PIX_FMT_YUV420P,
-			flags, NULL, NULL, NULL);
+					width, height, self->full_luma ? PIX_FMT_YUVJ420P : PIX_FMT_YUV420P,
+					flags, NULL, NULL, NULL);
+#endif
+
 		AVPicture output;
 		output.data[0] = buffer;
 		output.data[1] = buffer + width * height;
@@ -1200,7 +1121,7 @@ static int convert_image( producer_avformat self, AVFrame *frame, uint8_t *buffe
 		output.linesize[0] = width;
 		output.linesize[1] = width >> 1;
 		output.linesize[2] = width >> 1;
-		if ( !set_luma_transfer( context, self->yuv_colorspace, profile->colorspace, self->full_luma ) )
+		if ( !set_luma_transfer( context, self->yuv_colorspace, profile->colorspace, self->full_luma, self->full_luma ) )
 			result = profile->colorspace;
 		sws_scale( context, (const uint8_t* const*) frame->data, frame->linesize, 0, height,
 			output.data, output.linesize);
@@ -1208,35 +1129,40 @@ static int convert_image( producer_avformat self, AVFrame *frame, uint8_t *buffe
 	}
 	else if ( *format == mlt_image_rgb24 )
 	{
-		struct SwsContext *context = sws_getContext( width, height, pix_fmt,
+		struct SwsContext *context = sws_getContext( width, height, src_pix_fmt,
 			width, height, PIX_FMT_RGB24, flags | SWS_FULL_CHR_H_INT, NULL, NULL, NULL);
 		AVPicture output;
 		avpicture_fill( &output, buffer, PIX_FMT_RGB24, width, height );
 		// libswscale wants the RGB colorspace to be SWS_CS_DEFAULT, which is = SWS_CS_ITU601.
-		set_luma_transfer( context, self->yuv_colorspace, 601, self->full_luma );
+		set_luma_transfer( context, self->yuv_colorspace, 601, self->full_luma, 0 );
 		sws_scale( context, (const uint8_t* const*) frame->data, frame->linesize, 0, height,
 			output.data, output.linesize);
 		sws_freeContext( context );
 	}
 	else if ( *format == mlt_image_rgb24a || *format == mlt_image_opengl )
 	{
-		struct SwsContext *context = sws_getContext( width, height, pix_fmt,
+		struct SwsContext *context = sws_getContext( width, height, src_pix_fmt,
 			width, height, PIX_FMT_RGBA, flags | SWS_FULL_CHR_H_INT, NULL, NULL, NULL);
 		AVPicture output;
 		avpicture_fill( &output, buffer, PIX_FMT_RGBA, width, height );
 		// libswscale wants the RGB colorspace to be SWS_CS_DEFAULT, which is = SWS_CS_ITU601.
-		set_luma_transfer( context, self->yuv_colorspace, 601, self->full_luma );
+		set_luma_transfer( context, self->yuv_colorspace, 601, self->full_luma, 0 );
 		sws_scale( context, (const uint8_t* const*) frame->data, frame->linesize, 0, height,
 			output.data, output.linesize);
 		sws_freeContext( context );
 	}
 	else
 	{
+#if defined(FFUDIV) && (LIBAVFORMAT_VERSION_INT >= ((55<<16)+(48<<8)+100))
+		struct SwsContext *context = sws_getContext( width, height, src_pix_fmt,
+			width, height, PIX_FMT_YUYV422, flags | SWS_FULL_CHR_H_INP, NULL, NULL, NULL);
+#else
 		struct SwsContext *context = sws_getContext( width, height, pix_fmt,
 			width, height, PIX_FMT_YUYV422, flags | SWS_FULL_CHR_H_INP, NULL, NULL, NULL);
+#endif
 		AVPicture output;
 		avpicture_fill( &output, buffer, PIX_FMT_YUYV422, width, height );
-		if ( !set_luma_transfer( context, self->yuv_colorspace, profile->colorspace, self->full_luma ) )
+		if ( !set_luma_transfer( context, self->yuv_colorspace, profile->colorspace, self->full_luma, 0 ) )
 			result = profile->colorspace;
 		sws_scale( context, (const uint8_t* const*) frame->data, frame->linesize, 0, height,
 			output.data, output.linesize);
@@ -1361,21 +1287,16 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 	// This is the physical frame position in the source
 	int64_t req_position = ( int64_t )( position / mlt_producer_get_fps( producer ) * source_fps + 0.5 );
 
-	// Determines if we have to decode all frames in a sequence
-	// Temporary hack to improve intra frame only
-	int must_decode = !( codec_context->codec && codec_context->codec->name ) || (
-				  strcmp( codec_context->codec->name, "dnxhd" ) &&
-				  strcmp( codec_context->codec->name, "dvvideo" ) &&
-				  strcmp( codec_context->codec->name, "huffyuv" ) &&
-				  strcmp( codec_context->codec->name, "mjpeg" ) &&
-				  strcmp( codec_context->codec->name, "rawvideo" ) );
+	// Determines if we have to decode all frames in a sequence - when there temporal compression is used.
+	const AVCodecDescriptor *descriptor = codec_context->codec? avcodec_descriptor_get( codec_context->codec->id ) : NULL;
+	int must_decode = descriptor && !( descriptor->props & AV_CODEC_PROP_INTRA_ONLY );
 
 	double delay = mlt_properties_get_double( properties, "video_delay" );
 
 	// Seek if necessary
 	const char *interp = mlt_properties_get( frame_properties, "rescale.interp" );
 	int preseek = must_decode
-#if defined(FFUDIV) && LIBAVFORMAT_VERSION_INT >= ((53<<16)+(24<<8)+2)
+#if defined(FFUDIV)
 		&& ( interp && strcmp( interp, "nearest" ) )
 #endif
 		&& codec_context->has_b_frames;
@@ -1440,7 +1361,11 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 
 		// Construct an AVFrame for YUV422 conversion
 		if ( !self->video_frame )
+#if LIBAVCODEC_VERSION_INT >= ((55<<16)+(45<<8)+0)
+			self->video_frame = av_frame_alloc();
+#else
 			self->video_frame = avcodec_alloc_frame( );
+#endif
 
 		while( ret >= 0 && !got_picture )
 		{
@@ -1469,7 +1394,8 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 				}
 				else if ( ret < 0 )
 				{
-					mlt_log_verbose( MLT_PRODUCER_SERVICE(producer), "av_read_frame returned error %d inside get_image\n", ret );
+					if ( ret != AVERROR_EOF )
+						mlt_log_verbose( MLT_PRODUCER_SERVICE(producer), "av_read_frame returned error %d inside get_image\n", ret );
 					if ( !self->seekable && mlt_properties_get_int( properties, "reconnect" ) )
 					{
 						// Try to reconnect to live sources by closing context and codecs,
@@ -1519,7 +1445,7 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 				self->last_position = int_position;
 
 				// Decode the image
-				if ( must_decode || int_position >= req_position || !self->pkt.data )
+				if ( must_decode  || int_position >= req_position || !self->pkt.data )
 				{
 #ifdef VDPAU
 					if ( self->vdpau )
@@ -1534,11 +1460,7 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 					codec_context->reordered_opaque = int_position;
 					if ( int_position >= req_position )
 						codec_context->skip_loop_filter = AVDISCARD_NONE;
-#if (LIBAVCODEC_VERSION_INT >= ((52<<16)+(26<<8)+0))
 					ret = avcodec_decode_video2( codec_context, self->video_frame, &got_picture, &self->pkt );
-#else
-					ret = avcodec_decode_video( codec_context, self->video_frame, &got_picture, self->pkt.data, self->pkt.size );
-#endif
 					mlt_log_debug( MLT_PRODUCER_SERVICE(producer), "decoded packet with size %d => %d\n", self->pkt.size, ret );
 					// Note: decode may fail at the beginning of MPEGfile (B-frames referencing before first I-frame), so allow a few errors.
 					if ( ret < 0 )
@@ -1560,7 +1482,6 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 				{
 					// Get position of reordered frame
 					int_position = self->video_frame->reordered_opaque;
-#if (LIBAVCODEC_VERSION_INT >= ((52<<16)+(106<<8)+0))
 					pts = best_pts( self, self->video_frame->pkt_pts, self->video_frame->pkt_dts );
 					if ( pts != AV_NOPTS_VALUE )
 					{
@@ -1570,7 +1491,6 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 							pts -= context->start_time;
 						int_position = ( int64_t )( ( av_q2d( self->video_time_base ) * pts + delay ) * source_fps + 0.5 );
 					}
-#endif
 
 					if ( int_position < req_position )
 						got_picture = 0;
@@ -1581,7 +1501,8 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 				{
 					ret = -1;
 				}
-				mlt_log_debug( MLT_PRODUCER_SERVICE(producer), " got_pic %d key %d ret %d pkt_pos %d\n", got_picture, self->pkt.flags & PKT_FLAG_KEY, ret, int_position );
+				mlt_log_debug( MLT_PRODUCER_SERVICE(producer), " got_pic %d key %d ret %d pkt_pos %"PRId64"\n",
+							   got_picture, self->pkt.flags & AV_PKT_FLAG_KEY, ret, int_position );
 			}
 
 			// Now handle the picture if we have one
@@ -1723,11 +1644,6 @@ exit_get_image:
 	mlt_properties_set_int( properties, "meta.media.progressive", mlt_properties_get_int( frame_properties, "progressive" ) );
 	mlt_service_unlock( MLT_PRODUCER_SERVICE( producer ) );
 
-	// If we already have RGB, then the full range processing either happened already
-	// or does not apply (RGB source).
-	if ( *format == mlt_image_rgb24 || *format == mlt_image_rgb24a || *format == mlt_image_opengl )
-		mlt_properties_set( frame_properties, "force_full_luma", NULL );
-
 	return !got_picture;
 }
 
@@ -1741,23 +1657,11 @@ static void apply_properties( void *obj, mlt_properties properties, int flags )
 	for ( i = 0; i < count; i++ )
 	{
 		const char *opt_name = mlt_properties_get_name( properties, i );
-#if LIBAVUTIL_VERSION_INT >= ((51<<16)+(10<<8)+0)
 		const AVOption *opt = av_opt_find( obj, opt_name, NULL, flags, flags );
-#else
-		const AVOption *opt = av_find_opt( obj, opt_name, NULL, flags, flags );
-#endif
 		if ( opt_name && mlt_properties_get( properties, opt_name ) )
 		{
 			if ( opt )
-#if LIBAVUTIL_VERSION_INT >= ((51<<16)+(12<<8)+0)
 				av_opt_set( obj, opt_name, mlt_properties_get( properties, opt_name), 0 );
-#elif LIBAVCODEC_VERSION_INT >= ((52<<16)+(7<<8)+0)
-				av_set_string3( obj, opt_name, mlt_properties_get( properties, opt_name), 0, NULL );
-#elif LIBAVCODEC_VERSION_INT >= ((51<<16)+(59<<8)+0)
-				av_set_string2( obj, opt_name, mlt_properties_get( properties, opt_name), 0 );
-#else
-				av_set_string( obj, opt_name, mlt_properties_get( properties, opt_name) );
-#endif
 		}
 	}
 }
@@ -1804,11 +1708,7 @@ static int video_codec_init( producer_avformat self, int index, mlt_properties p
 
 		// If we don't have a codec and we can't initialise it, we can't do much more...
 		pthread_mutex_lock( &self->open_mutex );
-#if LIBAVCODEC_VERSION_INT >= ((53<<16)+(8<<8)+0)
 		if ( codec && avcodec_open2( codec_context, codec, NULL ) >= 0 )
-#else
-		if ( codec && avcodec_open( codec_context, codec ) >= 0 )
-#endif
 		{
 			// Now store the codec with its destructor
 			self->video_codec = codec_context;
@@ -1824,25 +1724,16 @@ static int video_codec_init( producer_avformat self, int index, mlt_properties p
 
 		// Process properties as AVOptions
 		apply_properties( codec_context, properties, AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_DECODING_PARAM );
-#if LIBAVCODEC_VERSION_INT >= ((52<<16)+(122<<8)+0)
 		if ( codec->priv_class && codec_context->priv_data )
 			apply_properties( codec_context->priv_data, properties, AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_DECODING_PARAM );
-#endif
 
 		// Reset some image properties
-		if ( self->video_codec )
-		{
-			mlt_properties_set_int( properties, "width", self->video_codec->width );
-			mlt_properties_set_int( properties, "height", self->video_codec->height );
-			get_aspect_ratio( properties, stream, self->video_codec );
-		}
+		mlt_properties_set_int( properties, "width", self->video_codec->width );
+		mlt_properties_set_int( properties, "height", self->video_codec->height );
+		get_aspect_ratio( properties, stream, self->video_codec );
 
 		// Start with the muxer frame rate.
-#if LIBAVFORMAT_VERSION_INT >= ((52<<16)+(42<<8)+0)
 		AVRational frame_rate = stream->avg_frame_rate;
-#else
-		AVRational frame_rate = stream->r_frame_rate;
-#endif
 		double fps = av_q2d( frame_rate );
 
 #if LIBAVFORMAT_VERSION_MAJOR < 55 || defined(FFUDIV)
@@ -1853,7 +1744,7 @@ static int video_codec_init( producer_avformat self, int index, mlt_properties p
 			fps = av_q2d( frame_rate );
 		}
 #endif
-#if LIBAVFORMAT_VERSION_INT >= ((52<<16)+(42<<8)+0) && ( LIBAVFORMAT_VERSION_MAJOR < 55 || defined(FFUDIV) )
+#if (LIBAVFORMAT_VERSION_MAJOR < 55) || defined(FFUDIV)
 		// With my samples when r_frame_rate != 1000 but avg_frame_rate is valid,
 		// avg_frame_rate gives some approximate value that does not well match the media.
 		// Also, on my sample where r_frame_rate = 1000, using avg_frame_rate directly
@@ -1893,7 +1784,6 @@ static int video_codec_init( producer_avformat self, int index, mlt_properties p
 
 		// Set the YUV colorspace from override or detect
 		self->yuv_colorspace = mlt_properties_get_int( properties, "force_colorspace" );
-#if LIBAVCODEC_VERSION_INT > ((52<<16)+(28<<8)+0)
 		if ( ! self->yuv_colorspace )
 		{
 			switch ( self->video_codec->colorspace )
@@ -1914,10 +1804,16 @@ static int video_codec_init( producer_avformat self, int index, mlt_properties p
 				break;
 			}
 		}
-#endif
 		// Let apps get chosen colorspace
 		mlt_properties_set_int( properties, "meta.media.colorspace", self->yuv_colorspace );
 
+		// Get the color transfer characteristic (gamma).
+		self->color_trc = mlt_properties_get_int( properties, "force_color_trc" );
+		if ( !self->color_trc )
+			self->color_trc = self->video_codec->color_trc;
+		mlt_properties_set_int( properties, "meta.media.color_trc", self->color_trc );
+
+		// Get the RGB color primaries.
 		switch ( self->video_codec->color_primaries )
 		{
 		case AVCOL_PRI_BT470BG:
@@ -1935,15 +1831,13 @@ static int video_codec_init( producer_avformat self, int index, mlt_properties p
 		}
 
 		self->full_luma = 0;
-#if LIBAVCODEC_VERSION_INT >= ((52<<16)+(72<<8)+2)
 		mlt_log_debug( MLT_PRODUCER_SERVICE(self->parent), "color_range %d\n", codec_context->color_range );
 		if ( codec_context->color_range == AVCOL_RANGE_JPEG )
 			self->full_luma = 1;
-#endif
 		if ( mlt_properties_get( properties, "set.force_full_luma" ) )
 			self->full_luma = mlt_properties_get_int( properties, "set.force_full_luma" );
 	}
-	return self->video_codec && self->video_index > -1;
+	return self->video_index > -1;
 }
 
 /** Set up video handling.
@@ -1981,11 +1875,11 @@ static void producer_set_up_video( producer_avformat self, mlt_frame frame )
 	{
 		// Get the last video stream
 		for ( index = context->nb_streams - 1;
-			  index >= 0 && context->streams[ index ]->codec->codec_type != CODEC_TYPE_VIDEO;
+			  index >= 0 && context->streams[ index ]->codec->codec_type != AVMEDIA_TYPE_VIDEO;
 			  index-- );
 		mlt_properties_set_int( properties, "video_index", index );
 	}
-	if ( context && index > -1 && context->streams[ index ]->codec->codec_type != CODEC_TYPE_VIDEO )
+	if ( context && index > -1 && context->streams[ index ]->codec->codec_type != AVMEDIA_TYPE_VIDEO )
 	{
 		// Invalidate the video stream
 		index = -1;
@@ -2022,6 +1916,7 @@ static void producer_set_up_video( producer_avformat self, mlt_frame frame )
 		mlt_properties_set_int( properties, "meta.media.height", self->video_codec->height );
 		mlt_properties_set_double( frame_properties, "aspect_ratio", aspect_ratio );
 		mlt_properties_set_int( frame_properties, "colorspace", self->yuv_colorspace );
+		mlt_properties_set_int( frame_properties, "color_trc", self->color_trc );
 		mlt_properties_set_int( frame_properties, "color_primaries", self->color_primaries );
 		mlt_properties_set_int( frame_properties, "full_luma", self->full_luma );
 
@@ -2060,7 +1955,8 @@ static int seek_audio( producer_avformat self, mlt_position position, double tim
 				find_first_pts( self, video_index );
 		}
 
-		if ( position + 1 == self->audio_expected )
+		if ( position + 1 == self->audio_expected  &&
+			mlt_properties_get_int( MLT_PRODUCER_PROPERTIES( self->parent ), "mute_on_pause" ) )
 		{
 			// We're paused - silence required
 			paused = 1;
@@ -2089,13 +1985,7 @@ static int seek_audio( producer_avformat self, mlt_position position, double tim
 
 static int sample_bytes( AVCodecContext *context )
 {
-#if LIBAVUTIL_VERSION_INT >= ((51<<16)+(8<<8)+0)
 	return av_get_bytes_per_sample( context->sample_fmt );
-#elif LIBAVCODEC_VERSION_MAJOR >= 53
-	return av_get_bits_per_sample_fmt( context->sample_fmt ) / 8;
-#else
-	return av_get_bits_per_sample_format( context->sample_fmt ) / 8;
-#endif
 }
 
 #if LIBAVCODEC_VERSION_MAJOR >= 55
@@ -2126,7 +2016,7 @@ static void planar_to_interleaved( uint8_t *dest, uint8_t *src, int samples, int
 }
 #endif
 
-static int decode_audio( producer_avformat self, int *ignore, AVPacket pkt, int channels, int samples, double timecode, double fps )
+static int decode_audio( producer_avformat self, int *ignore, AVPacket pkt, int samples, double timecode, double fps )
 {
 	// Fetch the audio_format
 	AVFormatContext *context = self->audio_format;
@@ -2141,6 +2031,7 @@ static int decode_audio( producer_avformat self, int *ignore, AVPacket pkt, int 
 	uint8_t *audio_buffer = self->audio_buffer[ index ];
 	uint8_t *decode_buffer = self->decode_buffer[ index ];
 
+	int channels = codec_context->channels;
 	int audio_used = self->audio_used[ index ];
 	int ret = 0;
 
@@ -2152,14 +2043,21 @@ static int decode_audio( producer_avformat self, int *ignore, AVPacket pkt, int 
 		// Decode the audio
 #if LIBAVCODEC_VERSION_MAJOR >= 55
 		if ( !self->audio_frame )
+#if LIBAVCODEC_VERSION_INT >= ((55<<16)+(45<<8)+0)
+			self->audio_frame = av_frame_alloc();
+		else
+			av_frame_unref( self->audio_frame );
+#else
 			self->audio_frame = avcodec_alloc_frame();
 		else
 			avcodec_get_frame_defaults( self->audio_frame );
+#endif
 		ret = avcodec_decode_audio4( codec_context, self->audio_frame, &data_size, &pkt );
 		if ( data_size ) {
-			data_size = av_samples_get_buffer_size( NULL, codec_context->channels,
+			data_size = av_samples_get_buffer_size( NULL, channels,
 				self->audio_frame->nb_samples, codec_context->sample_fmt, 1 );
 			decode_buffer = self->audio_frame->data[0];
+			channels = codec_context->channels;
 		}
 #else
 		ret = avcodec_decode_audio3( codec_context, (int16_t*) decode_buffer, &data_size, &pkt );
@@ -2178,7 +2076,7 @@ static int decode_audio( producer_avformat self, int *ignore, AVPacket pkt, int 
 		if ( data_size > 0 )
 		{
 			// Figure out how many samples will be needed after resampling
-			int convert_samples = data_size / codec_context->channels / sample_bytes( codec_context );
+			int convert_samples = data_size / channels / sizeof_sample;
 
 			// Resize audio buffer to prevent overflow
 			if ( ( audio_used + convert_samples ) * channels * sizeof_sample > self->audio_buffer_size[ index ] )
@@ -2186,21 +2084,19 @@ static int decode_audio( producer_avformat self, int *ignore, AVPacket pkt, int 
 				self->audio_buffer_size[ index ] = ( audio_used + convert_samples * 2 ) * channels * sizeof_sample;
 				audio_buffer = self->audio_buffer[ index ] = mlt_pool_realloc( audio_buffer, self->audio_buffer_size[ index ] );
 			}
-			uint8_t *dest = &audio_buffer[ audio_used * codec_context->channels * sizeof_sample ];
+			uint8_t *dest = &audio_buffer[ audio_used * channels * sizeof_sample ];
 			switch ( codec_context->sample_fmt )
 			{
-#if LIBAVUTIL_VERSION_INT >= ((51<<16)+(17<<8)+0)
 			case AV_SAMPLE_FMT_U8P:
 			case AV_SAMPLE_FMT_S16P:
 			case AV_SAMPLE_FMT_S32P:
 			case AV_SAMPLE_FMT_FLTP:
 #if LIBAVCODEC_VERSION_MAJOR >= 55
-				planar_to_interleaved( dest, self->audio_frame, convert_samples, codec_context->channels, sizeof_sample );
+				planar_to_interleaved( dest, self->audio_frame, convert_samples, channels, sizeof_sample );
 #else
-				planar_to_interleaved( dest, decode_buffer, convert_samples, codec_context->channels, sizeof_sample );
+				planar_to_interleaved( dest, decode_buffer, convert_samples, channels, sizeof_sample );
 #endif
 				break;
-#endif
 			default:
 				// Straight copy to audio buffer
 				memcpy( dest, decode_buffer, data_size );
@@ -2212,7 +2108,7 @@ static int decode_audio( producer_avformat self, int *ignore, AVPacket pkt, int 
 			{
 				*ignore -= 1;
 				audio_used -= audio_used > samples ? samples : audio_used;
-				memmove( audio_buffer, &audio_buffer[ samples * codec_context->channels * sizeof_sample ],
+				memmove( audio_buffer, &audio_buffer[ samples * channels * sizeof_sample ],
 						 audio_used * sizeof_sample );
 			}
 		}
@@ -2271,6 +2167,8 @@ static int producer_get_audio( mlt_frame frame, void **buffer, mlt_audio_format 
 
 	// Get the producer fps
 	double fps = mlt_producer_get_fps( self->parent );
+	if ( mlt_properties_get( MLT_FRAME_PROPERTIES(frame), "producer_consumer_fps" ) )
+		fps = mlt_properties_get_double( MLT_FRAME_PROPERTIES(frame), "producer_consumer_fps" );
 
 	// Number of frames to ignore (for ffwd)
 	int ignore[ MAX_AUDIO_STREAMS ] = { 0 };
@@ -2310,7 +2208,8 @@ static int producer_get_audio( mlt_frame frame, void **buffer, mlt_audio_format 
 
 		if ( codec_context && !self->audio_buffer[ index ] )
 		{
-			codec_context->request_channels = self->audio_index == INT_MAX ? codec_context->channels : *channels;
+			if ( self->audio_index != INT_MAX && !mlt_properties_get( MLT_PRODUCER_PROPERTIES(self->parent), "request_channel_layout" ) )
+				codec_context->request_channel_layout = av_get_default_channel_layout( *channels );
 			sizeof_sample = sample_bytes( codec_context );
 
 			// Check for audio buffer and create if necessary
@@ -2380,7 +2279,8 @@ static int producer_get_audio( mlt_frame frame, void **buffer, mlt_audio_format 
 				{
 					mlt_producer producer = self->parent;
 					mlt_properties properties = MLT_PRODUCER_PROPERTIES( producer );
-					mlt_log_verbose( MLT_PRODUCER_SERVICE(producer), "av_read_frame returned error %d inside get_audio\n", ret );
+					if ( ret != AVERROR_EOF )
+						mlt_log_verbose( MLT_PRODUCER_SERVICE(producer), "av_read_frame returned error %d inside get_audio\n", ret );
 					if ( !self->seekable && mlt_properties_get_int( properties, "reconnect" ) )
 					{
 						// Try to reconnect to live sources by closing context and codecs,
@@ -2401,10 +2301,9 @@ static int producer_get_audio( mlt_frame frame, void **buffer, mlt_audio_format 
 			// We only deal with audio from the selected audio index
 			index = pkt.stream_index;
 			if ( index < MAX_AUDIO_STREAMS && ret >= 0 && pkt.data && pkt.size > 0 && ( index == self->audio_index ||
-				 ( self->audio_index == INT_MAX && context->streams[ index ]->codec->codec_type == CODEC_TYPE_AUDIO ) ) )
+				 ( self->audio_index == INT_MAX && context->streams[ index ]->codec->codec_type == AVMEDIA_TYPE_AUDIO ) ) )
 			{
-				int channels2 = self->audio_codec[index]->channels;
-				ret = decode_audio( self, &ignore[index], pkt, channels2, *samples, real_timecode, fps );
+				ret = decode_audio( self, &ignore[index], pkt, *samples, real_timecode, fps );
 			}
 
 			if ( self->seekable || index != self->video_index )
@@ -2522,11 +2421,7 @@ static int audio_codec_init( producer_avformat self, int index, mlt_properties p
 
 		// If we don't have a codec and we can't initialise it, we can't do much more...
 		pthread_mutex_lock( &self->open_mutex );
-#if LIBAVCODEC_VERSION_INT >= ((53<<16)+(8<<8)+0)
 		if ( codec && avcodec_open2( codec_context, codec, NULL ) >= 0 )
-#else
-		if ( codec && avcodec_open( codec_context, codec ) >= 0 )
-#endif
 		{
 			// Now store the codec with its destructor
 			if ( self->audio_codec[ index ] )
@@ -2586,12 +2481,12 @@ static void producer_set_up_audio( producer_avformat self, mlt_frame frame )
 	if ( context && index >= (int) context->nb_streams && index < INT_MAX )
 	{
 		for ( index = context->nb_streams - 1;
-			  index >= 0 && context->streams[ index ]->codec->codec_type != CODEC_TYPE_AUDIO;
+			  index >= 0 && context->streams[ index ]->codec->codec_type != AVMEDIA_TYPE_AUDIO;
 			  index-- );
 		mlt_properties_set_int( properties, "audio_index", index );
 	}
 	if ( context && index > -1 && index < INT_MAX &&
-		 context->streams[ index ]->codec->codec_type != CODEC_TYPE_AUDIO )
+		 context->streams[ index ]->codec->codec_type != AVMEDIA_TYPE_AUDIO )
 	{
 		index = self->audio_index;
 		mlt_properties_set_int( properties, "audio_index", index );
@@ -2621,9 +2516,9 @@ static void producer_set_up_audio( producer_avformat self, mlt_frame frame )
 	{
 		mlt_properties_set_int( frame_properties, "audio_frequency", self->max_frequency );
 		mlt_properties_set_int( frame_properties, "audio_channels", self->total_channels );
-		for ( index = 0; index < context->nb_streams; index++ )
+		for ( index = 0; index < context->nb_streams && index < MAX_AUDIO_STREAMS; index++ )
 		{
-			if ( context->streams[ index ]->codec->codec_type == CODEC_TYPE_AUDIO )
+			if ( context->streams[ index ]->codec->codec_type == AVMEDIA_TYPE_AUDIO )
 				audio_codec_init( self, index, properties );
 		}
 	}
@@ -2716,28 +2611,18 @@ static void producer_avformat_close( producer_avformat self )
 		avcodec_close( self->video_codec );
 	self->video_codec = NULL;
 	// Close the file
-#if LIBAVFORMAT_VERSION_INT >= ((53<<16)+(17<<8)+0)
 	if ( self->dummy_context )
 		avformat_close_input( &self->dummy_context );
 	if ( self->seekable && self->audio_format )
 		avformat_close_input( &self->audio_format );
 	if ( self->video_format )
 		avformat_close_input( &self->video_format );
-#else
-	if ( self->dummy_context )
-		av_close_input_file( self->dummy_context );
-	if ( self->seekable && self->audio_format )
-		av_close_input_file( self->audio_format );
-	if ( self->video_format )
-		av_close_input_file( self->video_format );
-#endif
 	if ( self->is_mutex_init )
 		pthread_mutex_unlock( &self->open_mutex );
 #ifdef VDPAU
 	vdpau_producer_close( self );
 #endif
-	if ( self->image_cache )
-		mlt_cache_close( self->image_cache );
+	mlt_cache_close( self->image_cache );
 	if ( self->last_good_frame )
 		mlt_frame_close( self->last_good_frame );
 

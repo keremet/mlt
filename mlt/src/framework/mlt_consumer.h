@@ -3,9 +3,7 @@
  * \brief abstraction for all consumer services
  * \see mlt_consumer_s
  *
- * Copyright (C) 2003-2010 Ushodaya Enterprises Limited
- * \author Charles Yates <charles.yates@pandora.be>
- * \author Dan Dennedy <dan@dennedy.org>
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -22,8 +20,8 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef _MLT_CONSUMER_H_
-#define _MLT_CONSUMER_H_
+#ifndef MLT_CONSUMER_H
+#define MLT_CONSUMER_H
 
 #include "mlt_service.h"
 #include "mlt_events.h"

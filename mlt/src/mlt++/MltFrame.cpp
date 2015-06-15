@@ -1,7 +1,7 @@
 /**
  * MltFrame.cpp - MLT Wrapper
- * Copyright (C) 2004-2005 Charles Yates
- * Author: Charles Yates <charles.yates@pandora.be>
+ * Copyright (C) 2004-2015 Meltytech, LLC
+ * Author: Charles Yates <charles.yates@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -22,16 +22,29 @@
 #include "MltProducer.h"
 using namespace Mlt;
 
+Frame::Frame() :
+	Mlt::Properties( (mlt_properties)NULL ),
+	instance( NULL )
+{
+}
+
 Frame::Frame( mlt_frame frame ) :
-	Properties( false ),
+	Mlt::Properties( (mlt_properties)NULL ),
 	instance( frame )
 {
 	inc_ref( );
 }
 
 Frame::Frame( Frame &frame ) :
-	Mlt::Properties( frame ),
-	instance( frame.get_frame( ) )
+	Mlt::Properties( (mlt_properties)NULL ),
+	instance( frame.instance )
+{
+	inc_ref( );
+}
+
+Frame::Frame( const Frame &frame ) :
+	Mlt::Properties( (mlt_properties)NULL ),
+	instance( frame.instance )
 {
 	inc_ref( );
 }
@@ -39,6 +52,17 @@ Frame::Frame( Frame &frame ) :
 Frame::~Frame( )
 {
 	mlt_frame_close( instance );
+}
+
+Frame& Frame::operator=( const Frame &frame )
+{
+	if (this != &frame)
+	{
+		mlt_frame_close( instance );
+		instance = frame.instance;
+		inc_ref( );
+	}
+	return *this;
 }
 
 mlt_frame Frame::get_frame( )

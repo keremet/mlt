@@ -1,8 +1,6 @@
 /*
  * melt.c -- MLT command line utility
- * Copyright (C) 2002-2013 Ushodaya Enterprises Limited
- * Authors: Charles Yates <charles.yates@pandora.be>
- *          Dan Dennedy <dan@dennedy.org>
+ * Copyright (C) 2002-2014 Meltytech, LLC
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -276,8 +274,7 @@ static mlt_consumer create_consumer( mlt_profile profile, char *id )
 		mlt_properties properties = MLT_CONSUMER_PROPERTIES( consumer );
 		mlt_properties_set_data( properties, "transport_callback", transport_action, 0, NULL, NULL );
 	}
-	if ( myid )
-		free( myid );
+	free( myid );
 	return consumer;
 }
 
@@ -806,7 +803,7 @@ query_all:
 		else if ( !strcmp( argv[ i ], "-version" ) || !strcmp( argv[ i ], "--version" ) )
 		{
 			fprintf( stdout, "%s " VERSION "\n"
-				"Copyright (C) 2002-2013 Ushodaya Enterprises Limited\n"
+				"Copyright (C) 2002-2014 Meltytech, LLC\n"
 				"<http://www.mltframework.org/>\n"
 				"This is free software; see the source for copying conditions.  There is NO\n"
 				"warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n",

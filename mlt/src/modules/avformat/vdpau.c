@@ -1,7 +1,6 @@
 /*
  * producer_avformat/vdpau.c -- VDPAU functions for the avformat producer
- * Copyright (C) 2009 Ushodaya Enterprises Limited
- * Author: Dan Dennedy <dan@dennedy.org>
+ * Copyright (C) 2009-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -130,8 +129,7 @@ static int vdpau_init( producer_avformat self )
 		mlt_log_debug( MLT_PRODUCER_SERVICE(self->parent), "VDPAU failed to initialize device\n" );
 		if ( object )
 			dlclose( object );
-		if ( self->vdpau )
-			free( self->vdpau );
+		free( self->vdpau );
 		self->vdpau = NULL;
 	}
 

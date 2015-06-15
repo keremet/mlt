@@ -3,9 +3,7 @@
  * \brief provides a map between service and shared objects
  * \see mlt_repository_s
  *
- * Copyright (C) 2003-2009 Ushodaya Enterprises Limited
- * \author Charles Yates <charles.yates@pandora.be>
- * \author Dan Dennedy <dan@dennedy.org>
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -35,9 +33,6 @@
 #include <limits.h>
 #include <dirent.h>
 #include <sys/stat.h>
-
-/** the default subdirectory of the datadir for holding presets */
-#define PRESETS_DIR "/presets"
 
 /** \brief Repository class
  *
@@ -81,6 +76,7 @@ mlt_repository mlt_repository_init( const char *directory )
 	mlt_properties dir = mlt_properties_new();
 	int count = mlt_properties_dir_list( dir, directory, NULL, 0 );
 	int i;
+	int plugin_count = 0;
 
 #ifdef WIN32
 	char *syspath = getenv("PATH");
@@ -119,6 +115,7 @@ mlt_repository mlt_repository_init( const char *directory )
 
 				// Register the object file for closure
 				mlt_properties_set_data( &self->parent, object_name, object, 0, ( mlt_destructor )dlclose, NULL );
+				++plugin_count;
 			}
 			else
 			{
@@ -127,9 +124,12 @@ mlt_repository mlt_repository_init( const char *directory )
 		}
 		else if ( strstr( object_name, "libmlt" ) )
 		{
-			mlt_log( NULL, MLT_LOG_WARNING, "%s: failed to dlopen %s\n  (%s)\n", __FUNCTION__, object_name, dlerror() );
+			mlt_log_warning( NULL, "%s: failed to dlopen %s\n  (%s)\n", __FUNCTION__, object_name, dlerror() );
 		}
 	}
+
+	if ( !plugin_count )
+		mlt_log_error( NULL, "%s: no plugins found in \"%s\"\n", __FUNCTION__, directory );
 
 	mlt_properties_close( dir );
 
@@ -499,20 +499,6 @@ static void list_presets( mlt_properties properties, const char *path, const cha
 mlt_properties mlt_repository_presets( )
 {
 	mlt_properties result = mlt_properties_new();
-	char *path = getenv( "MLT_PRESETS_PATH" );
-
-	if ( path )
-	{
-		path = strdup( path );
-	}
-	else
-	{
-		path = malloc( strlen( mlt_environment( "MLT_DATA" ) ) + strlen( PRESETS_DIR ) + 1 );
-		strcpy( path, mlt_environment( "MLT_DATA" ) );
-		strcat( path, PRESETS_DIR );
-	}
-	list_presets( result, NULL, path );
-	free( path );
-
+	list_presets( result, NULL, mlt_environment( "MLT_PRESETS_PATH" ) );
 	return result;
 }

@@ -2,8 +2,7 @@
  * \file mlt_version.h
  * \brief contains version information
  *
- * Copyright (C) 2010-2013 Ushodaya Enterprises Limited
- * \author Jonathan Thomas <Jonathan.Oomph@gmail.com>
+ * Copyright (C) 2010-2015 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,8 +19,8 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef _MLT_VERSION_H_
-#define _MLT_VERSION_H_
+#ifndef MLT_VERSION_H
+#define MLT_VERSION_H
 
 // Add quotes around any #define variables
 #define STRINGIZE2(s)           #s
@@ -29,7 +28,7 @@
 
 #define LIBMLT_VERSION_MAJOR    0
 #define LIBMLT_VERSION_MINOR    9
-#define LIBMLT_VERSION_REVISION 2
+#define LIBMLT_VERSION_REVISION 6
 #define LIBMLT_VERSION_INT      ((LIBMLT_VERSION_MAJOR<<16)+(LIBMLT_VERSION_MINOR<<8)+LIBMLT_VERSION_REVISION)
 #define LIBMLT_VERSION          STRINGIZE(LIBMLT_VERSION_MAJOR.LIBMLT_VERSION_MINOR.LIBMLT_VERSION_REVISION)
 

@@ -3,7 +3,7 @@ type: consumer
 identifier: xml
 title: XML
 version: 1
-copyright: Ushodaya Enterprises Limited
+copyright: Meltytech, LLC
 creator: Dan Dennedy
 license: LGPLv2.1
 language: en
@@ -84,14 +84,26 @@ parameters:
     default: 0
     widget: checkbox
 
+  - identifier: no_root
+    title: No root attribute
+    type: integer
+    description: >
+      Set this to disable the output of the root attribute on the root element.
+    minimum: 0
+    maximum: 1
+    default: 0
+    widget: checkbox
+
   - identifier: time_format
     title: Time format
     type: string
     description: Output time-based values as timecode or clock formats.
     values:
       - frames
-      - smpte # or SMPTE
-      - timecode # same as smpte
+      - smpte_df # SMPTE drop-frame timecode
+      - smpte_ndf # SMPTE non-drop-frame timecode
+      - smpte # or SMPTE - same as smpte_df
+      - timecode # same as smpte_df
       - clock # or CLOCK
     default: frames
     widget: dropdown

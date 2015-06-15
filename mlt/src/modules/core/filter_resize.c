@@ -1,7 +1,6 @@
 /*
  * filter_resize.c -- resizing filter
- * Copyright (C) 2003-2004 Ushodaya Enterprises Limited
- * Author: Charles Yates <charles.yates@pandora.be>
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -130,7 +129,7 @@ static uint8_t *frame_resize_image( mlt_frame frame, int owidth, int oheight, in
 
 	// Get the input image, width and height
 	uint8_t *input = mlt_properties_get_data( properties, "image", NULL );
-	uint8_t *alpha = mlt_frame_get_alpha_mask( frame );
+	uint8_t *alpha = mlt_frame_get_alpha( frame );
 	int alpha_size = 0;
 	mlt_properties_get_data( properties, "alpha", &alpha_size );
 
@@ -255,6 +254,15 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 	// Now pass on the calculations down the line
 	mlt_properties_set_int( properties, "resize_width", *width );
 	mlt_properties_set_int( properties, "resize_height", *height );
+
+	// If there will be padding, then we need packed image format.
+	if ( *format == mlt_image_yuv420p )
+	{
+		int iwidth = mlt_properties_get_int( properties, "width" );
+		int iheight = mlt_properties_get_int( properties, "height" );
+		if ( iwidth < owidth || iheight < oheight )
+			*format = mlt_image_yuv422;
+	}
 
 	// Now get the image
 	if ( *format == mlt_image_yuv422 )

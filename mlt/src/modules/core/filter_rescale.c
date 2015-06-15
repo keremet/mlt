@@ -1,7 +1,6 @@
 /*
  * filter_rescale.c -- scale the producer video frame size to match the consumer
- * Copyright (C) 2003-2004 Ushodaya Enterprises Limited
- * Author: Dan Dennedy <dan@dennedy.org>
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -114,7 +113,7 @@ static void scale_alpha( mlt_frame frame, int iwidth, int iheight, int owidth, i
 {
 	// Scale the alpha
 	uint8_t *output = NULL;
-	uint8_t *input = mlt_frame_get_alpha_mask( frame );
+	uint8_t *input = mlt_frame_get_alpha( frame );
 
 	if ( input != NULL )
 	{

@@ -17,8 +17,8 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef _MLTPP_PROFILE_H_
-#define _MLTPP_PROFILE_H_
+#ifndef MLTPP_PROFILE_H
+#define MLTPP_PROFILE_H
 
 #include "config.h"
 
@@ -65,6 +65,7 @@ namespace Mlt
 			void set_width( int width );
 			void set_height( int height );
 			void set_sample_aspect( int numerator, int denominator );
+			void set_display_aspect( int numerator, int denominator );
 			void set_progressive( int progressive );
 			void set_colorspace( int colorspace );
 			void set_frame_rate( int numerator, int denominator );

@@ -3,8 +3,7 @@
  * \brief abstraction for all producer services
  * \see mlt_producer_s
  *
- * Copyright (C) 2003-2009 Ushodaya Enterprises Limited
- * \author Charles Yates <charles.yates@pandora.be>
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -93,8 +92,10 @@ int mlt_producer_init( mlt_producer self, void *child )
 			mlt_properties_set_double( properties, "_frame", 0 );
 			mlt_properties_set_double( properties, "_speed", 1.0 );
 			mlt_properties_set_position( properties, "in", 0 );
-			mlt_properties_set_position( properties, "out", 14999 );
-			mlt_properties_set_position( properties, "length", 15000 );
+			char *e = getenv( "MLT_DEFAULT_PRODUCER_LENGTH" );
+			int p = e ? atoi( e ) : 15000;
+			mlt_properties_set_position( properties, "out", p - 1 );
+			mlt_properties_set_position( properties, "length", p );
 			mlt_properties_set( properties, "eof", "pause" );
 			mlt_properties_set( properties, "resource", "<producer>" );
 
@@ -204,7 +205,12 @@ int mlt_producer_is_mix( mlt_producer self )
 
 int mlt_producer_is_blank( mlt_producer self )
 {
-	return self == NULL || !strcmp( mlt_properties_get( MLT_PRODUCER_PROPERTIES( mlt_producer_cut_parent( self ) ), "resource" ), "blank" );
+	if ( self )
+	{
+		const char *resource = mlt_properties_get( MLT_PRODUCER_PROPERTIES( mlt_producer_cut_parent( self ) ), "resource" );
+		return ( resource && !strcmp( "blank", resource ) );
+	}
+	return ( self == NULL );
 }
 
 /** Obtain the parent producer.
@@ -241,6 +247,9 @@ mlt_producer mlt_producer_cut( mlt_producer self, int in, int out )
 	mlt_producer parent = mlt_producer_cut_parent( self );
 	mlt_properties properties = MLT_PRODUCER_PROPERTIES( result );
 	mlt_properties parent_props = MLT_PRODUCER_PROPERTIES( parent );
+
+	mlt_properties_set_lcnumeric( properties,
+		mlt_properties_get_lcnumeric( MLT_PRODUCER_PROPERTIES( self ) ) );
 
 	mlt_events_block( MLT_PRODUCER_PROPERTIES( result ), MLT_PRODUCER_PROPERTIES( result ) );
 	// Special case - allow for a cut of the entire producer (this will squeeze all other cuts to 0)

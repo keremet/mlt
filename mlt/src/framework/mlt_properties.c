@@ -3,9 +3,7 @@
  * \brief Properties class definition
  * \see mlt_properties_s
  *
- * Copyright (C) 2003-2013 Ushodaya Enterprises Limited
- * \author Charles Yates <charles.yates@pandora.be>
- * \author Dan Dennedy <dan@dennedy.org>
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -45,8 +43,6 @@
 #include <errno.h>
 #include <locale.h>
 #include <float.h>
-
-#define PRESETS_DIR "/presets"
 
 /** \brief private implementation of the property list */
 
@@ -149,8 +145,8 @@ int mlt_properties_set_lcnumeric( mlt_properties self, const char *locale )
 			freelocale( list->locale );
 		list->locale = newlocale( LC_NUMERIC_MASK, locale, NULL );
 #else
-		if ( list->locale )
-			free( list->locale );
+
+		free( list->locale );
 		list->locale = strdup( locale );
 #endif
 	}
@@ -170,6 +166,8 @@ int mlt_properties_set_lcnumeric( mlt_properties self, const char *locale )
 
 const char* mlt_properties_get_lcnumeric( mlt_properties self )
 {
+	if ( !self ) return NULL;
+
 	property_list *list = self->local;
 	const char *result = NULL;
 
@@ -291,22 +289,12 @@ int mlt_properties_preset( mlt_properties self, const char *name )
 	else
 	{
 		// Look for profile-specific preset before a generic one.
-		char *data          = getenv( "MLT_PRESETS_PATH" );
+		const char *data    = mlt_environment( "MLT_PRESETS_PATH" );
 		const char *type    = mlt_properties_get( self, "mlt_type" );
 		const char *service = mlt_properties_get( self, "mlt_service" );
 		const char *profile = mlt_environment( "MLT_PROFILE" );
 		int error = 0;
 
-		if ( data )
-		{
-			data = strdup( data );
-		}
-		else
-		{
-			data = malloc( strlen( mlt_environment( "MLT_DATA" ) ) + strlen( PRESETS_DIR ) + 1 );
-			strcpy( data, mlt_environment( "MLT_DATA" ) );
-			strcat( data, PRESETS_DIR );
-		}
 		if ( data && type && service )
 		{
 			char *path = malloc( 5 + strlen(name) + strlen(data) + strlen(type) + strlen(service) + ( profile? strlen(profile) : 0 ) );
@@ -322,7 +310,6 @@ int mlt_properties_preset( mlt_properties self, const char *name )
 		{
 			error = 1;
 		}
-		free( data );
 		return error;
 	}
 }
@@ -1413,8 +1400,8 @@ void mlt_properties_close( mlt_properties self )
 			if ( list->locale )
 				freelocale( list->locale );
 #else
-			if ( list->locale )
-				free( list->locale );
+
+			free( list->locale );
 #endif
 
 			// Clear up the list
@@ -1796,8 +1783,7 @@ mlt_properties mlt_properties_parse_yaml( const char *filename )
 			fclose( file );
 			mlt_deque_close( context->stack );
 			mlt_deque_close( context->index_stack );
-			if ( context->block_name )
-				free( context->block_name );
+			free( context->block_name );
 			free( context );
 		}
 	}
@@ -1849,8 +1835,7 @@ static void strbuf_close( strbuf buffer )
 {
 	// We do not free buffer->string; strbuf user must save that pointer
 	// and free it.
-	if ( buffer )
-		free( buffer );
+	free( buffer );
 }
 
 /** Format a string into a string buffer

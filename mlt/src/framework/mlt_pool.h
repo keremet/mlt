@@ -3,8 +3,7 @@
  * \brief memory pooling functionality
  * \see mlt_pool_s
  *
- * Copyright (C) 2003-2009 Ushodaya Enterprises Limited
- * \author Charles Yates <charles.yates@pandora.be>
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -21,8 +20,8 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef _MLT_POOL_H
-#define _MLT_POOL_H
+#ifndef MLT_POOL_H
+#define MLT_POOL_H
 
 extern void mlt_pool_init( );
 extern void *mlt_pool_alloc( int size );
@@ -30,5 +29,6 @@ extern void *mlt_pool_realloc( void *ptr, int size );
 extern void mlt_pool_release( void *release );
 extern void mlt_pool_purge( );
 extern void mlt_pool_close( );
+extern void mlt_pool_stat( );
 
 #endif

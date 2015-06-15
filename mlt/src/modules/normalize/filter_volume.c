@@ -1,7 +1,6 @@
 /*
  * filter_volume.c -- adjust audio volume
- * Copyright (C) 2003-2004 Ushodaya Enterprises Limited
- * Author: Dan Dennedy <dan@dennedy.org>
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -187,6 +186,7 @@ static int filter_get_audio( mlt_frame frame, void **buffer, mlt_audio_format *f
 		mlt_position position = mlt_filter_get_position( filter, frame );
 		mlt_position length = mlt_filter_get_length2( filter, frame );
 		gain = mlt_properties_anim_get_double( filter_props, "level", position, length );
+		gain = DBFSTOAMP( gain );
 	}
 
 	if ( mlt_properties_get( instance_props, "limiter" ) != NULL )
@@ -328,7 +328,7 @@ static mlt_frame filter_process( mlt_filter filter, mlt_frame frame )
 
 				/* check if "dB" is given after number */
 				if ( strncaseeq( p, "db", 2 ) )
-					end = DBFSTOAMP( gain );
+					end = DBFSTOAMP( end );
 				else
 					end = fabs( end );
 

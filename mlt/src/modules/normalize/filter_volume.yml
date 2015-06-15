@@ -3,7 +3,7 @@ type: filter
 identifier: volume
 title: Volume
 version: 2
-copyright: Ushodaya Enterprises Limited
+copyright: Meltytech, LLC
 creator: Dan Denneedy
 license: GPLv2
 language: en
@@ -89,6 +89,7 @@ parameters:
     title: Level
     type: float
     description: >
-      The animated floating point value of the gain
-      adjustment. Properties "gain" and "end" are discarded if this is set.
+      The animated value of the gain adjustment in dB.
+      Properties "gain" and "end" are ignored if this is set.
+    unit: dB
     mutable: yes

@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2011 Ushodaya Enterprises Limited
- * Author: Dan Dennedy <dan@dennedy.org>
+ * Copyright (C) 2011-1024 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -73,8 +72,7 @@ static mlt_consumer create_consumer( mlt_profile profile, char *id, char *arg )
 	else
 		myarg = arg;
 	mlt_consumer consumer = mlt_factory_consumer( profile, myid, myarg );
-	if ( myid )
-		free( myid );
+	free( myid );
 	return consumer;
 }
 
@@ -328,6 +326,22 @@ static void foreach_consumer_refresh( mlt_consumer consumer )
 	} while ( nested );
 }
 
+// Update certain properties on this consumer from the child consumers.
+static void foreach_consumer_update( mlt_consumer consumer )
+{
+	mlt_properties properties = MLT_CONSUMER_PROPERTIES( consumer );
+	mlt_consumer nested = NULL;
+	char key[30];
+	int index = 0;
+
+	do {
+		snprintf( key, sizeof(key), "%d.consumer", index++ );
+		nested = mlt_properties_get_data( properties, key, NULL );
+		if ( nested )
+			mlt_properties_pass_list( properties, MLT_CONSUMER_PROPERTIES(nested), "color_trc" );
+	} while ( nested );
+}
+
 static void foreach_consumer_put( mlt_consumer consumer, mlt_frame frame )
 {
 	mlt_properties properties = MLT_CONSUMER_PROPERTIES( consumer );
@@ -542,8 +556,7 @@ static void purge( mlt_consumer consumer )
 		do {
 			snprintf( key, sizeof(key), "%d.consumer", index++ );
 			nested = mlt_properties_get_data( properties, key, NULL );
-			if ( nested )
-				mlt_consumer_purge( nested );
+			mlt_consumer_purge( nested );
 		} while ( nested );
 	}
 }
@@ -560,6 +573,8 @@ static void *consumer_thread( void *arg )
 	// Determine whether to stop at end-of-media
 	int terminate_on_pause = mlt_properties_get_int( properties, "terminate_on_pause" );
 	int terminated = 0;
+
+	foreach_consumer_update( consumer );
 
 	// Loop while running
 	while ( !terminated && !is_stopped( consumer ) )

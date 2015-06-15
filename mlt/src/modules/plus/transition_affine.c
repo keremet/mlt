@@ -1,8 +1,6 @@
 /*
  * transition_affine.c -- affine transformations
- * Copyright (C) 2003-2010 Ushodaya Enterprises Limited
- * Author: Charles Yates <charles.yates@pandora.be>
- * Author: Dan Dennedy <dan@dennedy.org>
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -29,6 +27,21 @@
 #include <math.h>
 
 #include "interp.h"
+
+static float alignment_parse( char* align )
+{
+	int ret = 0.0f;
+
+	if ( align == NULL );
+	else if ( isdigit( align[ 0 ] ) )
+		ret = atoi( align );
+	else if ( align[ 0 ] == 'c' || align[ 0 ] == 'm' )
+		ret = 1.0f;
+	else if ( align[ 0 ] == 'r' || align[ 0 ] == 'b' )
+		ret = 2.0f;
+
+	return ret;
+}
 
 /** Calculate real geometry.
 */
@@ -376,8 +389,10 @@ static int transition_get_image( mlt_frame a_frame, uint8_t **image, mlt_image_f
 	// Image, format, width, height and image for the b frame
 	uint8_t *b_image = NULL;
 	mlt_image_format b_format = mlt_image_rgb24a;
-	int b_width;
-	int b_height;
+	int b_width = mlt_properties_get_int( b_props, "meta.media.width" );
+	int b_height = mlt_properties_get_int( b_props, "meta.media.height" );
+	double b_ar = mlt_frame_get_aspect_ratio( b_frame );
+	double b_dar = b_ar * b_width / b_height;
 
 	// Assign the current position
 	mlt_position position =  mlt_transition_get_position( transition, a_frame );
@@ -397,7 +412,7 @@ static int transition_get_image( mlt_frame a_frame, uint8_t **image, mlt_image_f
 	int normalised_width = profile->width;
 	int normalised_height = profile->height;
 
-	double consumer_ar = mlt_profile_sar( mlt_service_profile( MLT_TRANSITION_SERVICE(transition) ) );
+	double consumer_ar = mlt_profile_sar( profile );
 
 	// Structures for geometry
 	struct mlt_geometry_item_s result;
@@ -414,6 +429,25 @@ static int transition_get_image( mlt_frame a_frame, uint8_t **image, mlt_image_f
 	composite_calculate( transition, &result, normalised_width, normalised_height, ( float )position );
 	mlt_service_unlock( MLT_TRANSITION_SERVICE( transition ) );
 
+	float geometry_w = result.w;
+	float geometry_h = result.h;
+
+	if ( !mlt_properties_get_int( properties, "fill" ) )
+	{
+		double geometry_dar = result.w * consumer_ar / result.h;
+
+		if ( b_dar > geometry_dar )
+		{
+			result.w = MIN( result.w, b_width * b_ar / consumer_ar );
+			result.h = result.w * consumer_ar / b_dar;
+		}
+		else
+		{
+			result.h = MIN( result.h, b_height );
+			result.w = result.h * b_dar / consumer_ar;
+		}
+	}
+
 	// Fetch the b frame image
 	result.w = ( result.w * *width / normalised_width );
 	result.h = ( result.h * *height / normalised_height );
@@ -421,8 +455,6 @@ static int transition_get_image( mlt_frame a_frame, uint8_t **image, mlt_image_f
 	result.y = ( result.y * *height / normalised_height );
 
 	// Request full resolution of b frame image.
-	b_width = mlt_properties_get_int( b_props, "meta.media.width" );
-	b_height = mlt_properties_get_int( b_props, "meta.media.height" );
 	mlt_properties_set_int( b_props, "rescale_width", b_width );
 	mlt_properties_set_int( b_props, "rescale_height", b_height );
 
@@ -463,6 +495,19 @@ static int transition_get_image( mlt_frame a_frame, uint8_t **image, mlt_image_f
 		interpp interp = interpBL_b32;
 		int i, j; // loop counters
 
+		// Recalculate vars if alignment supplied.
+		if ( mlt_properties_get( properties, "halign" ) || mlt_properties_get( properties, "valign" ) )
+		{
+			float halign = alignment_parse( mlt_properties_get( properties, "halign" ) );
+			float valign = alignment_parse( mlt_properties_get( properties, "valign" ) );
+			x_offset = halign * b_width / 2.0f;
+			y_offset = valign * b_height / 2.0f;
+			cx = result.x + geometry_w * halign / 2.0f;
+			cy = result.y + geometry_h * valign / 2.0f;
+			lower_x = -cx;
+			lower_y = -cy;
+		}
+
 		affine_init( affine.matrix );
 
 		// Compute the affine transform
@@ -470,8 +515,7 @@ static int transition_get_image( mlt_frame a_frame, uint8_t **image, mlt_image_f
 		dz = MapZ( affine.matrix, 0, 0 );
 		if ( ( int )abs( dz * 1000 ) < 25 )
 		{
-			if ( interps )
-				free( interps );
+			free( interps );
 			return 0;
 		}
 
@@ -485,8 +529,6 @@ static int transition_get_image( mlt_frame a_frame, uint8_t **image, mlt_image_f
 		{
 			// Determine scale with respect to aspect ratio.
 			double consumer_dar = consumer_ar * normalised_width / normalised_height;
-			double b_ar = mlt_properties_get_double( b_props, "aspect_ratio" );
-			double b_dar = b_ar * b_width / b_height;
 			
 			if ( b_dar > consumer_dar )
 			{
@@ -539,8 +581,7 @@ static int transition_get_image( mlt_frame a_frame, uint8_t **image, mlt_image_f
 			}
 		}
 	}
-	if ( interps )
-		free( interps );
+	free( interps );
 
 	return 0;
 }
@@ -574,6 +615,7 @@ mlt_transition transition_affine_init( mlt_profile profile, mlt_service_type typ
 		mlt_properties_set( MLT_TRANSITION_PROPERTIES( transition ), "geometry", "0/0:100%x100%" );
 		// Inform apps and framework that this is a video only transition
 		mlt_properties_set_int( MLT_TRANSITION_PROPERTIES( transition ), "_transition_type", 1 );
+		mlt_properties_set_int( MLT_TRANSITION_PROPERTIES( transition ), "fill", 1 );
 		transition->process = transition_process;
 	}
 	return transition;

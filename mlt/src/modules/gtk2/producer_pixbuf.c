@@ -1,7 +1,6 @@
 /*
  * producer_pixbuf.c -- raster image loader based upon gdk-pixbuf
- * Copyright (C) 2003-2004 Ushodaya Enterprises Limited
- * Author: Dan Dennedy <dan@dennedy.org>
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -378,10 +377,6 @@ static int refresh_pixbuf( producer_pixbuf self, mlt_frame frame )
 		current_idx = MIN(( double )position / ttl, self->count - 1);
 	}
 
-	// Key for the cache
-	char image_key[ 10 ];
-	sprintf( image_key, "%d", current_idx );
-
 	int disable_exif = mlt_properties_get_int( producer_props, "disable_exif" );
 
 	if ( current_idx != self->pixbuf_idx )
@@ -457,7 +452,7 @@ static void refresh_image( producer_pixbuf self, mlt_frame frame, mlt_image_form
 			interp = GDK_INTERP_TILES;
 		else if ( strcmp( interps, "hyper" ) == 0 || strcmp( interps, "bicubic" ) == 0 )
 			interp = GDK_INTERP_HYPER;
-		if ( interps ) free( interps );
+		free( interps );
 
 		// Note - the original pixbuf is already safe and ready for destruction
 		pthread_mutex_lock( &g_mutex );
@@ -514,7 +509,7 @@ static void refresh_image( producer_pixbuf self, mlt_frame frame, mlt_image_form
 				self->image = mlt_pool_alloc( image_size );
 				memcpy( self->image, buffer, image_size );
 			}
-			if ( ( buffer = mlt_frame_get_alpha_mask( frame ) ) )
+			if ( ( buffer = mlt_frame_get_alpha( frame ) ) )
 			{
 				self->alpha = mlt_pool_alloc( width * height );
 				memcpy( self->alpha, buffer, width * height );

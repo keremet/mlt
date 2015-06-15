@@ -1,7 +1,6 @@
 /*
  * factory.c -- the factory method interfaces
- * Copyright (C) 2003-2004 Ushodaya Enterprises Limited
- * Author: Charles Yates <charles.yates@pandora.be>
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -21,6 +20,7 @@
 #include <string.h>
 #include <framework/mlt.h>
 #include <gdk/gdk.h>
+#include <stdlib.h>
 
 #ifdef USE_PIXBUF
 extern mlt_producer producer_pixbuf_init( char *filename );
@@ -42,6 +42,18 @@ static void initialise( )
 	{
 		init = 1;
 		g_type_init( );
+		if ( getenv("MLT_PIXBUF_PRODUCER_CACHE") )
+		{
+			int n = atoi( getenv("MLT_PIXBUF_PRODUCER_CACHE" )  );
+			mlt_service_cache_set_size( NULL, "pixbuf.image", n );
+			mlt_service_cache_set_size( NULL, "pixbuf.alpha", n );
+			mlt_service_cache_set_size( NULL, "pixbuf.pixbuf", n );
+		}
+		if ( getenv("MLT_PANGO_PRODUCER_CACHE") )
+		{
+			int n = atoi( getenv("MLT_PANGO_PRODUCER_CACHE" )  );
+			mlt_service_cache_set_size( NULL, "pango.image", n );
+		}
 	}
 }
 

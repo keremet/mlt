@@ -1,7 +1,7 @@
 /**
  * MltTractor.cpp - Tractor wrapper
- * Copyright (C) 2004-2005 Charles Yates
- * Author: Charles Yates <charles.yates@pandora.be>
+ * Copyright (C) 2004-2015 Meltytech, LLC
+ * Author: Charles Yates <charles.yates@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -29,6 +29,12 @@ using namespace Mlt;
 Tractor::Tractor( ) :
 	instance( mlt_tractor_new( ) )
 {
+}
+
+Tractor::Tractor( Profile& profile ) :
+	instance( mlt_tractor_new( ) )
+{
+	set_profile( profile );
 }
 
 Tractor::Tractor( Service &tractor ) :
@@ -66,6 +72,7 @@ Tractor::Tractor( Profile& profile, char *id, char *resource ) :
 	else if ( producer.is_valid( ) )
 	{
 		instance = mlt_tractor_new( );
+		set_profile( profile );
 		set_track( producer, 0 );
 	}
 }

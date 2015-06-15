@@ -1,7 +1,6 @@
 /*
  * consumer_sdl.c -- A Simple DirectMedia Layer consumer
- * Copyright (C) 2003-2004, 2010 Ushodaya Enterprises Limited
- * Author: Dan Dennedy <dan@dennedy.org>
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -502,7 +501,7 @@ static int consumer_play_video( consumer_sdl self, mlt_frame frame )
 	// Get the properties of this consumer
 	mlt_properties properties = self->properties;
 
-	mlt_image_format vfmt = mlt_image_yuv422;
+	mlt_image_format vfmt = mlt_properties_get_int( properties, "mlt_image_format" );
 	int width = self->width, height = self->height;
 	uint8_t *image;
 	int changed = 0;
@@ -653,7 +652,9 @@ static int consumer_play_video( consumer_sdl self, mlt_frame frame )
 		if ( self->running && SDL_GetVideoSurface() && self->sdl_overlay == NULL )
 		{
 			SDL_SetClipRect( SDL_GetVideoSurface(), &self->rect );
-			self->sdl_overlay = SDL_CreateYUVOverlay( width, height, SDL_YUY2_OVERLAY, SDL_GetVideoSurface() );
+			self->sdl_overlay = SDL_CreateYUVOverlay( width, height,
+				( vfmt == mlt_image_yuv422 ? SDL_YUY2_OVERLAY : SDL_IYUV_OVERLAY ),
+				SDL_GetVideoSurface() );
 		}
 
 		if ( self->running && SDL_GetVideoSurface() && self->sdl_overlay != NULL )
@@ -661,8 +662,11 @@ static int consumer_play_video( consumer_sdl self, mlt_frame frame )
 			self->buffer = self->sdl_overlay->pixels[ 0 ];
 			if ( SDL_LockYUVOverlay( self->sdl_overlay ) >= 0 )
 			{
+				// We use height-1 because mlt_image_format_size() uses height + 1.
+				// XXX Remove -1 when mlt_image_format_size() is changed.
+				int size = mlt_image_format_size( vfmt, width, height - 1, NULL );
 				if ( image != NULL )
-					memcpy( self->buffer, image, width * height * 2 );
+					memcpy( self->buffer, image, size );
 				SDL_UnlockYUVOverlay( self->sdl_overlay );
 				SDL_DisplayYUVOverlay( self->sdl_overlay, &SDL_GetVideoSurface()->clip_rect );
 			}
@@ -867,7 +871,8 @@ static void *consumer_thread( void *arg )
 	self->running = 0;
 	
 	// Unblock sdl_preview
-	if ( mlt_properties_get_int( MLT_CONSUMER_PROPERTIES( consumer ), "put_mode" ) == 1 )
+	if ( mlt_properties_get_int( MLT_CONSUMER_PROPERTIES( consumer ), "put_mode" ) &&
+	     mlt_properties_get_int( MLT_CONSUMER_PROPERTIES( consumer ), "put_pending" ) )
 	{
 		frame = mlt_consumer_get_frame( consumer );
 		if ( frame )

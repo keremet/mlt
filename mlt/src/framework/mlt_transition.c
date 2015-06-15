@@ -3,8 +3,7 @@
  * \brief abstraction for all transition services
  * \see mlt_transition_s
  *
- * Copyright (C) 2003-2009 Ushodaya Enterprises Limited
- * \author Charles Yates <charles.yates@pandora.be>
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -347,7 +346,7 @@ static int get_image_b( mlt_frame b_frame, uint8_t **image, mlt_image_format *fo
 		mlt_frame_set_aspect_ratio( b_frame, mlt_profile_sar( mlt_service_profile( MLT_TRANSITION_SERVICE(self) ) ) );
 
 	mlt_properties_pass_list( b_props, a_props,
-		"consumer_deinterlace, deinterlace_method, consumer_tff" );
+		"consumer_deinterlace, deinterlace_method, consumer_tff, consumer_color_trc" );
 
 	return mlt_frame_get_image( b_frame, image, format, width, height, writable );
 }

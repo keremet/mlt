@@ -3,7 +3,7 @@ type: filter
 identifier: dynamictext
 title: Dynamic text
 version: 1
-copyright: Brian Matherly
+copyright: Meltytech, LLC
 creator: Brian Matherly
 license: LGPLv2.1
 language: en
@@ -21,9 +21,19 @@ parameters:
     description: |
       The text to overlay. May include keywords enclosed in "#". 
       Keywords include:
-        * #timecode# - timecode of the frame (based on framerate and position)
-        * #frame#    - frame number of the frame
-        * #filedate# - modification date of the file
+        * #smpte_df#      - SMPTE drop-frame timecode of the frame
+        * #smpte_ndf#     - SMPTE non-drop-frame timecode of the frame
+        * #timecode#      - same as #smpte_df#
+        * #frame#         - frame number of the frame
+        * #filedate#      - modification date of the file (GMT)
+        * #localfiledate# - modification date of the file (local)
+        * #localtime#     - current system date and time
+        * #resource#      - resource of the producer that produced the frame
+      Timecode keywords are based on the framerate and position of the frame.
+      Time-based keywords can include a strftime format string to customize the
+      output as long as you put some delimiter except "#" between the keyword
+      and the format string and the keyword comes first. For example,
+      "#localtime %I:%M:%S %p#" shows only the time in 12-hour format.
       Keywords may also be any frame property (e.g. #meta.media.0.codec.frame_rate#)
       The # may be escaped with "\".
     required: yes
@@ -31,11 +41,13 @@ parameters:
     default: > #trick to escape "#" character
       #timecode#
     widget: text
+
   - identifier: geometry
     title: Geometry
     type: geometry
     description: A set of X/Y coordinates by which to adjust the text.
     default: 0%/0%:100%x100%:100
+
   - identifier: family
     title: Font family
     type: string
@@ -45,6 +57,7 @@ parameters:
     readonly: no
     mutable: yes
     widget: combo
+
   - identifier: size
     title: Font size
     type: integer
@@ -54,6 +67,7 @@ parameters:
     readonly: no
     mutable: yes
     widget: spinner
+
   - identifier: weight
     title: Font weight
     type: integer
@@ -64,6 +78,7 @@ parameters:
     readonly: no
     mutable: yes
     widget: spinner
+
   - identifier: fgcolour
     title: Foreground color
     type: string
@@ -75,6 +90,7 @@ parameters:
     readonly: no
     mutable: yes
     widget: color
+
   - identifier: bgcolour
     title: Background color
     type: string
@@ -86,6 +102,7 @@ parameters:
     readonly: no
     mutable: yes
     widget: color
+
   - identifier: olcolour
     title: Outline color
     type: string
@@ -96,6 +113,7 @@ parameters:
     readonly: no
     mutable: yes
     widget: color
+
   - identifier: outline
     title: Outline Width
     type: string
@@ -107,6 +125,7 @@ parameters:
     maximum: 3
     mutable: yes
     widget: spinner
+
   - identifier: pad
     title: Padding
     type: integer
@@ -116,6 +135,7 @@ parameters:
     default: 0
     mutable: yes
     widget: spinner
+
   - identifier: halign
     title: Horizontal alignment
     description: >
@@ -128,6 +148,7 @@ parameters:
       - right
     mutable: yes
     widget: combo
+
   - identifier: valign
     title: Vertical alignment
     description: >

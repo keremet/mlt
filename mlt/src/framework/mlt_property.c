@@ -3,9 +3,7 @@
  * \brief Property class definition
  * \see mlt_property_s
  *
- * Copyright (C) 2003-2013 Ushodaya Enterprises Limited
- * \author Charles Yates <charles.yates@pandora.be>
- * \author Dan Dennedy <dan@dennedy.org>
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -114,8 +112,7 @@ static inline void mlt_property_clear( mlt_property self )
 	if ( self->types & mlt_prop_string )
 		free( self->prop_string );
 
-	if ( self->animation )
-		mlt_animation_close( self->animation );
+	mlt_animation_close( self->animation );
 
 	// Wipe stuff
 	self->types = 0;
@@ -845,7 +842,7 @@ void mlt_property_pass( mlt_property self, mlt_property that )
  * \param[out] s the string to write into - must have enough space to hold largest time string
  */
 
-static void time_smpte_from_frames( int frames, double fps, char *s )
+static void time_smpte_from_frames( int frames, double fps, char *s, int drop )
 {
 	int hours, mins, secs;
 	char frame_sep = ':';
@@ -853,16 +850,19 @@ static void time_smpte_from_frames( int frames, double fps, char *s )
 	if ( fps == 30000.0/1001.0 )
 	{
 		fps = 30.0;
-		int i, max_frames = frames;
-		for ( i = 1800; i <= max_frames; i += 1800 )
+		if ( drop )
 		{
-			if ( i % 18000 )
+			int i, max_frames = frames;
+			for ( i = 1800; i <= max_frames; i += 1800 )
 			{
-				max_frames += 2;
-				frames += 2;
+				if ( i % 18000 )
+				{
+					max_frames += 2;
+					frames += 2;
+				}
 			}
+			frame_sep = ';';
 		}
-		frame_sep = ';';
 	}
 	hours = frames / ( fps * 3600 );
 	frames -= hours * ( fps * 3600 );
@@ -871,7 +871,8 @@ static void time_smpte_from_frames( int frames, double fps, char *s )
 	secs = frames / fps;
 	frames -= secs * fps;
 
-	sprintf( s, "%02d:%02d:%02d%c%02d", hours, mins, secs, frame_sep, frames );
+	sprintf( s, "%02d:%02d:%02d%c%0*d", hours, mins, secs, frame_sep,
+			 ( fps > 999? 4 : fps > 99? 3 : 2 ), frames );
 }
 
 /** Convert frame count to a SMIL clock value string.
@@ -912,7 +913,7 @@ static void time_clock_from_frames( int frames, double fps, char *s )
 char *mlt_property_get_time( mlt_property self, mlt_time_format format, double fps, locale_t locale )
 {
 	char *orig_localename = NULL;
-	const char *localename = "C";
+	int frames = 0;
 
 	// Optimization for mlt_time_frames
 	if ( format == mlt_time_frames )
@@ -928,11 +929,12 @@ char *mlt_property_get_time( mlt_property self, mlt_time_format format, double f
 		// TODO: when glibc gets sprintf_l, start using it! For now, hack on setlocale.
 		// Save the current locale
 #if defined(__DARWIN__)
-		localename = querylocale( LC_NUMERIC, locale );
+		const char *localename = querylocale( LC_NUMERIC, locale );
 #elif defined(__GLIBC__)
-		localename = locale->__names[ LC_NUMERIC ];
+		const char *localename = locale->__names[ LC_NUMERIC ];
 #else
 		// TODO: not yet sure what to do on other platforms
+		const char *localename = locale;
 #endif
 		// Protect damaging the global locale from a temporary locale on another thread.
 		pthread_mutex_lock( &self->mutex );
@@ -954,38 +956,33 @@ char *mlt_property_get_time( mlt_property self, mlt_time_format format, double f
 	{
 		self->types |= mlt_prop_string;
 		self->prop_string = malloc( 32 );
-		if ( format == mlt_time_clock )
-			time_clock_from_frames( self->prop_int, fps, self->prop_string );
-		else
-			time_smpte_from_frames( self->prop_int, fps, self->prop_string );
+		frames = self->prop_int;
 	}
 	else if ( self->types & mlt_prop_position )
 	{
 		self->types |= mlt_prop_string;
 		self->prop_string = malloc( 32 );
-		if ( format == mlt_time_clock )
-			time_clock_from_frames( (int) self->prop_position, fps, self->prop_string );
-		else
-			time_smpte_from_frames( (int) self->prop_position, fps, self->prop_string );
+		frames = (int) self->prop_position;
 	}
 	else if ( self->types & mlt_prop_double )
 	{
 		self->types |= mlt_prop_string;
 		self->prop_string = malloc( 32 );
-		if ( format == mlt_time_clock )
-			time_clock_from_frames( self->prop_double, fps, self->prop_string );
-		else
-			time_smpte_from_frames( self->prop_double, fps, self->prop_string );
+		frames = self->prop_double;
 	}
 	else if ( self->types & mlt_prop_int64 )
 	{
 		self->types |= mlt_prop_string;
 		self->prop_string = malloc( 32 );
-		if ( format == mlt_time_clock )
-			time_clock_from_frames( (int) self->prop_int64, fps, self->prop_string );
-		else
-			time_smpte_from_frames( (int) self->prop_int64, fps, self->prop_string );
+		frames = (int) self->prop_int64;
 	}
+
+	if ( format == mlt_time_clock )
+		time_clock_from_frames( frames, fps, self->prop_string );
+	else if ( format == mlt_time_smpte_ndf )
+		time_smpte_from_frames( frames, fps, self->prop_string, 0 );
+	else // Use smpte drop frame by default
+		time_smpte_from_frames( frames, fps, self->prop_string, 1 );
 
 	// Restore the current locale
 	if ( locale )
@@ -1312,8 +1309,7 @@ char* mlt_property_anim_get_string( mlt_property self, double fps, locale_t loca
 			refresh_animation( self, fps, locale, length );
 		mlt_animation_get_item( self->animation, &item, position );
 
-		if ( self->prop_string )
-			free( self->prop_string );
+		free( self->prop_string );
 		self->prop_string = mlt_property_get_string_l( item.property, locale );
 		if ( self->prop_string )
 			self->prop_string = strdup( self->prop_string );

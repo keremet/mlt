@@ -1,7 +1,7 @@
 /**
  * MltProducer.h - MLT Wrapper
- * Copyright (C) 2004-2005 Charles Yates
- * Author: Charles Yates <charles.yates@pandora.be>
+ * Copyright (C) 2004-2015 Meltytech, LLC
+ * Author: Charles Yates <charles.yates@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,8 +18,8 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef _MLTPP_PRODUCER_H_
-#define _MLTPP_PRODUCER_H_
+#ifndef MLTPP_PRODUCER_H
+#define MLTPP_PRODUCER_H
 
 #include "config.h"
 
@@ -55,7 +55,7 @@ namespace Mlt
 			int seek( const char* time );
 			int position( );
 			int frame( );
-			char* frame_time( mlt_time_format = mlt_time_smpte );
+			char* frame_time( mlt_time_format = mlt_time_smpte_df );
 			int set_speed( double speed );
 			int pause( );
 			double get_speed( );
@@ -64,7 +64,7 @@ namespace Mlt
 			int get_in( );
 			int get_out( );
 			int get_length( );
-			char* get_length_time( mlt_time_format = mlt_time_smpte );
+			char* get_length_time( mlt_time_format = mlt_time_smpte_df );
 			int get_playtime( );
 			Producer *cut( int in = 0, int out = -1 );
 			bool is_cut( );

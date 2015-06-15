@@ -3,8 +3,7 @@
  * \brief tractor service class
  * \see mlt_tractor_s
  *
- * Copyright (C) 2003-2009 Ushodaya Enterprises Limited
- * \author Charles Yates <charles.yates@pandora.be>
+ * Copyright (C) 2003-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -270,6 +269,7 @@ static int producer_get_image( mlt_frame self, uint8_t **buffer, mlt_image_forma
 	mlt_properties_set_int( frame_properties, "consumer_deinterlace", mlt_properties_get_int( properties, "consumer_deinterlace" ) );
 	mlt_properties_set( frame_properties, "deinterlace_method", mlt_properties_get( properties, "deinterlace_method" ) );
 	mlt_properties_set_int( frame_properties, "consumer_tff", mlt_properties_get_int( properties, "consumer_tff" ) );
+	mlt_properties_set( frame_properties, "consumer_color_trc", mlt_properties_get( properties, "consumer_color_trc" ) );
 	mlt_frame_get_image( frame, buffer, format, width, height, writable );
 	mlt_frame_set_image( self, *buffer, 0, NULL );
 	mlt_properties_set_int( properties, "width", *width );
@@ -281,12 +281,16 @@ static int producer_get_image( mlt_frame self, uint8_t **buffer, mlt_image_forma
 	mlt_properties_set_int( properties, "colorspace", mlt_properties_get_int( frame_properties, "colorspace" ) );
 	mlt_properties_set_int( properties, "force_full_luma", mlt_properties_get_int( frame_properties, "force_full_luma" ) );
 	mlt_properties_set_int( properties, "top_field_first", mlt_properties_get_int( frame_properties, "top_field_first" ) );
+	mlt_properties_set( properties, "color_trc", mlt_properties_get( frame_properties, "color_trc" ) );
 	mlt_properties_set_data( properties, "movit.convert.fence",
 		mlt_properties_get_data( frame_properties, "movit.convert.fence", NULL ),
 		0, NULL, NULL );
-	data = mlt_frame_get_alpha_mask( frame );
-	mlt_properties_get_data( frame_properties, "alpha", &size );
-	mlt_frame_set_alpha( self, data, size, NULL );
+	data = mlt_frame_get_alpha( frame );
+	if ( data )
+	{
+		mlt_properties_get_data( frame_properties, "alpha", &size );
+		mlt_frame_set_alpha( self, data, size, NULL );
+	};
 	self->convert_image = frame->convert_image;
 	self->convert_audio = frame->convert_audio;
 	return 0;
@@ -296,6 +300,8 @@ static int producer_get_audio( mlt_frame self, void **buffer, mlt_audio_format *
 {
 	mlt_properties properties = MLT_FRAME_PROPERTIES( self );
 	mlt_frame frame = mlt_frame_pop_audio( self );
+	mlt_properties frame_properties = MLT_FRAME_PROPERTIES( frame );
+	mlt_properties_set( frame_properties, "producer_consumer_fps", mlt_properties_get( properties, "producer_consumer_fps" ) );
 	mlt_frame_get_audio( frame, buffer, format, frequency, channels, samples );
 	mlt_frame_set_audio( self, *buffer, *format, mlt_audio_format_size( *format, *samples, *channels ), NULL );
 	mlt_properties_set_int( properties, "audio_frequency", *frequency );

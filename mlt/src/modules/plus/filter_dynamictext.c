@@ -1,7 +1,6 @@
 /*
  * filter_dynamictext.c -- dynamic text overlay filter
- * Copyright (C) 2011 Ushodaya Enterprises Limited
- * Author: Brian Matherly <pez4brian@yahoo.com>
+ * Copyright (C) 2011-2014 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -83,26 +82,13 @@ static int get_next_token(char* str, int* pos, char* token, int* is_keyword)
 	return 1;
 }
 
-static void get_timecode_str( mlt_filter filter, mlt_frame frame, char* text )
+static void get_timecode_str( mlt_filter filter, mlt_frame frame, char* text, mlt_time_format time_format )
 {
-	int frames = mlt_frame_get_position( frame );
-	double fps = mlt_profile_fps( mlt_service_profile( MLT_FILTER_SERVICE( filter ) ) );
-	char tc[12] = "";
-	if (fps == 0)
-	{
-		strncat( text, "-", MAX_TEXT_LEN - strlen( text ) - 1 );
-	}
-	else
-	{
-		int seconds = frames / fps;
-		frames = frames % lrint( fps );
-		int minutes = seconds / 60;
-		seconds = seconds % 60;
-		int hours = minutes / 60;
-		minutes = minutes % 60;
-		sprintf(tc, "%.2d:%.2d:%.2d:%.2d", hours, minutes, seconds, frames);
-		strncat( text, tc, MAX_TEXT_LEN - strlen( text ) - 1 );
-	}
+	mlt_position frames = mlt_frame_get_position( frame );
+	mlt_properties properties = MLT_FILTER_PROPERTIES( filter );
+	char *s = mlt_properties_frames_to_time( properties, frames, time_format );
+	if ( s )
+		strncat( text, s, MAX_TEXT_LEN - strlen( text ) - 1 );
 }
 
 static void get_frame_str( mlt_filter filter, mlt_frame frame, char* text )
@@ -113,7 +99,7 @@ static void get_frame_str( mlt_filter filter, mlt_frame frame, char* text )
 	strncat( text, s, MAX_TEXT_LEN - strlen( text ) - 1 );
 }
 
-static void get_filedate_str( mlt_filter filter, mlt_frame frame, char* text )
+static void get_filedate_str( const char* keyword, mlt_filter filter, mlt_frame frame, char* text )
 {
 	mlt_producer producer = mlt_producer_cut_parent( mlt_frame_get_original_producer( frame ) );
 	mlt_properties producer_properties = MLT_PRODUCER_PROPERTIES( producer );
@@ -122,14 +108,20 @@ static void get_filedate_str( mlt_filter filter, mlt_frame frame, char* text )
 
 	if( !stat(filename, &file_info))
 	{
+		const char *format = "%Y/%m/%d";
+		int n = strlen( "filedate" ) + 1;
 		struct tm* time_info = gmtime( &(file_info.st_mtime) );
-		char date[11] = "";
-		strftime( date, 11, "%Y/%m/%d", time_info );
+		char *date = calloc( 1, MAX_TEXT_LEN );
+
+		if ( strlen( keyword ) > n )
+			format = &keyword[n];
+		strftime( date, MAX_TEXT_LEN, format, time_info );
 		strncat( text, date, MAX_TEXT_LEN - strlen( text ) - 1);
+		free( date );
 	}
 }
 
-static void get_localfiledate_str( mlt_filter filter, mlt_frame frame, char* text )
+static void get_localfiledate_str( const char* keyword, mlt_filter filter, mlt_frame frame, char* text )
 {
 	mlt_producer producer = mlt_producer_cut_parent( mlt_frame_get_original_producer( frame ) );
 	mlt_properties producer_properties = MLT_PRODUCER_PROPERTIES( producer );
@@ -138,11 +130,32 @@ static void get_localfiledate_str( mlt_filter filter, mlt_frame frame, char* tex
 
 	if( !stat( filename, &file_info ) )
 	{
+		const char *format = "%Y/%m/%d";
+		int n = strlen( "localfiledate" ) + 1;
 		struct tm* time_info = localtime( &(file_info.st_mtime) );
-		char date[11] = "";
-		strftime( date, 11, "%Y/%m/%d", time_info );
+		char *date = calloc( 1, MAX_TEXT_LEN );
+
+		if ( strlen( keyword ) > n )
+			format = &keyword[n];
+		strftime( date, MAX_TEXT_LEN, format, time_info );
 		strncat( text, date, MAX_TEXT_LEN - strlen( text ) - 1);
+		free( date );
 	}
+}
+
+static void get_localtime_str( const char* keyword, char* text )
+{
+	const char *format = "%Y/%m/%d %H:%M:%S";
+	int n = strlen( "localtime" ) + 1;
+	time_t now = time( NULL );
+	struct tm* time_info = localtime( &now );
+	char *date = calloc( 1, MAX_TEXT_LEN );
+
+	if ( strlen( keyword ) > n )
+		format = &keyword[n];
+	strftime( date, MAX_TEXT_LEN, format, time_info );
+	strncat( text, date, MAX_TEXT_LEN - strlen( text ) - 1);
+	free( date );
 }
 
 static void get_resource_str( mlt_filter filter, mlt_frame frame, char* text )
@@ -166,21 +179,29 @@ static void substitute_keywords(mlt_filter filter, char* result, char* value, ml
 		{
 			strncat( result, keyword, MAX_TEXT_LEN - strlen( result ) - 1 );
 		}
-		else if ( !strcmp( keyword, "timecode" ) )
+		else if ( !strcmp( keyword, "timecode" ) || !strcmp( keyword, "smpte_df" ) )
 		{
-			get_timecode_str( filter, frame, result );
+			get_timecode_str( filter, frame, result, mlt_time_smpte_df );
+		}
+		else if ( !strcmp( keyword, "smpte_ndf" ) )
+		{
+			get_timecode_str( filter, frame, result, mlt_time_smpte_ndf );
 		}
 		else if ( !strcmp( keyword, "frame" ) )
 		{
 			get_frame_str( filter, frame, result );
 		}
-		else if ( !strcmp( keyword, "filedate" ) )
+		else if ( !strncmp( keyword, "filedate", 8 ) )
 		{
-			get_filedate_str( filter, frame, result );
+			get_filedate_str( keyword, filter, frame, result );
 		}
-		else if ( !strcmp( keyword, "localfiledate" ) )
+		else if ( !strncmp( keyword, "localfiledate", 13 ) )
 		{
-			get_localfiledate_str( filter, frame, result );
+			get_localfiledate_str( keyword, filter, frame, result );
+		}
+		else if ( !strncmp( keyword, "localtime", 9 ) )
+		{
+			get_localtime_str( keyword, result );
 		}
 		else if ( !strcmp( keyword, "resource" ) )
 		{
@@ -248,8 +269,13 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 	mlt_properties properties = MLT_FILTER_PROPERTIES( filter );
 	mlt_producer producer = mlt_properties_get_data( properties, "_producer", NULL );
 	mlt_transition transition = mlt_properties_get_data( properties, "_transition", NULL );
-	mlt_frame text_frame = NULL;
+	mlt_frame a_frame = 0;
+	mlt_frame b_frame = 0;
 	mlt_position position = 0;
+
+	// Process all remaining filters first
+	*format = mlt_image_yuv422;
+	error = mlt_frame_get_image( frame, image, format, width, height, 0 );
 
 	// Configure this filter
 	mlt_service_lock( MLT_FILTER_SERVICE( filter ) );
@@ -262,29 +288,33 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 	mlt_producer_seek( producer, position );
 
 	// Get the b frame and process with transition if successful
-	if ( mlt_service_get_frame( MLT_PRODUCER_SERVICE( producer ), &text_frame, 0 ) == 0 )
+	if ( !error && mlt_service_get_frame( MLT_PRODUCER_SERVICE( producer ), &b_frame, 0 ) == 0 )
 	{
-		// Get the a and b frame properties
-		mlt_properties a_props = MLT_FRAME_PROPERTIES( frame );
-		mlt_properties b_props = MLT_FRAME_PROPERTIES( text_frame );
+		// Create a temporary frame so the original stays in tact.
+		mlt_frame a_frame = mlt_frame_clone( frame, 0 );
 
-		// Set the frame and text_frame to be in the same position and have same consumer requirements
-		mlt_frame_set_position( text_frame, position );
-		mlt_frame_set_position( frame, position );
+		// Get the a and b frame properties
+		mlt_properties a_props = MLT_FRAME_PROPERTIES( a_frame );
+		mlt_properties b_props = MLT_FRAME_PROPERTIES( b_frame );
+
+		// Set the a_frame and b_frame to be in the same position and have same consumer requirements
+		mlt_frame_set_position( a_frame, position );
+		mlt_frame_set_position( b_frame, position );
 		mlt_properties_set_int( b_props, "consumer_deinterlace", mlt_properties_get_int( a_props, "consumer_deinterlace" ) );
 
 		// Apply all filters that are attached to this filter to the b frame
-		mlt_service_apply_filters( MLT_FILTER_SERVICE( filter ), text_frame, 0 );
+		mlt_service_apply_filters( MLT_FILTER_SERVICE( filter ), b_frame, 0 );
 
 		// Process the frame
-		mlt_transition_process( transition, frame, text_frame );
+		mlt_transition_process( transition, a_frame, b_frame );
 
 		// Get the image
 		*format = mlt_image_yuv422;
-		error = mlt_frame_get_image( frame, image, format, width, height, 1 );
+		error = mlt_frame_get_image( a_frame, image, format, width, height, 1 );
 
-		// Close the b frame
-		mlt_frame_close( text_frame );
+		// Close the temporary frames
+		mlt_frame_close( a_frame );
+		mlt_frame_close( b_frame );
 	}
 
 	return error;
