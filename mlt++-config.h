@@ -1,7 +1,7 @@
 /**
  * config.h - Convenience header file for all mlt++ objects
- * Copyright (C) 2004-2005 Charles Yates
- * Author: Charles Yates <charles.yates@pandora.be>
+ * Copyright (C) 2004-2015 Meltytech, LLC
+ * Author: Charles Yates <charles.yates@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,17 +18,21 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef MLTPP_CONFIG_H_
-#define MLTPP_CONFIG_H_
+#ifndef MLTPP_CONFIG_H
+#define MLTPP_CONFIG_H
 
-#ifdef WIN32
+#if defined(WIN32)
     #ifdef MLTPP_EXPORTS
         #define MLTPP_DECLSPEC __declspec( dllexport )
     #else
         #define MLTPP_DECLSPEC __declspec( dllimport )
     #endif
 #else
-	#define MLTPP_DECLSPEC
+    #if __GNUC__ >= 4
+        #define MLTPP_DECLSPEC __attribute__ ((visibility ("default")))
+    #else
+        #define MLTPP_DECLSPEC
+    #endif
 #endif
 
 #endif
