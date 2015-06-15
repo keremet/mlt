@@ -8,8 +8,8 @@
 %define lname lib%name
 
 Name: mlt
-Version: 0.9.2
-Release: alt1.M70P.1
+Version: 0.9.6
+Release: alt1
 
 Summary: Multimedia framework designed for television broadcasting
 License: GPLv3
@@ -160,6 +160,9 @@ install -pm 0755 src/swig/python/_%name.so %buildroot%python_sitelibdir/
 %python_sitelibdir/*
 
 %changelog
+* Mon Jun 15 2015 Sergey V Turchin <zerg@altlinux.org> 0.9.6-alt1
+- new version
+
 * Thu Apr 16 2015 Sergey V Turchin <zerg@altlinux.org> 0.9.2-alt1.M70P.1
 - build for M70P
 
