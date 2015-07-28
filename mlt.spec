@@ -37,9 +37,9 @@ Patch20: 01-changed-preset-path.diff
 BuildRequires: ImageMagick-tools gcc-c++ jackit-devel ladspa_sdk libSDL-devel
 BuildRequires: libSDL_image-devel libX11-devel libavdevice-devel libavformat-devel
 BuildRequires: libquicktime-devel libsamplerate-devel libsox-devel libswscale-devel
-BuildRequires: libxml2-devel kde4libs-devel swig python-devel
+BuildRequires: libxml2-devel swig python-devel
 BuildRequires: frei0r-devel libalsa-devel libexif-devel
-BuildRequires: libqt4-devel
+BuildRequires: libqt4-devel kde4libs-devel
 %if_enabled vdpau
 BuildRequires: libvdpau-devel
 %endif
