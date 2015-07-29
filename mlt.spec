@@ -39,7 +39,10 @@ BuildRequires: libSDL_image-devel libX11-devel libavdevice-devel libavformat-dev
 BuildRequires: libquicktime-devel libsamplerate-devel libsox-devel libswscale-devel
 BuildRequires: libxml2-devel swig python-devel
 BuildRequires: frei0r-devel libalsa-devel libexif-devel
-BuildRequires: libqt4-devel kde4libs-devel
+#BuildRequires: libqt4-devel kde4libs-devel
+BuildRequires: qt5-base-devel qt5-svg-devel
+BuildRequires: rpm-build-kf5
+#kf5-kdelibs4support-devel
 %if_enabled vdpau
 BuildRequires: libvdpau-devel
 %endif
@@ -108,7 +111,7 @@ VDPAU_SONAME=`readelf -a %_libdir/libvdpau.so | grep SONAME| sed 's/.*\[//'| sed
 sed -i "s/__VDPAU_SONAME__/${VDPAU_SONAME}/" src/modules/avformat/vdpau.c
 
 %build
-export CC=gcc CXX=g++ CFLAGS="%optflags" QTDIR=%_qt4dir
+export CC=gcc CXX=g++ CFLAGS="%optflags" QTDIR=%_qt5_prefix
 %configure \
 	--enable-gpl --enable-gpl3 \
 	--target-os=Linux \
@@ -130,8 +133,8 @@ export CC=gcc CXX=g++ CFLAGS="%optflags" QTDIR=%_qt4dir
 	%endif
 	%{subst_enable debug} \
 	--without-kde \
-	--kde-includedir=%_K4includedir \
-        --kde-libdir=%_K4lib \
+	--kde-includedir=%_K5inc \
+        --kde-libdir=%_K5link \
         --swig-languages=python \
         #
 #	--luma-compress \
