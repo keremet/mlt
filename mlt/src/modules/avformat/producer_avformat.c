@@ -504,7 +504,7 @@ static char* parse_url( mlt_profile profile, const char* URL, AVInputFormat **fo
 	return result;
 }
 
-static mlt_image_format pick_pix_fmt( enum PixelFormat pix_fmt )
+static enum PixelFormat pick_pix_fmt( enum PixelFormat pix_fmt )
 {
 	switch ( pix_fmt )
 	{
@@ -821,6 +821,8 @@ static int seek_video( producer_avformat self, mlt_position position,
 	mlt_producer producer = self->parent;
 	int paused = 0;
 
+	pthread_mutex_lock( &self->packets_mutex );
+
 	if ( self->seekable && ( position != self->video_expected || self->last_position < 0 ) )
 	{
 		mlt_properties properties = MLT_PRODUCER_PROPERTIES( producer );
@@ -876,6 +878,7 @@ static int seek_video( producer_avformat self, mlt_position position,
 			av_freep( &self->video_frame );
 		}
 	}
+	pthread_mutex_unlock( &self->packets_mutex );
 	return paused;
 }
 
@@ -1437,7 +1440,7 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 					self->pkt.pts, self->pkt.dts, req_position, self->current_position, int_position );
 
 				// Make a dumb assumption on streams that contain wild timestamps
-				if ( abs( req_position - int_position ) > 999 )
+				if ( llabs( req_position - int_position ) > 999 )
 				{
 					int_position = req_position;
 					mlt_log_warning( MLT_PRODUCER_SERVICE(producer), " WILD TIMESTAMP!\n" );
@@ -1943,6 +1946,8 @@ static int seek_audio( producer_avformat self, mlt_position position, double tim
 {
 	int paused = 0;
 
+	pthread_mutex_lock( &self->packets_mutex );
+
 	// Seek if necessary
 	if ( self->seekable && ( position != self->audio_expected || self->last_position < 0 ) )
 	{
@@ -1980,6 +1985,7 @@ static int seek_audio( producer_avformat self, mlt_position position, double tim
 				self->audio_used[i - 1] = 0;
 		}
 	}
+	pthread_mutex_unlock( &self->packets_mutex );
 	return paused;
 }
 
@@ -1996,7 +2002,8 @@ static void planar_to_interleaved( uint8_t *dest, AVFrame *src, int samples, int
 	{
 		for ( c = 0; c < channels; c++ )
 		{
-			memcpy( dest, &src->data[c][s * bytes_per_sample], bytes_per_sample );
+			if ( c < AV_NUM_DATA_POINTERS )
+				memcpy( dest, &src->data[c][s * bytes_per_sample], bytes_per_sample );
 			dest += bytes_per_sample;
 		}
 	}

@@ -479,3 +479,39 @@ MLTPP_0.9.4 {
       "Mlt::Filter::process(Mlt::Frame&)";
     };
 } MLTPP_0.9.2;
+
+MLTPP_0.9.8 {
+  global:
+    extern "C++" {
+        "Mlt::Multitrack::disconnect(int)";
+        "Mlt::Service::disconnect_producer(int)";
+        "Mlt::Tractor::remove_track(int)";
+        "Mlt::Service::insert_producer(Mlt::Service&, int)";
+        "Mlt::Multitrack::insert(Mlt::Producer&, int)";
+        "Mlt::Tractor::insert_track(Mlt::Producer&, int)";
+        "Mlt::Transition::set_tracks(int, int)";
+        "Mlt::Properties::get_animation(char const*)";
+        "Mlt::Properties::get_anim(char const*)";
+        "Mlt::Animation::Animation()";
+        "Mlt::Animation::Animation(mlt_animation_s*)";
+        "Mlt::Animation::Animation(Mlt::Animation const&)";
+        "Mlt::Animation::~Animation()";
+        "Mlt::Animation::is_valid() const";
+        "Mlt::Animation::get_animation() const";
+        "Mlt::Animation::operator=(Mlt::Animation const&)";
+        "Mlt::Animation::length()";
+        "Mlt::Animation::is_key(int)";
+        "Mlt::Animation::keyframe_type(int)";
+        "Mlt::Animation::get_item(int, bool&, mlt_keyframe_type&)";
+        "Mlt::Animation::next_key(int)";
+        "Mlt::Animation::previous_key(int)";
+        "Mlt::Animation::key_count()";
+        "Mlt::Animation::key_get(int, int&, mlt_keyframe_type&)";
+        "Mlt::Animation::key_get_frame(int)";
+        "Mlt::Animation::key_get_type(int)";
+        "Mlt::Animation::set_length(int)";
+        "Mlt::Animation::remove(int)";
+        "Mlt::Animation::interpolate()";
+        "Mlt::Animation::serialize_cut(int, int)";
+    };
+} MLTPP_0.9.4;

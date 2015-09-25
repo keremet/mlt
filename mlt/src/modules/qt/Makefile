@@ -9,6 +9,7 @@ TARGET = ../libmltqt$(LIBSUF)
 
 OBJS = factory.o producer_qimage.o producer_kdenlivetitle.o
 CPPOBJS = common.o \
+	filter_audiowaveform.o \
 	qimage_wrapper.o \
 	kdenlivetitle_wrapper.o \
 	producer_qtext.o
@@ -21,6 +22,11 @@ endif
 ifdef GPL3
 	CPPOBJS += transition_vqm.o
 	CFLAGS += -DGPL3
+endif
+
+ifdef USE_FFTW
+	CPPOBJS += filter_lightshow.o
+	CFLAGS += -DUSE_FFTW
 endif
 
 ifneq ($(targetos), Darwin)

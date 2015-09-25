@@ -291,7 +291,7 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 	if ( !error && mlt_service_get_frame( MLT_PRODUCER_SERVICE( producer ), &b_frame, 0 ) == 0 )
 	{
 		// Create a temporary frame so the original stays in tact.
-		mlt_frame a_frame = mlt_frame_clone( frame, 0 );
+		a_frame = mlt_frame_clone( frame, 0 );
 
 		// Get the a and b frame properties
 		mlt_properties a_props = MLT_FRAME_PROPERTIES( a_frame );
@@ -350,6 +350,9 @@ mlt_filter filter_dynamictext_init( mlt_profile profile, mlt_service_type type, 
 	// Use pango if qtext is not available.
 	if( !producer )
 		producer = mlt_factory_producer( profile, mlt_environment( "MLT_PRODUCER" ), "pango:" );
+
+	if( !producer )
+		mlt_log_warning( MLT_FILTER_SERVICE(filter), "QT or GTK modules required for dynamic text.\n" );
 
 	if ( filter && transition && producer )
 	{

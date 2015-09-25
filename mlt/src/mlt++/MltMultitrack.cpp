@@ -65,6 +65,16 @@ int Multitrack::connect( Producer &producer, int index )
 	return mlt_multitrack_connect( get_multitrack( ), producer.get_producer( ), index );
 }
 
+int Multitrack::insert( Producer &producer, int index )
+{
+	return mlt_multitrack_insert( get_multitrack( ), producer.get_producer( ), index );
+}
+
+int Multitrack::disconnect( int index )
+{
+	return mlt_multitrack_disconnect( get_multitrack(), index );
+}
+
 int Multitrack::clip( mlt_whence whence, int index )
 {
 	return mlt_multitrack_clip( get_multitrack( ), whence, index );

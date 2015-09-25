@@ -3,7 +3,7 @@
  * \brief tractor service class
  * \see mlt_tractor_s
  *
- * Copyright (C) 2003-2014 Meltytech, LLC
+ * Copyright (C) 2003-2015 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -25,6 +25,7 @@
 #include "mlt_multitrack.h"
 #include "mlt_field.h"
 #include "mlt_log.h"
+#include "mlt_transition.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -243,6 +244,99 @@ int mlt_tractor_set_track( mlt_tractor self, mlt_producer producer, int index )
 	return mlt_multitrack_connect( mlt_tractor_multitrack( self ), producer, index );
 }
 
+/** Insert a producer before a specific track.
+ *
+ * This also adjusts the track indices on mlt_transition_s and mlt_filter_s,
+ *
+ * \public \memberof mlt_tractor_s
+ * \param self a tractor
+ * \param producer a producer
+ * \param index the 0-based track index
+ * \return true on error
+ */
+
+int mlt_tractor_insert_track( mlt_tractor self, mlt_producer producer, int index )
+{
+	int error = mlt_multitrack_insert( mlt_tractor_multitrack( self ), producer, index );
+	if ( !error )
+	{
+		// Update the track indices of transitions and track filters.
+		mlt_service service = mlt_service_producer( MLT_TRACTOR_SERVICE( self ) );
+		while ( service )
+		{
+			mlt_service_type type = mlt_service_identify( service );
+			mlt_properties properties = MLT_SERVICE_PROPERTIES( service );
+
+			if ( type == transition_type )
+			{
+				mlt_transition transition = MLT_TRANSITION( service );
+				int a_track = mlt_transition_get_a_track( transition );
+				int b_track = mlt_transition_get_b_track( transition );
+
+				if ( a_track >= index || b_track >= index )
+				{
+					a_track = a_track >= index ? a_track + 1 : a_track;
+					b_track = b_track >= index ? b_track + 1 : b_track;
+					mlt_transition_set_tracks( transition, a_track, b_track );
+				}
+			}
+			else if ( type == filter_type )
+			{
+				int current_track = mlt_properties_get_int( properties, "track" );
+				if ( current_track >= index )
+					mlt_properties_set_int( properties, "track", current_track + 1 );
+			}
+			service = mlt_service_producer( service );
+		}
+	}
+	return error;
+}
+
+/** Remove a track by its index.
+ *
+ * \public \memberof mlt_tractor_s
+ * \param self a tractor
+ * \param index the 0-based track index
+ * \return true on error
+ */
+
+int mlt_tractor_remove_track( mlt_tractor self, int index )
+{
+	int error = mlt_multitrack_disconnect( mlt_tractor_multitrack( self ), index );
+	if ( !error )
+	{
+		// Update the track indices of transitions and track filters.
+		mlt_service service = mlt_service_producer( MLT_TRACTOR_SERVICE( self ) );
+		while ( service )
+		{
+			mlt_service_type type = mlt_service_identify( service );
+			mlt_properties properties = MLT_SERVICE_PROPERTIES( service );
+
+			if ( type == transition_type )
+			{
+				mlt_transition transition = MLT_TRANSITION( service );
+				int a_track = mlt_transition_get_a_track( transition );
+				int b_track = mlt_transition_get_b_track( transition );
+
+				if ( a_track > index || b_track > index )
+				{
+					a_track = a_track > index ? a_track - 1 : a_track;
+					b_track = b_track > index ? b_track - 1 : b_track;
+					mlt_transition_set_tracks( transition, a_track, b_track );
+				}
+			}
+			else if ( type == filter_type )
+			{
+				int current_track = mlt_properties_get_int( properties, "track" );
+				if ( current_track > index )
+					mlt_properties_set_int( properties, "track", current_track - 1 );
+			}
+			service = mlt_service_producer( service );
+		}
+	}
+	return error;
+}
+
 /** Get the producer for a specific track.
  *
  * \public \memberof mlt_tractor_s
@@ -270,8 +364,12 @@ static int producer_get_image( mlt_frame self, uint8_t **buffer, mlt_image_forma
 	mlt_properties_set( frame_properties, "deinterlace_method", mlt_properties_get( properties, "deinterlace_method" ) );
 	mlt_properties_set_int( frame_properties, "consumer_tff", mlt_properties_get_int( properties, "consumer_tff" ) );
 	mlt_properties_set( frame_properties, "consumer_color_trc", mlt_properties_get( properties, "consumer_color_trc" ) );
+	// WebVfx uses this to setup a consumer-stopping event handler.
+	mlt_properties_set_data( frame_properties, "consumer", mlt_properties_get_data( properties, "consumer", NULL ), 0, NULL, NULL );
+
 	mlt_frame_get_image( frame, buffer, format, width, height, writable );
 	mlt_frame_set_image( self, *buffer, 0, NULL );
+
 	mlt_properties_set_int( properties, "width", *width );
 	mlt_properties_set_int( properties, "height", *height );
 	mlt_properties_set_int( properties, "format", *format );

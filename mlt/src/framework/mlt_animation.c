@@ -376,19 +376,22 @@ int mlt_animation_get_item( mlt_animation self, mlt_animation_item item, int pos
 		if ( position < node->item.frame )
 		{
 			item->is_key = 0;
-			mlt_property_pass( item->property, node->item.property );
+			if ( item->property )
+				mlt_property_pass( item->property, node->item.property );
 		}
 		// Item exists.
 		else if ( position == node->item.frame )
 		{
 			item->is_key = node->item.is_key;
-			mlt_property_pass( item->property, node->item.property );
+			if ( item->property )
+				mlt_property_pass( item->property, node->item.property );
 		}
 		// Position is after the last keyframe.
 		else if ( !node->next )
 		{
 			item->is_key = 0;
-			mlt_property_pass( item->property, node->item.property );
+			if ( item->property )
+				mlt_property_pass( item->property, node->item.property );
 		}
 		// Interpolation needed.
 		else
@@ -526,7 +529,8 @@ int mlt_animation_next_key( mlt_animation self, mlt_animation_item item, int pos
 		item->frame = node->item.frame;
 		item->is_key = node->item.is_key;
 		item->keyframe_type = node->item.keyframe_type;
-		mlt_property_pass( item->property, node->item.property );
+		if ( item->property )
+			mlt_property_pass( item->property, node->item.property );
 	}
 
 	return ( node == NULL );
@@ -553,7 +557,8 @@ int mlt_animation_prev_key( mlt_animation self, mlt_animation_item item, int pos
 		item->frame = node->item.frame;
 		item->is_key = node->item.is_key;
 		item->keyframe_type = node->item.keyframe_type;
-		mlt_property_pass( item->property, node->item.property );
+		if ( item->property )
+			mlt_property_pass( item->property, node->item.property );
 	}
 
 	return ( node == NULL );
@@ -692,6 +697,61 @@ char *mlt_animation_serialize( mlt_animation self )
 		ret = strdup( ret );
 	}
 	return ret;
+}
+
+/** Get the number of keyframes.
+ *
+ * \public \memberof mlt_animation_s
+ * \param self an animation
+ * \return the number of keyframes or -1 on error
+ */
+
+int mlt_animation_key_count( mlt_animation self )
+{
+	int count = -1;
+	if ( self )
+	{
+		animation_node node = self->nodes;
+		for ( count = 0; node; ++count )
+			node = node->next;
+	}
+	return count;
+}
+
+/** Get an animation item for the N-th keyframe.
+ *
+ * \public \memberof mlt_animation_s
+ * \param self an animation
+ * \param item an already allocated animation item that will be filled in
+ * \param position the frame number for the point in time
+ * \return true if there was an error
+ */
+
+int mlt_animation_key_get( mlt_animation self, mlt_animation_item item, int index )
+{
+	int error = 0;
+	animation_node node = self->nodes;
+
+	// Iterate through the keyframes.
+	int i = index;
+	while ( i-- && node )
+		node = node->next;
+
+	if ( node )
+	{
+		item->is_key = node->item.is_key;
+		item->frame = node->item.frame;
+		item->keyframe_type = node->item.keyframe_type;
+		if ( item->property )
+			mlt_property_pass( item->property, node->item.property );
+	}
+	else
+	{
+		item->frame = item->is_key = 0;
+		error = 1;
+	}
+
+	return error;
 }
 
 /** Close the animation and deallocate all of its resources.
