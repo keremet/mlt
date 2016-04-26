@@ -1,0 +1,12 @@
+--- a/src/modules/gtk2/producer_pango.c~	2016-04-26 15:21:49.000000000 +0300
++++ b/src/modules/gtk2/producer_pango.c	2016-04-26 15:29:08.623000000 +0300
+@@ -25,7 +25,8 @@
+ #include <string.h>
+ #include <gdk-pixbuf/gdk-pixbuf.h>
+ #include <pango/pangoft2.h>
+-#include <freetype.h>
++#include <ft2build.h>
++#include FT_FREETYPE_H
+ #include <iconv.h>
+ #include <pthread.h>
+ #include <ctype.h>
