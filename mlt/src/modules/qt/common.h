@@ -26,5 +26,6 @@ class QImage;
 bool createQApplicationIfNeeded(mlt_service service);
 void copy_qimage_to_mlt_rgba( QImage* qImg, uint8_t* mImg );
 void copy_mlt_to_qimage_rgba( uint8_t* mImg, QImage* qImg );
+int create_image( mlt_frame frame, uint8_t **image, mlt_image_format *image_format, int *width, int *height, int writable );
 
 #endif // COMMON_H

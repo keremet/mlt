@@ -3,7 +3,7 @@
  * \brief Properties class definition
  * \see mlt_properties_s
  *
- * Copyright (C) 2003-2014 Meltytech, LLC
+ * Copyright (C) 2003-2016 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -140,7 +140,7 @@ int mlt_properties_set_lcnumeric( mlt_properties self, const char *locale )
 	{
 		property_list *list = self->local;
 
-#if defined(__GLIBC__) || defined(__DARWIN__)
+#if defined(__GLIBC__) || defined(__APPLE__)
 		if ( list->locale )
 			freelocale( list->locale );
 		list->locale = newlocale( LC_NUMERIC_MASK, locale, NULL );
@@ -173,12 +173,21 @@ const char* mlt_properties_get_lcnumeric( mlt_properties self )
 
 	if ( list->locale )
 	{
-#if defined(__DARWIN__)
+#if defined(__APPLE__)
         result = querylocale( LC_NUMERIC, list->locale );
 #elif defined(__GLIBC__)
         result = list->locale->__names[ LC_NUMERIC ];
 #else
 		result = list->locale;
+#endif
+#if defined(_WIN32)
+		if ( result )
+		{
+			// Convert the string from ANSI code page to UTF-8.
+			mlt_properties_set( self, "_lcnumeric_in", result );
+			mlt_properties_to_utf8( self, "_lcnumeric_in", "_lcnumeric_out" );
+			result = mlt_properties_get( self, "_lcnumeric_out" );
+		}
 #endif
     }
 	return result;
@@ -435,6 +444,9 @@ void mlt_properties_mirror( mlt_properties self, mlt_properties that )
 int mlt_properties_inherit( mlt_properties self, mlt_properties that )
 {
 	if ( !self || !that ) return 1;
+
+	mlt_properties_lock( that );
+
 	int count = mlt_properties_count( that );
 	int i = 0;
 	for ( i = 0; i < count; i ++ )
@@ -446,6 +458,9 @@ int mlt_properties_inherit( mlt_properties self, mlt_properties that )
 			mlt_properties_set( self, name, value );
 		}
 	}
+
+	mlt_properties_unlock( that );
+
 	return 0;
 }
 
@@ -699,7 +714,7 @@ int mlt_properties_set( mlt_properties self, const char *name, const char *value
 			// Determine the value
 			if ( isdigit( id[ 0 ] ) )
 			{
-#if defined(__GLIBC__) || defined(__DARWIN__)
+#if defined(__GLIBC__) || defined(__APPLE__)
 				property_list *list = self->local;
 				if ( list->locale )
 					current = strtod_l( id, NULL, list->locale );
@@ -1395,7 +1410,7 @@ void mlt_properties_close( mlt_properties self )
 				free( list->name[ index ] );
 			}
 
-#if defined(__GLIBC__) || defined(__DARWIN__)
+#if defined(__GLIBC__) || defined(__APPLE__)
 			// Cleanup locale
 			if ( list->locale )
 				freelocale( list->locale );
@@ -2515,7 +2530,7 @@ extern mlt_rect mlt_properties_anim_get_rect( mlt_properties self, const char *n
 	return value == NULL ? rect : mlt_property_anim_get_rect( value, fps, list->locale, position, length );
 }
 
-#ifndef WIN32
+#ifndef _WIN32
 
 // See win32/win32.c for win32 implementation.
 

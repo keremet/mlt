@@ -33,7 +33,7 @@ parameters:
     type: string
     description: |
       A text file containing Pango markup, see:
-      http://developer.gnome.org/doc/API/2.0/pango/PangoMarkupFormat.html
+      https://developer.gnome.org/pango/stable/PangoMarkupFormat.html
       requires xml-like encoding special chars from:
       <, >, &   -to-   &lt;, &gt;, &amp;
     readonly: no
@@ -229,6 +229,26 @@ parameters:
     type: integer
     description: >
       The angle of text rotation in degrees. Positive value is clockwise.
+    default: 0
+    readonly: no
+    mutable: yes
+    widget: spinner
+
+  - identifier: width_crop
+    title: Width to crop
+    type: integer
+    description: >
+      Limit width of rendered image.
+    default: 0
+    readonly: no
+    mutable: yes
+    widget: spinner
+
+  - identifier: width_fit
+    title: Fit width
+    type: integer
+    description: >
+      Scale pango layout to fit specified width.
     default: 0
     readonly: no
     mutable: yes

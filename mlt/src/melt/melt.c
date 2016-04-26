@@ -1,6 +1,6 @@
 /*
  * melt.c -- MLT command line utility
- * Copyright (C) 2002-2014 Meltytech, LLC
+ * Copyright (C) 2002-2016 Meltytech, LLC
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -31,7 +31,7 @@
 
 #include <framework/mlt.h>
 
-#if (defined(__DARWIN__) || defined(WIN32)) && !defined(MELT_NOSDL)
+#if (defined(__APPLE__) || defined(_WIN32)) && !defined(MELT_NOSDL)
 #include <SDL.h>
 #endif
 
@@ -350,7 +350,7 @@ static void load_consumer( mlt_consumer *consumer, mlt_profile profile, int argc
 	}
 }
 
-#if (defined(__DARWIN__) || defined(WIN32)) && !defined(MELT_NOSDL)
+#if (defined(__APPLE__) || defined(_WIN32)) && !defined(MELT_NOSDL)
 
 static void event_handling( mlt_producer producer, mlt_consumer consumer )
 {
@@ -382,6 +382,7 @@ static void transport( mlt_producer producer, mlt_consumer consumer )
 	mlt_properties properties = MLT_PRODUCER_PROPERTIES( producer );
 	int silent = mlt_properties_get_int( MLT_CONSUMER_PROPERTIES( consumer ), "silent" );
 	int progress = mlt_properties_get_int( MLT_CONSUMER_PROPERTIES( consumer ), "progress" );
+	int is_getc = mlt_properties_get_int( MLT_CONSUMER_PROPERTIES( consumer ), "melt_getc" );
 	struct timespec tm = { 0, 40000000 };
 	int total_length = mlt_producer_get_length( producer );
 	int last_position = 0;
@@ -390,7 +391,8 @@ static void transport( mlt_producer producer, mlt_consumer consumer )
 	{
 		if ( !silent && !progress )
 		{
-			term_init( );
+			if ( !is_getc )
+				term_init( );
 
 			fprintf( stderr, "+-----+ +-----+ +-----+ +-----+ +-----+ +-----+ +-----+ +-----+ +-----+\n" );
 			fprintf( stderr, "|1=-10| |2= -5| |3= -2| |4= -1| |5=  0| |6=  1| |7=  2| |8=  5| |9= 10|\n" );
@@ -406,7 +408,12 @@ static void transport( mlt_producer producer, mlt_consumer consumer )
 
 		while( mlt_properties_get_int( properties, "done" ) == 0 && !mlt_consumer_is_stopped( consumer ) )
 		{
-			int value = ( silent || progress )? -1 : term_read( );
+			int value = ( silent || progress || is_getc )? -1 : term_read( );
+			if ( is_getc )
+			{
+				value = getc( stdin );
+				value = ( value == EOF )? 'q' : value;
+			}
 
 			if ( value != -1 )
 			{
@@ -414,7 +421,7 @@ static void transport( mlt_producer producer, mlt_consumer consumer )
 				transport_action( producer, string );
 			}
 
-#if (defined(__DARWIN__) || defined(WIN32)) && !defined(MELT_NOSDL)
+#if (defined(__APPLE__) || defined(_WIN32)) && !defined(MELT_NOSDL)
 			event_handling( producer, consumer );
 #endif
 
@@ -461,6 +468,7 @@ static void show_usage( char *program_name )
 "  -consumer id[:arg] [name=value]*         Set the consumer (sink)\n"
 "  -debug                                   Set the logging level to debug\n"
 "  -filter filter[:arg] [name=value]*       Add a filter to the current track\n"
+"  -getc                                    Get keyboard input using getc\n"
 "  -group [name=value]*                     Apply properties repeatedly\n"
 "  -help                                    Show this message\n"
 "  -jack                                    Enable JACK transport synchronization\n"
@@ -684,6 +692,7 @@ static void query_vcodecs( )
 static void on_fatal_error( mlt_properties owner, mlt_consumer consumer )
 {
 	mlt_properties_set_int( MLT_CONSUMER_PROPERTIES(consumer), "done", 1 );
+	mlt_properties_set_int( MLT_CONSUMER_PROPERTIES(consumer), "melt_error", 1 );
 }
 
 int main( int argc, char **argv )
@@ -695,6 +704,9 @@ int main( int argc, char **argv )
 	mlt_profile profile = NULL;
 	int is_progress = 0;
 	int is_silent = 0;
+	int is_abort = 0;
+	int is_getc = 0;
+	int error = 0;
 	mlt_profile backup_profile;
 
 	// Handle abnormal exit situations.
@@ -705,10 +717,6 @@ int main( int argc, char **argv )
 	// Construct the factory
 	mlt_repository repo = mlt_factory_init( NULL );
 
-#if defined(WIN32) && !defined(MELT_NOSDL)
-	is_silent = 1;
-#endif
-	
 	for ( i = 1; i < argc; i ++ )
 	{
 		// Check for serialisation switch
@@ -803,7 +811,7 @@ query_all:
 		else if ( !strcmp( argv[ i ], "-version" ) || !strcmp( argv[ i ], "--version" ) )
 		{
 			fprintf( stdout, "%s " VERSION "\n"
-				"Copyright (C) 2002-2014 Meltytech, LLC\n"
+				"Copyright (C) 2002-2016 Meltytech, LLC\n"
 				"<http://www.mltframework.org/>\n"
 				"This is free software; see the source for copying conditions.  There is NO\n"
 				"warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n",
@@ -813,6 +821,14 @@ query_all:
 		else if ( !strcmp( argv[ i ], "-debug" ) )
 		{
 			mlt_log_set_level( MLT_LOG_DEBUG );
+		}
+		else if ( !strcmp( argv[ i ], "-abort" ) )
+		{
+			is_abort = 1;
+		}
+		else if ( !strcmp( argv[ i ], "-getc" ) )
+		{
+			is_getc = 1;
 		}
 	}
 	if ( !is_silent && !isatty( STDIN_FILENO ) && !is_progress )
@@ -886,6 +902,8 @@ query_all:
 			mlt_properties_set_int(  MLT_CONSUMER_PROPERTIES( consumer ), "progress", is_progress );
 		if ( is_silent )
 			mlt_properties_set_int(  MLT_CONSUMER_PROPERTIES( consumer ), "silent", is_silent );
+		if ( is_getc )
+			mlt_properties_set_int(  MLT_CONSUMER_PROPERTIES( consumer ), "melt_getc", is_getc );
 	}
 
 	if ( argc > 1 && melt != NULL && mlt_producer_get_length( melt ) > 0 )
@@ -942,7 +960,7 @@ query_all:
 				// Try to exit gracefully upon these signals
 				signal( SIGINT, stop_handler );
 				signal( SIGTERM, stop_handler );
-#ifndef WIN32
+#ifndef _WIN32
 				signal( SIGHUP, stop_handler );
 				signal( SIGPIPE, stop_handler );
 #endif
@@ -968,9 +986,14 @@ query_all:
 	// Disconnect producer from consumer to prevent ref cycles from closing services
 	if ( consumer )
 	{
+		error = mlt_properties_get_int( MLT_CONSUMER_PROPERTIES( consumer ), "melt_error" );
 		mlt_consumer_connect( consumer, NULL );
-		mlt_events_fire( MLT_CONSUMER_PROPERTIES(consumer), "consumer-cleanup", NULL);
+		if ( !is_abort )
+			mlt_events_fire( MLT_CONSUMER_PROPERTIES(consumer), "consumer-cleanup", NULL);
 	}
+
+	if ( is_abort )
+		return error;
 
 	// Close the producer
 	if ( melt != NULL )
@@ -990,5 +1013,5 @@ exit_factory:
 	mlt_factory_close( );
 #endif
 
-	return 0;
+	return error;
 }

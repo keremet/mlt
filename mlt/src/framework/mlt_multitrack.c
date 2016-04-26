@@ -3,7 +3,7 @@
  * \brief multitrack service class
  * \see mlt_multitrack_s
  *
- * Copyright (C) 2003-2015 Meltytech, LLC
+ * Copyright (C) 2003-2016 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -183,6 +183,7 @@ int mlt_multitrack_connect( mlt_multitrack self, mlt_producer producer, int trac
 
 	if ( result == 0 )
 	{
+		mlt_track current_track = ( track < self->count )? self->list[ track ] : NULL;
 		// Resize the producer list if need be
 		if ( track >= self->size )
 		{
@@ -193,10 +194,10 @@ int mlt_multitrack_connect( mlt_multitrack self, mlt_producer producer, int trac
 			self->size = track + 10;
 		}
 
-		if ( self->list[ track ] != NULL )
+		if ( current_track )
 		{
-			mlt_event_close( self->list[ track ]->event );
-			mlt_producer_close( self->list[ track ]->producer );
+			mlt_event_close( current_track->event );
+			mlt_producer_close( current_track->producer );
 		}
 		else
 		{
@@ -346,7 +347,10 @@ int mlt_multitrack_disconnect( mlt_multitrack self, int track )
 
 int mlt_multitrack_count( mlt_multitrack self )
 {
-	return self->count;
+	if ( self == NULL )
+		return 0;
+	else
+		return self->count;
 }
 
 /** Get an individual track as a producer.
@@ -361,7 +365,7 @@ mlt_producer mlt_multitrack_track( mlt_multitrack self, int track )
 {
 	mlt_producer producer = NULL;
 
-	if ( self->list != NULL && track < self->count )
+	if ( self->list != NULL && track >= 0 && track < self->count )
 		producer = self->list[ track ]->producer;
 
 	return producer;
@@ -545,7 +549,7 @@ static int producer_get_frame( mlt_producer parent, mlt_frame_ptr frame, int ind
 	mlt_multitrack self = parent->child;
 
 	// Check if we have a track for this index
-	if ( index < self->count && self->list[ index ] != NULL )
+	if ( index >= 0 && index < self->count && self->list[ index ] != NULL )
 	{
 		// Get the producer for this track
 		mlt_producer producer = self->list[ index ]->producer;

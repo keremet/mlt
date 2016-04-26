@@ -1,6 +1,6 @@
 /*
  * io.c -- melt input/output
- * Copyright (C) 2002-2014 Meltytech, LLC
+ * Copyright (C) 2002-2015 Meltytech, LLC
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,13 +26,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-#ifndef WIN32
+#ifndef _WIN32
 #include <termios.h>
 #else
 // MinGW defines struct timespec in pthread.h
 #include <pthread.h>
 // for nanosleep()
 #include <framework/mlt_types.h>
+#include <windows.h>
 #endif
 #include <unistd.h>
 #include <sys/time.h>
@@ -99,10 +100,12 @@ int *get_int( int *output, int use )
 /** This stores the previous settings
 */
 
-#ifndef WIN32
+#ifndef _WIN32
 static struct termios oldtty;
-static int mode = 0;
+#else
+static DWORD oldtty;
 #endif
+static int mode = 0;
 
 /** This is called automatically on application exit to restore the 
 	previous tty settings.
@@ -110,13 +113,18 @@ static int mode = 0;
 
 void term_exit(void)
 {
-#ifndef WIN32
 	if ( mode == 1 )
 	{
+#ifndef _WIN32
 		tcsetattr( 0, TCSANOW, &oldtty );
+#else
+		HANDLE h = GetStdHandle( STD_INPUT_HANDLE );
+		if (h) {
+			SetConsoleMode( h, oldtty );
+		}
+#endif
 		mode = 0;
 	}
-#endif
 }
 
 /** Init terminal so that we can grab keys without blocking.
@@ -124,7 +132,7 @@ void term_exit(void)
 
 void term_init( )
 {
-#ifndef WIN32
+#ifndef _WIN32
 	struct termios tty;
 
 	tcgetattr( 0, &tty );
@@ -139,11 +147,19 @@ void term_init( )
 	tty.c_cc[ VTIME ] = 0;
     
 	tcsetattr( 0, TCSANOW, &tty );
+#else
+	HANDLE h = GetStdHandle( STD_INPUT_HANDLE );
+	if (h) {
+		DWORD tty;
+		GetConsoleMode( h, &tty );
+		oldtty = tty;
+		SetConsoleMode( h, mode & ~( ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT ) );
+	}
+#endif
 
 	mode = 1;
 
 	atexit( term_exit );
-#endif
 }
 
 /** Check for a keypress without blocking infinitely.
@@ -152,28 +168,38 @@ void term_init( )
 
 int term_read( )
 {
-#ifndef WIN32
-    int n = 1;
-    unsigned char ch;
-    struct timeval tv;
-    fd_set rfds;
+#ifndef _WIN32
+	int n = 1;
+	unsigned char ch;
+	struct timeval tv;
+	fd_set rfds;
 
-    FD_ZERO( &rfds );
-    FD_SET( 0, &rfds );
-    tv.tv_sec = 0;
-    tv.tv_usec = 40000;
-    n = select( 1, &rfds, NULL, NULL, &tv );
-    if (n > 0) 
+	FD_ZERO( &rfds );
+	FD_SET( 0, &rfds );
+	tv.tv_sec = 0;
+	tv.tv_usec = 40000;
+	n = select( 1, &rfds, NULL, NULL, &tv );
+	if (n > 0)
 	{
-        n = read( 0, &ch, 1 );
+		n = read( 0, &ch, 1 );
 		tcflush( 0, TCIFLUSH );
-        if (n == 1)
-            return ch;
-        return n;
-    }
+		if (n == 1)
+			return ch;
+		return n;
+	}
 #else
-	struct timespec tm = { 0, 40000000 };
-	nanosleep( &tm, NULL );
+	HANDLE h = GetStdHandle( STD_INPUT_HANDLE );
+	if ( h && WaitForSingleObject( h, 0 ) == WAIT_OBJECT_0 )
+	{
+		DWORD count;
+		TCHAR c = 0;
+		ReadConsole( h, &c, 1, &count, NULL );
+		return (int) c;
+	} else {
+		struct timespec tm = { 0, 40000000 };
+		nanosleep( &tm, NULL );
+		return 0;
+	}
 #endif
     return -1;
 }

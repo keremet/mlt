@@ -141,7 +141,7 @@ mlt_consumer consumer_sdl_init( mlt_profile profile, mlt_service_type type, cons
 	
 		// Set the sdl flags
 		self->sdl_flags = SDL_HWSURFACE | SDL_ASYNCBLIT | SDL_HWACCEL | SDL_DOUBLEBUF;
-#if !defined(__DARWIN__)
+#if !defined(__APPLE__)
 		self->sdl_flags |= SDL_RESIZABLE;
 #endif		
 		// Allow thread to be started/stopped
@@ -281,7 +281,7 @@ int consumer_stop( mlt_consumer parent )
 		// Kill the thread and clean up
 		self->joined = 1;
 		self->running = 0;
-#ifndef WIN32
+#ifndef _WIN32
 		if ( self->thread )
 #endif
 			pthread_join( self->thread, NULL );
@@ -910,11 +910,11 @@ static int consumer_get_dimensions( int *width, int *height )
 	// Lock the display
 	//sdl_lock_display();
 
-#ifndef __DARWIN__
+#ifndef __APPLE__
 	// Get the wm structure
 	if ( SDL_GetWMInfo( &wm ) == 1 )
 	{
-#ifndef WIN32
+#ifndef _WIN32
 		// Check that we have the X11 wm
 		if ( wm.subsystem == SDL_SYSWM_X11 ) 
 		{

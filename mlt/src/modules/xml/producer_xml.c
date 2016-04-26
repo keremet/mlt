@@ -1,6 +1,6 @@
 /*
  * producer_xml.c -- a libxml2 parser of mlt service networks
- * Copyright (C) 2003-2014 Meltytech, LLC
+ * Copyright (C) 2003-2016 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -191,23 +191,32 @@ static void track_service( mlt_properties properties, void *service, mlt_destruc
 // Prepend the property value with the document root
 static inline void qualify_property( deserialise_context context, mlt_properties properties, const char *name )
 {
+	char *resource_orig = mlt_properties_get( properties, name );
 	char *resource = mlt_properties_get( properties, name );
 	if ( resource != NULL && resource[0] )
 	{
-		// Qualify file name properties	
 		char *root = mlt_properties_get( context->producer_map, "root" );
+		int n = strlen( root ) + strlen( resource ) + 2;
+
+		// Strip off WebVfx "plain:" prefix.
+		if ( !strncmp( resource_orig, "plain:", 6 ) )
+			resource += 6;
+
+		// Qualify file name properties	
 		if ( root != NULL && strcmp( root, "" ) )
 		{
-			char *full_resource = malloc( strlen( root ) + strlen( resource ) + 2 );
+			char *full_resource = calloc( 1, n );
 			if ( resource[ 0 ] != '/' && strchr( resource, ':' ) == NULL )
 			{
-				strcpy( full_resource, root );
+				if ( !strncmp( resource_orig, "plain:", 6 ) )
+					strcat( full_resource, "plain:" );
+				strcat( full_resource, root );
 				strcat( full_resource, "/" );
 				strcat( full_resource, resource );
 			}
 			else
 			{
-				strcpy( full_resource, resource );
+				strcpy( full_resource, resource_orig );
 			}
 			mlt_properties_set( properties, name, full_resource );
 			free( full_resource );
@@ -604,6 +613,10 @@ static void on_end_producer( deserialise_context context, const xmlChar *name )
 		mlt_properties_set( properties, "in", NULL );
 		mlt_properties_set( properties, "out", NULL );
 
+		// Do not let XML overwrite these important properties set by mlt_factory.
+		mlt_properties_set( properties, "mlt_type", NULL );
+		mlt_properties_set( properties, "mlt_service", NULL );
+
 		// Inherit the properties
 		mlt_properties_inherit( MLT_SERVICE_PROPERTIES( producer ), properties );
 
@@ -910,6 +923,10 @@ static void on_end_filter( deserialise_context context, const xmlChar *name )
 		track_service( context->destructors, filter, (mlt_destructor) mlt_filter_close );
 		mlt_properties_set_lcnumeric( MLT_SERVICE_PROPERTIES( filter ), context->lc_numeric );
 
+		// Do not let XML overwrite these important properties set by mlt_factory.
+		mlt_properties_set( properties, "mlt_type", NULL );
+		mlt_properties_set( properties, "mlt_service", NULL );
+
 		// Propogate the properties
 		qualify_property( context, properties, "resource" );
 		qualify_property( context, properties, "luma" );
@@ -925,7 +942,7 @@ static void on_end_filter( deserialise_context context, const xmlChar *name )
 		// Associate the filter with the parent
 		if ( parent != NULL )
 		{
-			if ( parent_type == mlt_tractor_type )
+			if ( parent_type == mlt_tractor_type && mlt_properties_get( properties, "track" ) )
 			{
 				mlt_field field = mlt_tractor_field( MLT_TRACTOR( parent ) );
 				mlt_field_plant_filter( field, MLT_FILTER( filter ), mlt_properties_get_int( properties, "track" ) );
@@ -999,6 +1016,10 @@ static void on_end_transition( deserialise_context context, const xmlChar *name 
 		}
 		track_service( context->destructors, effect, (mlt_destructor) mlt_transition_close );
 		mlt_properties_set_lcnumeric( MLT_SERVICE_PROPERTIES( effect ), context->lc_numeric );
+
+		// Do not let XML overwrite these important properties set by mlt_factory.
+		mlt_properties_set( properties, "mlt_type", NULL );
+		mlt_properties_set( properties, "mlt_service", NULL );
 
 		// Propogate the properties
 		qualify_property( context, properties, "resource" );
@@ -1118,6 +1139,10 @@ static void on_end_consumer( deserialise_context context, const xmlChar *name )
 					track_service( context->destructors, MLT_CONSUMER_SERVICE(context->consumer), (mlt_destructor) mlt_consumer_close );
 					mlt_properties_set_lcnumeric( MLT_CONSUMER_PROPERTIES(context->consumer), context->lc_numeric );
 
+					// Do not let XML overwrite these important properties set by mlt_factory.
+					mlt_properties_set( properties, "mlt_type", NULL );
+					mlt_properties_set( properties, "mlt_service", NULL );
+
 					// Inherit the properties
 					mlt_properties_inherit( MLT_CONSUMER_PROPERTIES(context->consumer), properties );
 				}
@@ -1181,7 +1206,7 @@ static void on_end_property( deserialise_context context, const xmlChar *name )
 			// Serialise the tree to get value
 			xmlDocDumpMemory( context->value_doc, &value, &size );
 			mlt_properties_set( properties, context->property, _s(value) );
-#ifdef WIN32
+#ifdef _WIN32
 			xmlFreeFunc xmlFree = NULL;
 			xmlMemGet( &xmlFree, NULL, NULL, NULL);
 #endif
@@ -1513,7 +1538,7 @@ static void parse_url( mlt_properties properties, char *url )
 			
 			case ':':
 			case '=':
-#ifdef WIN32
+#ifdef _WIN32
 				if ( url[i] == ':' && url[i + 1] != '/' )
 #endif
 				if ( is_query )
@@ -1683,6 +1708,14 @@ mlt_producer producer_xml_init( mlt_profile profile, mlt_service_type servtype, 
 		// Convert file name string encoding.
 		mlt_properties_from_utf8( context->params, "_mlt_xml_resource", "__mlt_xml_resource" );
 		filename = mlt_properties_get( context->params, "__mlt_xml_resource" );
+
+		if ( !file_exists( filename ) )
+		{
+			// Try the un-converted text encoding as a fallback.
+			// Fixes launching melt as child process from Shotcut on Windows
+			// when there are extended characters in the path.
+			filename = mlt_properties_get( context->params, "_mlt_xml_resource" );
+		}
 
 		if ( !file_exists( filename ) )
 		{

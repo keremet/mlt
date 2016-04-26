@@ -21,7 +21,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#ifdef __DARWIN__
+#ifdef __APPLE__
 
 char* getCString( DLString aDLString )
 {
@@ -40,7 +40,7 @@ void freeDLString( DLString aDLString )
 	if ( aDLString ) CFRelease( aDLString );
 }
 
-#elif defined(WIN32)
+#elif defined(_WIN32)
 
 char* getCString( DLString aDLString )
 {

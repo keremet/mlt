@@ -1,6 +1,6 @@
 #!/bin/sh
 
-export version=0.9.8
+export version=6.2.0
 export soversion=6
 
 show_help()
@@ -93,7 +93,7 @@ build_config()
 
 		case $targetos in
 		Darwin)
-		echo "CFLAGS+=-fPIC -D__DARWIN__ `sdl-config --cflags`"
+                echo "CFLAGS+=-fPIC `sdl-config --cflags`"
 		echo "SHFLAGS=-dynamiclib"
 		echo "LDFLAGS+=`sdl-config --libs`"
 		;;
@@ -129,6 +129,13 @@ build_config()
 		echo "LIBDL=-ldl"
 		echo "RDYNAMIC="
 		echo "LDFLAGS+=-Wl,--no-undefined -Wl,--as-needed"
+		# If the host system is MinGW running on Windows, then cause make to
+		# treat all .c files as C and not use CXX. mingw32-make is case
+		# insensitive, and .C is considered C++.
+		if uname -s | grep -iq mingw ; then
+			echo "%.o: %.c"
+			printf "\t\$(CC) -c \$(CFLAGS) \$(CPPFLAGS) -o \$@ \$<\n"
+		fi
 		;;		
 		*)
 		;;
@@ -262,7 +269,7 @@ case $targetos in
 	Linux|FreeBSD|NetBSD)
 	LIBSUF=".so"
 	;;
-	MINGW32_NT-*|MinGW|mingw)
+	MINGW??_NT-*|MinGW|mingw)
 	targetos="MinGW"
 	LIBSUF=".dll"
 	;;

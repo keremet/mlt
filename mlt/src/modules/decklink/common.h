@@ -20,13 +20,13 @@
 #ifndef DECKLINK_COMMON_H
 #define DECKLINK_COMMON_H
 
-#ifdef WIN32
+#ifdef _WIN32
 #	include <objbase.h>
 #	include "DeckLinkAPI_h.h"
 	typedef BSTR DLString;
 #else
 #	include "DeckLinkAPI.h"
-#	ifdef __DARWIN__
+#	ifdef __APPLE__
 		typedef CFStringRef DLString;
 #	else
 		typedef const char* DLString;

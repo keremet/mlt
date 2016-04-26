@@ -3,7 +3,7 @@
  * \brief Property class definition
  * \see mlt_property_s
  *
- * Copyright (C) 2003-2014 Meltytech, LLC
+ * Copyright (C) 2003-2015 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -278,7 +278,7 @@ static int time_clock_to_frames( mlt_property self, const char *s, double fps, l
 	s = copy;
 	pos = strrchr( s, ':' );
 
-#if !defined(__GLIBC__) && !defined(__DARWIN__)
+#if !defined(__GLIBC__) && !defined(__APPLE__)
 	char *orig_localename = NULL;
 	if ( locale )
 	{
@@ -294,7 +294,7 @@ static int time_clock_to_frames( mlt_property self, const char *s, double fps, l
 #endif
 
 	if ( pos ) {
-#if defined(__GLIBC__) || defined(__DARWIN__)
+#if defined(__GLIBC__) || defined(__APPLE__)
 		if ( locale )
 			seconds = strtod_l( pos + 1, NULL, locale );
 		else
@@ -312,7 +312,7 @@ static int time_clock_to_frames( mlt_property self, const char *s, double fps, l
 		}
 	}
 	else {
-#if defined(__GLIBC__) || defined(__DARWIN__)
+#if defined(__GLIBC__) || defined(__APPLE__)
 		if ( locale )
 			seconds = strtod_l( s, NULL, locale );
 		else
@@ -320,7 +320,7 @@ static int time_clock_to_frames( mlt_property self, const char *s, double fps, l
 			seconds = strtod( s, NULL );
 	}
 
-#if !defined(__GLIBC__) && !defined(__DARWIN__)
+#if !defined(__GLIBC__) && !defined(__APPLE__)
 	if ( locale ) {
 		// Restore the current locale
 		setlocale( LC_NUMERIC, orig_localename );
@@ -489,7 +489,7 @@ static double mlt_property_atof( mlt_property self, double fps, locale_t locale 
 		char *end = NULL;
 		double result;
 
-#if defined(__GLIBC__) || defined(__DARWIN__)
+#if defined(__GLIBC__) || defined(__APPLE__)
 		if ( locale )
 			result = strtod_l( value, &end, locale );
 		else
@@ -511,7 +511,7 @@ static double mlt_property_atof( mlt_property self, double fps, locale_t locale 
 		if ( end && end[0] == '%' )
 			result /= 100.0;
 
-#if !defined(__GLIBC__) && !defined(__DARWIN__)
+#if !defined(__GLIBC__) && !defined(__APPLE__)
 		if ( locale ) {
 			// Restore the current locale
 			setlocale( LC_NUMERIC, orig_localename );
@@ -695,7 +695,7 @@ char *mlt_property_get_string_l( mlt_property self, locale_t locale )
 	{
 		// TODO: when glibc gets sprintf_l, start using it! For now, hack on setlocale.
 		// Save the current locale
-#if defined(__DARWIN__)
+#if defined(__APPLE__)
 		const char *localename = querylocale( LC_NUMERIC, locale );
 #elif defined(__GLIBC__)
 		const char *localename = locale->__names[ LC_NUMERIC ];
@@ -846,30 +846,30 @@ static void time_smpte_from_frames( int frames, double fps, char *s, int drop )
 {
 	int hours, mins, secs;
 	char frame_sep = ':';
+	int temp_frames;
 
 	if ( fps == 30000.0/1001.0 )
 	{
 		fps = 30.0;
 		if ( drop )
 		{
-			int i, max_frames = frames;
-			for ( i = 1800; i <= max_frames; i += 1800 )
+			int i;
+			for ( i = 1800; i <= frames; i += 1800 )
 			{
 				if ( i % 18000 )
-				{
-					max_frames += 2;
 					frames += 2;
-				}
 			}
 			frame_sep = ';';
 		}
 	}
 	hours = frames / ( fps * 3600 );
-	frames -= hours * ( fps * 3600 );
-	mins = frames / ( fps * 60 );
-	frames -= mins * ( fps * 60 );
-	secs = frames / fps;
-	frames -= secs * fps;
+	temp_frames = frames - hours * 3600 * fps;
+
+	mins = temp_frames / ( fps * 60 );
+	temp_frames = frames - ( hours * 3600 + mins * 60 ) * fps;
+
+	secs = temp_frames / fps;
+	frames -= lrint( ( hours * 3600 + mins * 60 + secs ) * fps );
 
 	sprintf( s, "%02d:%02d:%02d%c%0*d", hours, mins, secs, frame_sep,
 			 ( fps > 999? 4 : fps > 99? 3 : 2 ), frames );
@@ -887,11 +887,12 @@ static void time_clock_from_frames( int frames, double fps, char *s )
 {
 	int hours, mins;
 	double secs;
+	int temp_frames;
 
 	hours = frames / ( fps * 3600 );
-	frames -= hours * ( fps * 3600 );
-	mins = frames / ( fps * 60 );
-	frames -= mins * ( fps * 60 );
+	temp_frames = frames - hours * 3600 * fps;
+	mins = temp_frames / ( fps * 60 );
+	frames -= lrint( ( hours * 3600 + mins * 60 ) * fps );
 	secs = (double) frames / fps;
 
 	sprintf( s, "%02d:%02d:%06.3f", hours, mins, secs );
@@ -928,7 +929,7 @@ char *mlt_property_get_time( mlt_property self, mlt_time_format format, double f
 	{
 		// TODO: when glibc gets sprintf_l, start using it! For now, hack on setlocale.
 		// Save the current locale
-#if defined(__DARWIN__)
+#if defined(__APPLE__)
 		const char *localename = querylocale( LC_NUMERIC, locale );
 #elif defined(__GLIBC__)
 		const char *localename = locale->__names[ LC_NUMERIC ];
@@ -1023,7 +1024,7 @@ static int is_property_numeric( mlt_property self, locale_t locale )
 		double temp;
 		char *p = NULL;
 		
-#if defined(__GLIBC__) || defined(__DARWIN__)
+#if defined(__GLIBC__) || defined(__APPLE__)
 		if ( locale )
 			temp = strtod_l( self->prop_string, &p, locale );
 		else
@@ -1043,7 +1044,7 @@ static int is_property_numeric( mlt_property self, locale_t locale )
 
 		temp = strtod( self->prop_string, &p );
 
-#if !defined(__GLIBC__) && !defined(__DARWIN__)
+#if !defined(__GLIBC__) && !defined(__APPLE__)
 		if ( locale ) {
 			// Restore the current locale
 			setlocale( LC_NUMERIC, orig_localename );
@@ -1527,7 +1528,7 @@ mlt_rect mlt_property_get_rect( mlt_property self, locale_t locale )
 		char *p = NULL;
 		int count = 0;
 
-#if !defined(__GLIBC__) && !defined(__DARWIN__)
+#if !defined(__GLIBC__) && !defined(__APPLE__)
 		char *orig_localename = NULL;
 		if ( locale ) {
 			// Protect damaging the global locale from a temporary locale on another thread.
@@ -1544,7 +1545,7 @@ mlt_rect mlt_property_get_rect( mlt_property self, locale_t locale )
 		while ( *value )
 		{
 			double temp;
-#if defined(__GLIBC__) || defined(__DARWIN__)
+#if defined(__GLIBC__) || defined(__APPLE__)
 			if ( locale )
 				temp = strtod_l( value, &p, locale );
             else
@@ -1579,7 +1580,7 @@ mlt_rect mlt_property_get_rect( mlt_property self, locale_t locale )
 			count ++;
 		}
 
-#if !defined(__GLIBC__) && !defined(__DARWIN__)
+#if !defined(__GLIBC__) && !defined(__APPLE__)
 		if ( locale ) {
 			// Restore the current locale
 			setlocale( LC_NUMERIC, orig_localename );

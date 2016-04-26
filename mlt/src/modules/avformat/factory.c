@@ -1,6 +1,6 @@
 /*
  * factory.c -- the factory method interfaces
- * Copyright (C) 2003-2014 Meltytech, LLC
+ * Copyright (C) 2003-2016 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -30,11 +30,15 @@ extern mlt_filter filter_avdeinterlace_init( void *arg );
 extern mlt_filter filter_avresample_init( char *arg );
 extern mlt_filter filter_swscale_init( mlt_profile profile, char *arg );
 extern mlt_producer producer_avformat_init( mlt_profile profile, const char *service, char *file );
+extern mlt_filter filter_avfilter_init( mlt_profile, mlt_service_type, const char*, char* );
 
 // ffmpeg Header files
 #include <libavformat/avformat.h>
 #ifdef AVDEVICE
 #include <libavdevice/avdevice.h>
+#endif
+#ifdef AVFILTER
+#include <libavfilter/avfilter.h>
 #endif
 #include <libavutil/opt.h>
 
@@ -44,32 +48,32 @@ static int avformat_initialised = 0;
 
 static int avformat_lockmgr(void **mutex, enum AVLockOp op)
 {
-   pthread_mutex_t** pmutex = (pthread_mutex_t**) mutex;
+	pthread_mutex_t** pmutex = (pthread_mutex_t**) mutex;
 
-   switch (op)
-   {
-   case AV_LOCK_CREATE:
-      *pmutex = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
-       if (!*pmutex) return -1;
-       pthread_mutex_init(*pmutex, NULL);
-       break;
-   case AV_LOCK_OBTAIN:
-       if (!*pmutex) return -1;
-       pthread_mutex_lock(*pmutex);
-       break;
-   case AV_LOCK_RELEASE:
-       if (!*pmutex) return -1;
-       pthread_mutex_unlock(*pmutex);
-       break;
-   case AV_LOCK_DESTROY:
-       if (!*pmutex) return -1;
-       pthread_mutex_destroy(*pmutex);
-       free(*pmutex);
-       *pmutex = NULL;
-       break;
-   }
+	switch (op)
+	{
+	case AV_LOCK_CREATE:
+		*pmutex = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
+		if (!*pmutex) return -1;
+		pthread_mutex_init(*pmutex, NULL);
+		break;
+	case AV_LOCK_OBTAIN:
+		if (!*pmutex) return -1;
+		pthread_mutex_lock(*pmutex);
+		break;
+	case AV_LOCK_RELEASE:
+		if (!*pmutex) return -1;
+		pthread_mutex_unlock(*pmutex);
+		break;
+	case AV_LOCK_DESTROY:
+		if (!*pmutex) return -1;
+		pthread_mutex_destroy(*pmutex);
+		free(*pmutex);
+		*pmutex = NULL;
+		break;
+	}
 
-   return 0;
+	return 0;
 }
 
 static void unregister_lockmgr( void *p )
@@ -88,6 +92,9 @@ static void avformat_init( )
 		av_register_all( );
 #ifdef AVDEVICE
 		avdevice_register_all();
+#endif
+#ifdef AVFILTER
+		avfilter_register_all();
 #endif
 		avformat_network_init();
 		av_log_set_level( mlt_log_get_level() );
@@ -128,7 +135,7 @@ static void *create_service( mlt_profile profile, mlt_service_type type, const c
 	return NULL;
 }
 
-static void add_parameters( mlt_properties params, void *object, int req_flags, const char *unit, const char *subclass )
+static void add_parameters( mlt_properties params, void *object, int req_flags, const char *unit, const char *subclass, const char *id_prefix )
 {
 	const AVOption *opt = NULL;
 
@@ -137,7 +144,7 @@ static void add_parameters( mlt_properties params, void *object, int req_flags, 
 	{
 		// If matches flags and not a binary option (not supported by Mlt)
 		if ( !( opt->flags & req_flags ) || ( opt->type == AV_OPT_TYPE_BINARY ) )
-            continue;
+			continue;
 
 		// Ignore constants (keyword values)
 		if ( !unit && opt->type == AV_OPT_TYPE_CONST )
@@ -166,7 +173,16 @@ static void add_parameters( mlt_properties params, void *object, int req_flags, 
 		mlt_properties_set_data( params, key, p, 0, (mlt_destructor) mlt_properties_close, NULL );
 
 		// Add the parameter metadata for this AVOption.
-		mlt_properties_set( p, "identifier", opt->name );
+		if ( id_prefix )
+		{
+			char id[200];
+			snprintf( id, sizeof(id), "%s%s", id_prefix, opt->name );
+			mlt_properties_set( p, "identifier", id );
+		}
+		else
+		{
+			mlt_properties_set( p, "identifier", opt->name );
+		}
 		if ( opt->help )
 		{
 			if ( subclass )
@@ -183,7 +199,7 @@ static void add_parameters( mlt_properties params, void *object, int req_flags, 
 				mlt_properties_set( p, "description", opt->help );
 		}
 
-        switch ( opt->type )
+		switch ( opt->type )
 		{
 		case AV_OPT_TYPE_FLAGS:
 			mlt_properties_set( p, "type", "string" );
@@ -232,25 +248,27 @@ static void add_parameters( mlt_properties params, void *object, int req_flags, 
 			mlt_properties_set_double( p, "default", opt->default_val.dbl );
 			break;
 		case AV_OPT_TYPE_STRING:
+			mlt_properties_set( p, "type", "string" );
 			if ( opt->default_val.str ) {
 				size_t len = strlen( opt->default_val.str ) + 3;
 				char* quoted = malloc( len );
 				snprintf( quoted, len, "'%s'", opt->default_val.str );
-				mlt_properties_set( p, "type", "string" );
 				mlt_properties_set( p, "default", quoted );
 				free( quoted );
 			}
 			break;
 		case AV_OPT_TYPE_RATIONAL:
 			mlt_properties_set( p, "type", "string" );
-			mlt_properties_set( p, "format", "numerator:denominator" );
+			mlt_properties_set( p, "format", "numerator/denominator" );
 			break;
 		case AV_OPT_TYPE_CONST:
-		default:
 			mlt_properties_set( p, "type", "integer" );
 			mlt_properties_set( p, "format", "constant" );
 			break;
-        }
+		default:
+			mlt_properties_set( p, "type", "string" );
+			break;
+		}
 		// If the option belongs to a group (unit) and is not a constant (keyword value)
 		if ( opt->unit && opt->type != AV_OPT_TYPE_CONST )
 		{
@@ -258,7 +276,7 @@ static void add_parameters( mlt_properties params, void *object, int req_flags, 
 			mlt_properties values = mlt_properties_new();
 
 			// Recurse to add constants in this group to the 'values' sequence.
-			add_parameters( values, object, req_flags, opt->unit, NULL );
+			add_parameters( values, object, req_flags, opt->unit, NULL, NULL );
 			if ( mlt_properties_count( values ) )
 				mlt_properties_set_data( p, "values", values, 0, (mlt_destructor) mlt_properties_close, NULL );
 			else
@@ -302,34 +320,81 @@ static mlt_properties avformat_metadata( mlt_service_type type, const char *id, 
 		AVCodecContext *avcodec = avcodec_alloc_context3( NULL );
 		int flags = ( type == consumer_type )? AV_OPT_FLAG_ENCODING_PARAM : AV_OPT_FLAG_DECODING_PARAM;
 
-		add_parameters( params, avformat, flags, NULL, NULL );
+		add_parameters( params, avformat, flags, NULL, NULL, NULL );
 		avformat_init();
 		if ( type == producer_type )
 		{
 			AVInputFormat *f = NULL;
 			while ( ( f = av_iformat_next( f ) ) )
 				if ( f->priv_class )
-					add_parameters( params, &f->priv_class, flags, NULL, f->name );
+					add_parameters( params, &f->priv_class, flags, NULL, f->name, NULL );
 		}
 		else
 		{
 			AVOutputFormat *f = NULL;
 			while ( ( f = av_oformat_next( f ) ) )
 				if ( f->priv_class )
-					add_parameters( params, &f->priv_class, flags, NULL, f->name );
+					add_parameters( params, &f->priv_class, flags, NULL, f->name, NULL );
 		}
 
-		add_parameters( params, avcodec, flags, NULL, NULL );
+		add_parameters( params, avcodec, flags, NULL, NULL, NULL );
 		AVCodec *c = NULL;
 		while ( ( c = av_codec_next( c ) ) )
 			if ( c->priv_class )
-				add_parameters( params, &c->priv_class, flags, NULL, c->name );
+				add_parameters( params, &c->priv_class, flags, NULL, c->name, NULL );
 
 		av_free( avformat );
 		av_free( avcodec );
 	}
 	return result;
 }
+
+#ifdef AVFILTER
+static mlt_properties avfilter_metadata( mlt_service_type type, const char *id, void *name )
+{
+	AVFilter *f = (AVFilter*)avfilter_get_by_name ( name );
+	if( !f ) return NULL;
+
+	mlt_properties metadata = mlt_properties_new();
+	mlt_properties_set_double ( metadata, "schema_version" , 0.3 );
+	mlt_properties_set ( metadata, "title" , f->name );
+	mlt_properties_set ( metadata, "version", LIBAVFILTER_IDENT );
+	mlt_properties_set ( metadata, "identifier" , id );
+	mlt_properties_set ( metadata, "description" , f->description );
+	mlt_properties_set ( metadata, "creator" , "libavfilter maintainers" );
+	mlt_properties_set ( metadata, "type" , "filter" );
+
+	mlt_properties tags = mlt_properties_new ( );
+	mlt_properties_set_data ( metadata , "tags" , tags , 0 , ( mlt_destructor )mlt_properties_close, NULL );
+	if( avfilter_pad_get_type( f->inputs, 0 ) == AVMEDIA_TYPE_VIDEO ) {
+		mlt_properties_set ( tags , "0" , "Video" );
+	}
+	if( avfilter_pad_get_type( f->inputs, 0 ) == AVMEDIA_TYPE_AUDIO ) {
+		mlt_properties_set ( tags , "0" , "Audio" );
+	}
+
+	if ( f->priv_class ) {
+		mlt_properties params = mlt_properties_new ( );
+		mlt_properties_set_data( metadata , "parameters" , params , 0 , ( mlt_destructor )mlt_properties_close, NULL );
+		add_parameters( params, &f->priv_class, AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_AUDIO_PARAM | AV_OPT_FLAG_FILTERING_PARAM, NULL, NULL, "av." );
+
+		// Add the parameters common to all avfilters.
+		if ( f->flags & AVFILTER_FLAG_SLICE_THREADS ) {
+			mlt_properties p = mlt_properties_new();
+			char key[20];
+			snprintf( key, 20, "%d", mlt_properties_count( params ) );
+			mlt_properties_set_data( params, key, p, 0, (mlt_destructor) mlt_properties_close, NULL );
+			mlt_properties_set( p, "identifier", "av.threads" );
+			mlt_properties_set( p, "description", "Maximum number of threads" );
+			mlt_properties_set( p, "type", "integer" );
+			mlt_properties_set_int( p, "minimum", 0 );
+			mlt_properties_set_int( p, "default", 0 );
+		}
+	}
+
+	return metadata;
+}
+#endif
 
 MLT_REPOSITORY
 {
@@ -348,5 +413,27 @@ MLT_REPOSITORY
 	MLT_REGISTER( filter_type, "avresample", create_service );
 #endif
 	MLT_REGISTER( filter_type, "swscale", create_service );
+
+#ifdef AVFILTER
+	char dirname[PATH_MAX];
+	snprintf( dirname, PATH_MAX, "%s/avformat/blacklist.txt", mlt_environment( "MLT_DATA" ) );
+	mlt_properties blacklist = mlt_properties_load( dirname );
+	avfilter_register_all();
+	AVFilter *f = NULL;
+	while ( ( f = (AVFilter*)avfilter_next( f ) ) ) {
+		// Support filters that have one input and one output of the same type.
+		if ( avfilter_pad_count( f->inputs ) == 1 &&
+			avfilter_pad_count( f->outputs ) == 1 &&
+			avfilter_pad_get_type( f->inputs, 0 ) == avfilter_pad_get_type( f->outputs, 0 ) &&
+			!mlt_properties_get( blacklist, f->name ) )
+		{
+			char service_name[1024]="avfilter.";
+			strncat( service_name, f->name, sizeof( service_name ) - strlen( service_name ) -1 );
+			MLT_REGISTER( filter_type, service_name, filter_avfilter_init );
+			MLT_REGISTER_METADATA( filter_type, service_name, avfilter_metadata, (void*)f->name );
+		}
+	}
+	mlt_properties_close( blacklist );
+#endif // AVFILTER
 #endif
 }

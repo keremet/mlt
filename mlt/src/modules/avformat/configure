@@ -1,18 +1,12 @@
 #!/bin/sh
 
-# Determine whether to recommend/use the HEAD revision of FFmpeg (unreleased)
-# or a specific revision based upon whether the last digit of our version
-# is even or odd. An odd MLT version number always represents unreleased.
-ffmpeg_ver="1.2"
-libav_ver="0.8.7"
-micro_version=$(echo $version | cut -d . -f 3)
-odd_version=$(($micro_version % 2))
-[ "$odd_version" -eq "1" ] && ffmpeg_ver="HEAD" && libav_ver="HEAD"
-
 if [ "$help" = "1" ]
 then
 	cat << EOF
 FFmpeg/avformat options:
+
+  This module requires at least FFmpeg v1.1 or Libav 9.
+  Features using libavfilter requires at least FFmpeg v2.3 (not Libav).
 
   --avformat-shared=path  - Link against a shared installation of libavformat (default)
   --avformat-static=path  - Link against a static build of libavformat
@@ -21,9 +15,7 @@ FFmpeg/avformat options:
   --avformat-no-codecs    - Disable the producer and consumer to avoid the codecs
   --avformat-no-filters   - Disable the filters to make a codecs+muxers-only plugin
   --avformat-no-devices   - Disable support for libavdevice
-  --avformat-vdpau        - Enable support for NVIDIA VDPAU
-
-  NOTE: The recommended version of FFmpeg is $ffmpeg_ver or libav $libav_ver.
+  --avformat-no-avfilter  - Disable support for libavfilter
 
 EOF
 
@@ -60,6 +52,7 @@ else
 	export filters=true
 	export devices=true
 	export vdpau=false
+	export avfilter=true
 	pkg-config x11 > /dev/null 2>&1
 	export x11=$?
 
@@ -73,6 +66,7 @@ else
 			--avformat-no-codecs )	codecs=false ;;
 			--avformat-no-filters )	filters=false ;;
 			--avformat-no-devices )	devices=false ;;
+			--avformat-no-avfilter ) avfilter=false ;;
 			--avformat-no-vdpau )   vdpau=false ;;
 			--avformat-vdpau )      vdpau=true ;;
 		esac
@@ -93,6 +87,10 @@ else
 			if [ "$devices" = "true" ]
 			then
 				echo "LDFLAGS+=-L$static_ffmpeg/libavdevice" >> config.mak
+			fi
+			if [ "$avfilter" = "true" ]
+			then
+				echo "LDFLAGS+=-L$static_ffmpeg/libavfilter" >> config.mak
 			fi
 			echo "LDFLAGS+=-Wl,-Bsymbolic" >> config.mak
 			extra_libs="$extra_libs -lm -lz -lbz2"
@@ -123,14 +121,14 @@ else
 				echo "CFLAGS+=-DAVDATADIR=\\\"${shared_ffmpeg}/share/ffmpeg${avformat_suffix}/\\\"" >> config.mak
 			;;
 		esac
-                echo "CFLAGS+=$(pkg-config --cflags libavcodec${avformat_suffix})" >> config.mak
-                echo "LDFLAGS+=$(pkg-config --libs libavcodec${avformat_suffix})" >> config.mak
-                echo "CFLAGS+=$(pkg-config --cflags libavutil${avformat_suffix})" >> config.mak
-                echo "LDFLAGS+=$(pkg-config --libs libavutil${avformat_suffix})" >> config.mak
-                echo "CFLAGS+=$(pkg-config --cflags libavformat${avformat_suffix})" >> config.mak
-                echo "LDFLAGS+=$(pkg-config --libs libavformat${avformat_suffix})" >> config.mak
+		echo "CFLAGS+=$(pkg-config --cflags libavcodec${avformat_suffix})" >> config.mak
+		echo "LDFLAGS+=$(pkg-config --libs libavcodec${avformat_suffix})" >> config.mak
+		echo "CFLAGS+=$(pkg-config --cflags libavutil${avformat_suffix})" >> config.mak
+		echo "LDFLAGS+=$(pkg-config --libs libavutil${avformat_suffix})" >> config.mak
+		echo "CFLAGS+=$(pkg-config --cflags libavformat${avformat_suffix})" >> config.mak
+		echo "LDFLAGS+=$(pkg-config --libs libavformat${avformat_suffix})" >> config.mak
 		echo "CFLAGS+=$(pkg-config --cflags libswscale${avformat_suffix})" >> config.mak
-                echo "LDFLAGS+=$(pkg-config --libs libswscale${avformat_suffix})" >> config.mak
+		echo "LDFLAGS+=$(pkg-config --libs libswscale${avformat_suffix})" >> config.mak
 		if [ "$devices" = "true" ]
 		then
 			if ! $(pkg-config libavdevice${avformat_suffix}); then
@@ -139,9 +137,19 @@ else
 				exit 0
 			fi
 			echo "CFLAGS+=$(pkg-config --cflags libavdevice${avformat_suffix})" >> config.mak
-                        echo "LDFLAGS+=$(pkg-config --libs libavdevice${avformat_suffix})" >> config.mak
+			echo "LDFLAGS+=$(pkg-config --libs libavdevice${avformat_suffix})" >> config.mak
 		fi
-		
+		if [ "$avfilter" = "true" ]
+		then
+			if $(pkg-config "libavfilter${avformat_suffix} >= 4.11.100") &&
+				$(pkg-config --list-all | grep libavfilter | grep -q FFmpeg); then
+				echo "CFLAGS+=$(pkg-config --cflags libavfilter${avformat_suffix})" >> config.mak
+				echo "LDFLAGS+=$(pkg-config --libs libavfilter${avformat_suffix})" >> config.mak
+			else
+				echo " - FFmpeg libavfilter >= 4.11.100 not found, disabling some features"
+				avfilter=false
+			fi
+		fi
 		if [ "$vdpau" = "true" ]
 		then
 			printf "#include <libavcodec/vdpau.h>\n int main(){ VdpBitstreamBuffer test; test.struct_version; return 0;}" | $CC $(pkg-config --cflags libavformat${avformat_suffix}) -I"$shared_ffmpeg/include" $CFLAGS -c -x c -  >/dev/null 2>&1
@@ -154,9 +162,10 @@ else
 	fi
 
 	echo "EXTRA_LIBS=$extra_libs" >> config.mak
-        [ "$codecs" = "true" ] && echo "CODECS=1" >> config.mak
+	[ "$codecs" = "true" ] && echo "CODECS=1" >> config.mak
 	[ "$filters" = "true" ] && echo "FILTERS=1" >> config.mak
 	[ "$devices" = "true" ] && echo "DEVICES=1" >> config.mak
+	[ "$avfilter" = "true" ] && echo "AVFILTER=1" >> config.mak
 	exit 0
 
 fi

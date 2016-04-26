@@ -13,6 +13,7 @@ OBJS = factory.o \
 	   producer_loader.o \
 	   producer_melt.o \
 	   producer_noise.o \
+	   producer_timewarp.o \
 	   producer_tone.o \
 	   filter_audiochannels.o \
 	   filter_audiomap.o \
@@ -64,19 +65,19 @@ endif
 all: 	$(TARGET)
 
 $(TARGET): $(OBJS) $(ASM_OBJS)
-		$(CC) $(SHFLAGS) -o $@ $(OBJS) $(ASM_OBJS) $(LDFLAGS)
+	$(CC) $(SHFLAGS) -o $@ $(OBJS) $(ASM_OBJS) $(LDFLAGS)
 
 composite_line_yuv_mmx.o: composite_line_yuv_mmx.S
 	$(CC) -o $@ -c composite_line_yuv_mmx.S
 
 depend:	$(SRCS)
-		$(CC) -MM $(CFLAGS) $^ 1>.depend
+	$(CC) -MM $(CFLAGS) $^ 1>.depend
 
 distclean:	clean
-		rm -f .depend
+	rm -f .depend
 
 clean:	
-		rm -f $(OBJS) $(ASM_OBJS) $(TARGET) 
+	rm -f $(OBJS) $(ASM_OBJS) $(TARGET)
 
 install: all
 	install -m 755 $(TARGET) "$(DESTDIR)$(moduledir)"

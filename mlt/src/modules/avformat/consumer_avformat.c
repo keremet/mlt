@@ -1,6 +1,6 @@
 /*
  * consumer_avformat.c -- an encoder based on avformat
- * Copyright (C) 2003-2014 Meltytech, LLC
+ * Copyright (C) 2003-2015 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -58,7 +58,7 @@
 #define MAX_AUDIO_STREAMS (8)
 #define AUDIO_ENCODE_BUFFER_SIZE (48000 * 2 * MAX_AUDIO_STREAMS)
 #define AUDIO_BUFFER_SIZE (1024 * 42)
-#define VIDEO_BUFFER_SIZE (2048 * 2048)
+#define VIDEO_BUFFER_SIZE (8192 * 8192)
 
 //
 // This structure should be extended and made globally available in mlt
@@ -439,18 +439,18 @@ static void apply_properties( void *obj, mlt_properties properties, int flags )
 	}
 }
 
-static enum PixelFormat pick_pix_fmt( mlt_image_format img_fmt )
+static enum AVPixelFormat pick_pix_fmt( mlt_image_format img_fmt )
 {
 	switch ( img_fmt )
 	{
 	case mlt_image_rgb24:
-		return PIX_FMT_RGB24;
+		return AV_PIX_FMT_RGB24;
 	case mlt_image_rgb24a:
-		return PIX_FMT_RGBA;
+		return AV_PIX_FMT_RGBA;
 	case mlt_image_yuv420p:
-		return PIX_FMT_YUV420P;
+		return AV_PIX_FMT_YUV420P;
 	default:
-		return PIX_FMT_YUYV422;
+		return AV_PIX_FMT_YUYV422;
 	}
 }
 
@@ -798,7 +798,7 @@ static AVStream *add_video_stream( mlt_consumer consumer, AVFormatContext *oc, A
 		st->time_base = c->time_base;
 
 		// Default to the codec's first pix_fmt if possible.
-		c->pix_fmt = pix_fmt? av_get_pix_fmt( pix_fmt ) : codec? codec->pix_fmts[0] : PIX_FMT_YUV420P;
+		c->pix_fmt = pix_fmt? av_get_pix_fmt( pix_fmt ) : codec? codec->pix_fmts[0] : AV_PIX_FMT_YUV420P;
 		
 		switch ( colorspace )
 		{
@@ -1032,7 +1032,7 @@ static int open_video( mlt_properties properties, AVFormatContext *oc, AVStream 
 
 	if( codec && codec->pix_fmts )
 	{
-		const enum PixelFormat *p = codec->pix_fmts;
+		const enum AVPixelFormat *p = codec->pix_fmts;
 		for( ; *p!=-1; p++ )
 		{
 			if( *p == video_enc->pix_fmt )
@@ -1776,11 +1776,12 @@ static void *consumer_thread( void *arg )
 						// Convert the mlt frame to an AVPicture
 						if ( img_fmt == mlt_image_yuv420p )
 						{
-							memcpy( video_avframe->data[0], q, video_avframe->linesize[0] );
+							stride = width * height;
+							memcpy( video_avframe->data[0], q, video_avframe->linesize[0] * height );
 							q += stride;
-							memcpy( video_avframe->data[1], q, video_avframe->linesize[1] );
+							memcpy( video_avframe->data[1], q, video_avframe->linesize[1] * height / 2 );
 							q += stride / 4;
-							memcpy( video_avframe->data[2], q, video_avframe->linesize[2] );
+							memcpy( video_avframe->data[2], q, video_avframe->linesize[2] * height / 2 );
 						}
 						else for ( i = 0; i < height; i ++ )
 						{
@@ -1791,12 +1792,6 @@ static void *consumer_thread( void *arg )
 
 						// Do the colour space conversion
 						int flags = SWS_BICUBIC;
-#ifdef USE_MMX
-						flags |= SWS_CPU_CAPS_MMX;
-#endif
-#ifdef USE_SSE
-						flags |= SWS_CPU_CAPS_MMX2;
-#endif
 						struct SwsContext *context = sws_getContext( width, height, pick_pix_fmt( img_fmt ),
 							width, height, c->pix_fmt, flags, NULL, NULL, NULL);
 						sws_scale( context, (const uint8_t* const*) video_avframe->data, video_avframe->linesize, 0, height,
@@ -1808,9 +1803,9 @@ static void *consumer_thread( void *arg )
 						// Apply the alpha if applicable
 						if ( !mlt_properties_get( properties, "mlt_image_format" ) ||
 						     strcmp( mlt_properties_get( properties, "mlt_image_format" ), "rgb24a" ) )
-						if ( c->pix_fmt == PIX_FMT_RGBA ||
-						     c->pix_fmt == PIX_FMT_ARGB ||
-						     c->pix_fmt == PIX_FMT_BGRA )
+						if ( c->pix_fmt == AV_PIX_FMT_RGBA ||
+						     c->pix_fmt == AV_PIX_FMT_ARGB ||
+						     c->pix_fmt == AV_PIX_FMT_BGRA )
 						{
 							uint8_t *alpha = mlt_frame_get_alpha_mask( frame );
 							register int n;
@@ -1844,12 +1839,10 @@ static void *consumer_thread( void *arg )
 						av_init_packet(&pkt);
 
 						// Set frame interlace hints
-						c->coded_frame->interlaced_frame = !mlt_properties_get_int( frame_properties, "progressive" );
-						c->coded_frame->top_field_first = mlt_properties_get_int( frame_properties, "top_field_first" );
 						if ( mlt_properties_get_int( frame_properties, "progressive" ) )
 							c->field_order = AV_FIELD_PROGRESSIVE;
 						else
-							c->field_order = (mlt_properties_get_int( frame_properties, "top_field_first" )) ? AV_FIELD_TT : AV_FIELD_BB;
+							c->field_order = (mlt_properties_get_int( frame_properties, "top_field_first" )) ? AV_FIELD_TB : AV_FIELD_BT;
 						pkt.flags |= AV_PKT_FLAG_KEY;
 						pkt.stream_index = video_st->index;
 						pkt.data = (uint8_t *)converted_avframe;

@@ -32,10 +32,10 @@
 #include <math.h>
 
 
-#if defined(WIN32)
+#if defined(_WIN32)
 #define LIBSUF ".dll"
 #define FREI0R_PLUGIN_PATH "\\lib\\frei0r-1"
-#elif defined(__DARWIN__) && defined(RELOCATABLE)
+#elif defined(__APPLE__) && defined(RELOCATABLE)
 #define LIBSUF ".so"
 #define FREI0R_PLUGIN_PATH "/lib/frei0r-1"
 #else
@@ -44,8 +44,6 @@
 #endif
 
 #define GET_FREI0R_PATH (getenv("FREI0R_PATH") ? getenv("FREI0R_PATH") : getenv("MLT_FREI0R_PLUGIN_PATH") ? getenv("MLT_FREI0R_PLUGIN_PATH") : FREI0R_PLUGIN_PATH)
-
-#define CLAMP( x, min, max ) ((x) < (min) ? (min) : (x) > (max) ? (max) : (x))
 
 extern mlt_filter filter_frei0r_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
 extern mlt_frame filter_process( mlt_filter this, mlt_frame frame );
@@ -57,12 +55,12 @@ extern mlt_frame transition_process( mlt_transition transition, mlt_frame a_fram
 
 static char* get_frei0r_path()
 {
-#ifdef WIN32
+#ifdef _WIN32
 	char *dirname = malloc( strlen( mlt_environment( "MLT_APPDIR" ) ) + strlen( FREI0R_PLUGIN_PATH ) + 1 );
 	strcpy( dirname, mlt_environment( "MLT_APPDIR" ) );
 	strcat( dirname, FREI0R_PLUGIN_PATH );
 	return dirname;
-#elif defined(__DARWIN__) && defined(RELOCATABLE)
+#elif defined(__APPLE__) && defined(RELOCATABLE)
 	char *dirname = malloc( strlen( mlt_environment( "MLT_APPDIR" ) ) + strlen( FREI0R_PLUGIN_PATH ) + 1 );
 	strcpy( dirname, mlt_environment( "MLT_APPDIR" ) );
 	strcat( dirname, FREI0R_PLUGIN_PATH );
@@ -363,7 +361,7 @@ static void * create_frei0r_item ( mlt_profile profile, mlt_service_type type, c
 		char soname[PATH_MAX];
 		char *myid = strdup( id );
 
-#ifdef WIN32
+#ifdef _WIN32
 		char *firstname = strtok( myid, "." );
 #else
 		char *save_firstptr = NULL;
@@ -371,7 +369,7 @@ static void * create_frei0r_item ( mlt_profile profile, mlt_service_type type, c
 #endif
 		char* directory = mlt_tokeniser_get_string (tokeniser, dircount);
 
-#ifdef WIN32
+#ifdef _WIN32
 		firstname = strtok( NULL, "." );
 #else
 		firstname = strtok_r( NULL, ".", &save_firstptr );
@@ -433,7 +431,7 @@ MLT_REPOSITORY
 		for (i=0; i<mlt_properties_count(direntries);i++){
 			char* name=mlt_properties_get_value(direntries,i);
 			char* shortname=name+strlen(dirname)+1;
-#ifdef WIN32
+#ifdef _WIN32
 			char* firstname = strtok( shortname, "." );
 #else
 			char *save_firstptr = NULL;

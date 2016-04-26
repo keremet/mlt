@@ -30,8 +30,6 @@
 #include <math.h>
 #include <string.h>
 
-#define MIN(a,b) ((a) > (b) ? (b) : (a))
-
 #define ROUNDED_DIV(a,b) (((a)>0 ? (a) + ((b)>>1) : (a) - ((b)>>1))/(b))
 #define ABS(a) ((a) >= 0 ? (a) : (-(a)))
 
@@ -253,6 +251,11 @@ static int attach_boundry_to_frame( mlt_frame frame, uint8_t **image, mlt_image_
 	if (geometry == NULL) {
 		mlt_geometry geom = mlt_geometry_init();
 		char *arg = mlt_properties_get(filter_properties, "geometry");
+
+		// Parse the geometry if we have one
+		mlt_position length = mlt_filter_get_length2( filter, frame );
+		mlt_profile profile = mlt_service_profile( MLT_FILTER_SERVICE( filter ) );
+		mlt_geometry_parse( geom, arg, length, profile->width, profile->height );
 
 		// Initialize with the supplied geometry
 		struct mlt_geometry_item_s item;

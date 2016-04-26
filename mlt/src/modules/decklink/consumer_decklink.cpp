@@ -1,6 +1,6 @@
 /*
- * consumer_decklink.c -- output through Blackmagic Design DeckLink
- * Copyright (C) 2010 Dan Dennedy <dan@dennedy.org>
+ * consumer_decklink.cpp -- output through Blackmagic Design DeckLink
+ * Copyright (C) 2010-2015 Dan Dennedy <dan@dennedy.org>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -45,7 +45,6 @@ private:
 	double                      m_fps;
 	uint64_t                    m_count;
 	int                         m_channels;
-	unsigned                    m_dropped;
 	IDeckLinkMutableVideoFrame* m_decklinkFrame;
 	bool                        m_isAudio;
 	int                         m_isKeyer;
@@ -111,7 +110,7 @@ public:
 	bool open( unsigned card = 0 )
 	{
 		unsigned i = 0;
-#ifdef WIN32
+#ifdef _WIN32
 		IDeckLinkIterator* deckLinkIterator = NULL;
 		HRESULT result =  CoInitialize( NULL );
 		if ( FAILED( result ) )
@@ -162,7 +161,7 @@ public:
 		IDeckLinkAttributes *deckLinkAttributes = 0;
 		if ( m_deckLink->QueryInterface( IID_IDeckLinkAttributes, (void**) &deckLinkAttributes ) == S_OK )
 		{
-#ifdef WIN32
+#ifdef _WIN32
 			BOOL flag = FALSE;
 #else
 			bool flag = false;
@@ -214,7 +213,6 @@ public:
 
 		// Initialize members
 		m_count = 0;
-		m_dropped = 0;
 		m_decklinkFrame = NULL;
 		preroll = preroll < PREROLL_MINIMUM ? PREROLL_MINIMUM : preroll;
 		m_channels = mlt_properties_get_int( properties, "channels" );
@@ -315,7 +313,7 @@ public:
 
 		if ( !mlt_frame_get_audio( frame, (void**) &pcm, &format, &frequency, &m_channels, &samples ) )
 		{
-#ifdef WIN32
+#ifdef _WIN32
 #define DECKLINK_UNSIGNED_FORMAT "%lu"
 			unsigned long written = 0;
 #else
@@ -329,7 +327,7 @@ public:
 				mlt_log_verbose( getConsumer(), "renderAudio: will flush " DECKLINK_UNSIGNED_FORMAT " audiosamples\n", written );
 				m_deckLinkOutput->FlushBufferedAudioSamples();
 			};
-#ifdef WIN32
+#ifdef _WIN32
 			m_deckLinkOutput->ScheduleAudioSamples( pcm, samples, streamTime, frequency, (unsigned long*) &written );
 #else
 			m_deckLinkOutput->ScheduleAudioSamples( pcm, samples, streamTime, frequency, &written );
@@ -477,9 +475,6 @@ public:
 
 			m_deckLinkOutput->ScheduleVideoFrame( m_decklinkFrame, m_count * m_duration, m_duration, m_timescale );
 		}
-
-		if ( !rendered )
-			mlt_log_verbose( getConsumer(), "dropped video frame %u\n", ++m_dropped );
 	}
 
 	HRESULT render( mlt_frame frame )
@@ -549,7 +544,7 @@ public:
 			m_reprio = true;
 		};
 
-#ifdef WIN32
+#ifdef _WIN32
 		unsigned long cnt;
 #else
 		uint32_t cnt;
@@ -686,7 +681,7 @@ static void on_property_changed( void*, mlt_properties properties, const char *n
 	else
 		return;
 
-#ifdef WIN32
+#ifdef _WIN32
 	if ( FAILED( CoInitialize( NULL ) ) )
 		return;
 	if ( FAILED( CoCreateInstance( CLSID_CDeckLinkIterator, NULL, CLSCTX_ALL, IID_IDeckLinkIterator, (void**) &decklinkIterator ) ) )

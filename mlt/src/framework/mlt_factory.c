@@ -31,7 +31,7 @@
 /** the default subdirectory of the datadir for holding presets */
 #define PRESETS_DIR "/presets"
 
-#ifdef WIN32
+#ifdef _WIN32
 #ifdef PREFIX_LIB
 #undef PREFIX_LIB
 #endif
@@ -43,7 +43,7 @@
 #define PREFIX_LIB "\\lib\\mlt"
 /** the default subdirectory of the install prefix for holding module (plugin) data */
 #define PREFIX_DATA "\\share\\mlt"
-#elif defined(__DARWIN__) && defined(RELOCATABLE)
+#elif defined(__APPLE__) && defined(RELOCATABLE)
 #include <mach-o/dyld.h>
 /** the default subdirectory of the libdir for holding modules (plugins) */
 #define PREFIX_LIB "/lib/mlt"
@@ -117,16 +117,16 @@ mlt_repository mlt_factory_init( const char *directory )
 		mlt_properties_set_or_default( global_properties, "MLT_PROFILE", getenv( "MLT_PROFILE" ), "dv_pal" );
 		mlt_properties_set_or_default( global_properties, "MLT_DATA", getenv( "MLT_DATA" ), PREFIX_DATA );
 
-#if defined(WIN32)
+#if defined(_WIN32)
 		char path[1024];
 		DWORD size = sizeof( path );
 		GetModuleFileName( NULL, path, size );
-#elif defined(__DARWIN__)  && defined(RELOCATABLE)
+#elif defined(__APPLE__)  && defined(RELOCATABLE)
 		char path[1024];
 		uint32_t size = sizeof( path );
 		_NSGetExecutablePath( path, &size );
 #endif
-#if defined(WIN32) || (defined(__DARWIN__) && defined(RELOCATABLE))
+#if defined(_WIN32) || (defined(__APPLE__) && defined(RELOCATABLE))
 		char *path2 = strdup( path );
 		char *appdir = dirname( path2 );
 		mlt_properties_set( global_properties, "MLT_APPDIR", appdir );
@@ -137,7 +137,7 @@ mlt_repository mlt_factory_init( const char *directory )
 	// Only initialise once
 	if ( mlt_directory == NULL )
 	{
-#if !defined(WIN32) && !(defined(__DARWIN__) && defined(RELOCATABLE))
+#if !defined(_WIN32) && !(defined(__APPLE__) && defined(RELOCATABLE))
 		// Allow user overrides
 		if ( directory == NULL || !strcmp( directory, "" ) )
 			directory = getenv( "MLT_REPOSITORY" );
@@ -147,7 +147,7 @@ mlt_repository mlt_factory_init( const char *directory )
 			directory = PREFIX_LIB;
 
 		// Store the prefix for later retrieval
-#if defined(WIN32) || (defined(__DARWIN__) && defined(RELOCATABLE))
+#if defined(_WIN32) || (defined(__APPLE__) && defined(RELOCATABLE))
 		char *exedir = mlt_environment( "MLT_APPDIR" );
 		size_t size = strlen( exedir );
 		if ( global_properties && !getenv( "MLT_DATA" ) )
@@ -204,6 +204,16 @@ mlt_repository mlt_factory_init( const char *directory )
 		}
 	}
 
+	return repository;
+}
+
+/** Fetch the repository.
+ *
+ * \return the global repository object
+ */
+
+mlt_repository mlt_factory_repository( )
+{
 	return repository;
 }
 
@@ -427,7 +437,7 @@ void mlt_factory_close( )
 	{
 		mlt_properties_close( event_object );
 		event_object = NULL;
-#if !defined(WIN32)
+#if !defined(_WIN32)
 		// XXX something in here is causing Shotcut/Win32 to not exit completely
 		// under certain conditions: e.g. play a playlist.
 		mlt_properties_close( global_properties );

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Dan Dennedy <dan@dennedy.org>
+ * Copyright (C) 2013-2015 Dan Dennedy <dan@dennedy.org>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -23,7 +23,7 @@
 using namespace Mlt;
 
 extern "C" {
-#define __DARWIN__
+#define __APPLE__
 #include <framework/mlt_property.h>
 #include <framework/mlt_animation.h>
 }
@@ -36,14 +36,14 @@ class TestProperties: public QObject
 
 public:
     TestProperties() {
-#if defined(__linux__) || defined(__DARWIN__)
+#if defined(__linux__) || defined(__APPLE__)
         locale = newlocale( LC_NUMERIC_MASK, "POSIX", NULL );
 #endif
         Factory::init();
     }
 
     ~TestProperties() {
-#if defined(__linux__) || defined(__DARWIN__)
+#if defined(__linux__) || defined(__APPLE__)
         freelocale(locale);
 #endif
     }
@@ -192,6 +192,30 @@ private Q_SLOTS:
         QCOMPARE(p.get_time("key", mlt_time_smpte_df), timeString);
     }
 
+    void SetAndGetTimeCodeNonIntFps()
+    {
+        Profile profile("atsc_720p_2398");
+        Properties p;
+        p.set("_profile", profile.get_profile(), 0);
+        const char *timeString = "11:22:33:04";
+        const int frames = 981894;
+        p.set("key", timeString);
+        QCOMPARE(p.get_int("key"), frames);
+        p.set("key", frames);
+        QCOMPARE(p.get_time("key", mlt_time_smpte_df), timeString);
+    }
+
+    void SetAndGetTimeCodeNonDropFrame()
+    {
+        Profile profile("dv_ntsc");
+        Properties p;
+        p.set("_profile", profile.get_profile(), 0);
+        const char *timeString = "11:22:33:04";
+        const int frames = 1228594;
+        p.set("key", frames);
+        QCOMPARE(p.get_time("key", mlt_time_smpte_ndf), timeString);
+    }
+
     void SetAndGetTimeClock()
     {
         Profile profile;
@@ -201,6 +225,19 @@ private Q_SLOTS:
         p.set("key", timeString);
         QCOMPARE(p.get_int("key"), 1023835);
         p.set("key", 1023835);
+        QCOMPARE(p.get_time("key", mlt_time_clock), timeString);
+    }
+
+    void SetAndGetTimeClockNonIntFps()
+    {
+        Profile profile("dv_ntsc");
+        Properties p;
+        p.set("_profile", profile.get_profile(), 0);
+        const char *timeString = "11:22:33.400";
+        const int frames = 1227375;
+        p.set("key", timeString);
+        QCOMPARE(p.get_int("key"), frames);
+        p.set("key", frames);
         QCOMPARE(p.get_time("key", mlt_time_clock), timeString);
     }
 
