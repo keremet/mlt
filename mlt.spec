@@ -35,7 +35,7 @@ Patch10: libmlt-0.8.2-vdpau.patch
 Patch20: 01-changed-preset-path.diff
 
 BuildRequires: ImageMagick-tools gcc-c++ jackit-devel ladspa_sdk libSDL-devel
-BuildRequires: libSDL_image-devel libX11-devel libavdevice-devel libavformat-devel
+BuildRequires: libSDL_image-devel libX11-devel libavdevice-devel libavformat-devel libavfilter-devel
 BuildRequires: libquicktime-devel libsamplerate-devel libsox-devel libswscale-devel
 BuildRequires: libxml2-devel swig python-devel
 BuildRequires: frei0r-devel libalsa-devel libexif-devel
