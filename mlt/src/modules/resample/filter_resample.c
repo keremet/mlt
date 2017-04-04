@@ -14,7 +14,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software Foundation,
- * Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ * Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
 #include <framework/mlt_filter.h>
@@ -70,7 +70,7 @@ static int resample_get_audio( mlt_frame frame, void **buffer, mlt_audio_format 
 		data.data_out = mlt_properties_get_data( filter_properties, "output_buffer", NULL );
 		data.src_ratio = ( float ) output_rate / ( float ) *frequency;
 		data.input_frames = *samples;
-		data.output_frames = BUFFER_LEN / *channels;
+		data.output_frames = BUFFER_LEN / sizeof(float) / *channels;
 		data.end_of_input = 0;
 
 		SRC_STATE *state = mlt_properties_get_data( filter_properties, "state", NULL );

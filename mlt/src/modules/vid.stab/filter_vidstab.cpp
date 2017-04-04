@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software Foundation,
- * Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ * Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
 extern "C"
@@ -114,12 +114,30 @@ static void init_apply_data( mlt_filter filter, mlt_frame frame, VSPixelFormat v
 	mlt_properties properties = MLT_FILTER_PROPERTIES( filter );
 	vs_data* data = (vs_data*)filter->child;
 	vs_apply* apply_data = (vs_apply*)calloc( 1, sizeof(vs_apply) );
-	char* filename = mlt_properties_get( properties, "results" );
-	memset( apply_data, 0, sizeof( vs_apply ) );
+	char* results = mlt_properties_get( properties, "results" );
+	char* filename = mlt_properties_get( properties, "filename" );
 
+	// The XML producer can convert "filename" from relative to absolute, but
+	// it does not do the same for "results". Therefore, if both exist and
+	// "filename" ends with "results", then use "filename" instead.
+	if ( results && filename
+		 && strlen(filename) >= strlen(results)
+		 && !strcmp( &filename[strlen(filename) - strlen(results)], results ) )
+	{
+		// Convert file name string encoding.
+		mlt_properties_from_utf8( properties, "filename", "_filename" );
+		filename = mlt_properties_get( properties, "_filename" );
+	}
+	else
+	{
+		// Convert file name string encoding.
+		mlt_properties_from_utf8( properties, "results", "_results" );
+		filename = mlt_properties_get( properties, "_results" );
+	}
 	mlt_log_info( MLT_FILTER_SERVICE(filter), "Load results from %s\n", filename );
 
 	// Initialize the VSTransformConfig
+	memset( apply_data, 0, sizeof( vs_apply ) );
 	get_transform_config( &apply_data->conf, filter, frame );
 
 	// Initialize VSTransformData
@@ -130,10 +148,6 @@ static void init_apply_data( mlt_filter filter, mlt_frame frame, VSPixelFormat v
 
 	// Initialize VSTransformations
 	vsTransformationsInit( &apply_data->trans );
-
-	// Convert file name string encoding.
-	mlt_properties_from_utf8( properties, "results", "_results" );
-	filename = mlt_properties_get( properties, "_results" );
 
 	// Load the motions from the analyze step and convert them to VSTransformations
 	FILE* f = fopen( filename, "r" );

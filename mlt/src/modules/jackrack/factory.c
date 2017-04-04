@@ -14,7 +14,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software Foundation,
- * Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ * Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
 #include <framework/mlt.h>
@@ -37,7 +37,6 @@ extern mlt_filter filter_ladspa_init( mlt_profile profile, mlt_service_type type
 extern mlt_producer producer_ladspa_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg );
 
 plugin_mgr_t *g_jackrack_plugin_mgr = NULL;
-#endif
 
 static void add_port_to_metadata( mlt_properties p, plugin_desc_t* desc, int j )
 {
@@ -83,6 +82,8 @@ static void add_port_to_metadata( mlt_properties p, plugin_desc_t* desc, int j )
 	if ( LADSPA_IS_HINT_LOGARITHMIC( hint_descriptor ) )
 		mlt_properties_set( p, "scale", "log" );
 }
+
+#endif
 
 static mlt_properties metadata( mlt_service_type type, const char *id, char *data )
 {

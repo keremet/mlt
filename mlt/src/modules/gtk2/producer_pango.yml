@@ -27,6 +27,18 @@ notes: >
   Environment variable MLT_PANGO_PRODUCER_CACHE could be used to override and
   increase the size of cached converted images of simultaneous use.
 
+  Fontset used by pango producer loaded once. That behavior prevents using new
+  fonts till process used pango producer been restarted. To force fontmap reload
+  you need to send signal "fontmap-reload" to pango producer:
+    {
+        mlt_profile profile = mlt_profile_init("dv_pal");
+        mlt_producer producer = mlt_factory_producer(profile, "pango", NULL);
+        mlt_events_fire(mlt_producer_properties(producer), "fontmap-reload", NULL, NULL );
+        mlt_producer_close(producer);
+        mlt_profile_close(profile);
+    };
+
+
 parameters:
   - identifier: argument
     title: File
@@ -167,6 +179,7 @@ parameters:
     values:
       - normal
       - italic
+      - oblique
     default: normal
     readonly: no
     mutable: yes
@@ -249,6 +262,62 @@ parameters:
     type: integer
     description: >
       Scale pango layout to fit specified width.
+    default: 0
+    readonly: no
+    mutable: yes
+    widget: spinner
+
+  - identifier: line_spacing
+    title: Sets lines spacing
+    type: integer
+    description: >
+      Sets the amount of spacing between the lines of the layout.
+    default: 0
+    readonly: no
+    mutable: yes
+    widget: spinner
+
+  - identifier: stretch
+    title: Font stretch
+    type: integer
+    description: >
+      The stretch feature of pango's font description. Possible values:
+        1 - ULTRA_CONDENSED
+        2 - EXTRA_CONDENSED
+        3 - CONDENSED
+        4 - SEMI_CONDENSED
+        5 - NORMAL
+        6 - SEMI_EXPANDED
+        7 - EXPANDED
+        8 - EXTRA_EXPANDED
+        9 - ULTRA_EXPANDED
+    minimum: 0
+    maximum: 9
+    default: 4
+    readonly: no
+    mutable: yes
+    widget: spinner
+
+  - identifier: wrap_width
+    title: Sets the width to wrap to
+    type: integer
+    description: >
+      Sets the width to which the lines of the PangoLayout should wrap.
+    default: 0
+    readonly: no
+    mutable: yes
+    widget: spinner
+
+  - identifier: wrap_type
+    title: Sets the wrap mode
+    type: integer
+    description: >
+      Sets the wrap mode; the wrap mode only has effect if a 'wrap_width' is set.
+      Possible values:
+          0 - wrap lines at word boundaries
+          1 - wrap lines at character boundaries
+          2 - wrap lines at word boundaries, but fall back to character
+              boundaries if there is not enough space for a full word
     default: 0
     readonly: no
     mutable: yes

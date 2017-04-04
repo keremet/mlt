@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
 #ifndef MLT_H
@@ -57,6 +57,7 @@ extern "C"
 #include "mlt_log.h"
 #include "mlt_cache.h"
 #include "mlt_version.h"
+#include "mlt_slices.h"
 
 #ifdef __cplusplus
 }

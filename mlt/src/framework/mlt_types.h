@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
 #ifndef MLT_TYPES_H
@@ -198,6 +198,10 @@ extern int usleep(unsigned int useconds);
 extern int nanosleep( const struct timespec * rqtp, struct timespec * rmtp );
 #endif
 extern int setenv(const char *name, const char *value, int overwrite);
-#endif
+
+#define MLT_DIRLIST_DELIMITER ";"
+#else
+#define MLT_DIRLIST_DELIMITER ":"
+#endif /* ifdef _WIN32 */
 
 #endif

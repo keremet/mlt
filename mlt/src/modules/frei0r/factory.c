@@ -14,7 +14,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
 #include <string.h>
@@ -354,7 +354,7 @@ static void * create_frei0r_item ( mlt_profile profile, mlt_service_type type, c
 	int dircount=mlt_tokeniser_parse_new (
 		tokeniser,
 		frei0r_path,
-		 ":"
+		MLT_DIRLIST_DELIMITER
 	);
 	void* ret=NULL;
 	while (dircount--){
@@ -405,7 +405,7 @@ MLT_REPOSITORY
 	int dircount=mlt_tokeniser_parse_new (
 		tokeniser ,
 		frei0r_path,
-		":"
+		MLT_DIRLIST_DELIMITER
 	);
 	char dirname[PATH_MAX];
 	snprintf( dirname, PATH_MAX, "%s/frei0r/blacklist.txt", mlt_environment( "MLT_DATA" ) );

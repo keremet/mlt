@@ -17,7 +17,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
 // For strtod_l
@@ -174,7 +174,7 @@ const char* mlt_properties_get_lcnumeric( mlt_properties self )
 	if ( list->locale )
 	{
 #if defined(__APPLE__)
-        result = querylocale( LC_NUMERIC, list->locale );
+        result = querylocale( LC_NUMERIC_MASK, list->locale );
 #elif defined(__GLIBC__)
         result = list->locale->__names[ LC_NUMERIC ];
 #else
@@ -1979,11 +1979,15 @@ static void serialise_yaml( mlt_properties self, strbuf output, int indent, int 
 						strbuf_printf( output, "|\n" );
 						output_yaml_block_literal( output, value, indent + strlen( list->name[ i ] ) + strlen( "|" ) );
 					}
-					else if ( strchr( value, ':' ) || strchr( value, '[' ) )
+					else if ( strchr( value, ':' ) || strchr( value, '[' ) || strchr( value, '\'' ) )
 					{
 						strbuf_printf( output, "\"" );
 						strbuf_escape( output, value, '"' );
 						strbuf_printf( output, "\"\n", value );
+					}
+					else if ( strchr( value, '"') )
+					{
+						strbuf_printf( output, "%s: '%s'\n", list->name[ i ], value );
 					}
 					else
 					{
@@ -2015,11 +2019,15 @@ static void serialise_yaml( mlt_properties self, strbuf output, int indent, int 
 					strbuf_printf( output, "%s: |\n", list->name[ i ] );
 					output_yaml_block_literal( output, value, indent + strlen( list->name[ i ] ) + strlen( ": " ) );
 				}
-				else if ( strchr( value, ':' ) || strchr( value, '[' ) )
+				else if ( strchr( value, ':' ) || strchr( value, '[' ) || strchr( value, '\'' ) )
 				{
 					strbuf_printf( output, "%s: \"", list->name[ i ] );
 					strbuf_escape( output, value, '"' );
 					strbuf_printf( output, "\"\n" );
+				}
+				else if ( strchr( value, '"') )
+				{
+					strbuf_printf( output, "%s: '%s'\n", list->name[ i ], value );
 				}
 				else
 				{

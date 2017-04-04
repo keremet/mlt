@@ -56,6 +56,17 @@ parameters:
     maximum: 1
     mutable: yes
     widget: checkbox
+  - identifier: crop_to_fill
+    title: Fill by cropping
+    description: >
+      When set, causes the B frame image to fill the WxH completely by
+      cropping edges in order to maintain B's aspect ratio.
+    type: integer
+    default: 0
+    minimum: 0
+    maximum: 1
+    mutable: yes
+    widget: checkbox
   - identifier: halign
     title: Horizontal alignment
     description: >
@@ -126,6 +137,15 @@ parameters:
     type: geometry
     readonly: no
     mutable: yes
+  - identifier: sliced_composite
+    title: Use sliced compositing
+    description: >
+      Enabling this option will start sliced processing of picture compositing, i.e.
+      some parts of picture processed in different thread
+    type: boolean
+    default: 0
+    mutable: yes
+    widget: checkbox
   - identifier: key[F]
     title: Key frame geometry
     description: >
