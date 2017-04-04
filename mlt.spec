@@ -43,11 +43,12 @@ BuildRequires: rpm-build-kf5
 BuildRequires: qt5-svg-devel
 BuildRequires: frei0r-devel libSDL_image-devel libalsa-devel libexif-devel
 BuildRequires: libavfilter-devel libswscale-devel libavdevice-devel libavformat-devel
-BuildRequires: libfftw3-devel libjack-devel libpulseaudio-devel libsamplerate-devel libsox-devel libswfdec-devel
+BuildRequires: libfftw3-devel libjack-devel libpulseaudio-devel libsamplerate-devel libsox-devel
 BuildRequires: libxml2-devel swig python-devel ladspa_sdk
 %if_enabled vdpau
 BuildRequires: libvdpau-devel
 %endif
+#BuildRequires: libswfdec-devel
 
 %description
 %Name is a multimedia framework designed for television broadcasting.
@@ -180,6 +181,8 @@ install -pm 0755 src/swig/python/_%name.so %buildroot%python_sitelibdir/
 %_pkgconfigdir/mlt++.pc
 
 %changelog
+# - build without libswfdec (ALT#33326)
+
 * Thu Apr 28 2016 Sergey V Turchin <zerg@altlinux.org> 6.2.0-alt4
 - fix obsoletes
 
