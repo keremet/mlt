@@ -35,6 +35,8 @@ Patch2: mlt-0.9.0-alt-no-version-script.patch
 Patch10: libmlt-0.8.2-vdpau.patch
 # Debian
 Patch20: 01-changed-preset-path.diff
+Patch21: 01-crash-affine.diff
+Patch22: 02-crash-clipinfo-update.diff
 # ALT
 Patch100: alt-freetype-include.patch
 
@@ -111,6 +113,8 @@ This module allows to work with %Name using python..
 %else
 %patch20 -p1
 %endif
+%patch21 -p1
+%patch22 -p1
 %patch100 -p1
 
 [ -f src/mlt++/config.h ] || \
