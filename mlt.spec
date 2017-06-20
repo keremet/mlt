@@ -5,6 +5,8 @@
 %define mIF_ver_lt() %if "%(rpmvercmp '%2' '%1')" > "0"
 %define mIF_ver_lteq() %if "%(rpmvercmp '%2' '%1')" >= "0"
 
+%define is_ffmpeg %([ -n "`rpmquery --qf '%%{SOURCERPM}' libavformat-devel 2>/dev/null | grep -e '^libav'`" ] && echo 0 || echo 1)
+
 %def_disable debug
 %def_disable vdpau
 
@@ -105,7 +107,10 @@ This module allows to work with %Name using python..
 %patch1 -p1
 %patch2 -p1
 %patch10 -p0
+%if %is_ffmpeg
+%else
 %patch20 -p1
+%endif
 %patch100 -p1
 
 [ -f src/mlt++/config.h ] || \
