@@ -18,7 +18,7 @@
 
 Name: mlt
 Version: 6.4.1
-Release: alt2%ubt
+Release: alt3%ubt
 
 Summary: Multimedia framework designed for television broadcasting
 License: GPLv3
@@ -186,6 +186,9 @@ install -pm 0755 src/swig/python/_%name.so %buildroot%python_sitelibdir/
 %_pkgconfigdir/mlt++.pc
 
 %changelog
+* Tue Jun 20 2017 Sergey V Turchin <zerg@altlinux.org> 6.4.1-alt3%ubt
+- fix find ffmpeg presets
+
 * Tue Jun 06 2017 Sergey V Turchin <zerg@altlinux.org> 6.4.1-alt2%ubt
 - rebuild with ffmpeg
 
