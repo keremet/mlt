@@ -192,6 +192,7 @@ install -pm 0755 src/swig/python/_%name.so %buildroot%python_sitelibdir/
 %changelog
 * Tue Jun 20 2017 Sergey V Turchin <zerg@altlinux.org> 6.4.1-alt3%ubt
 - fix find ffmpeg presets
+- update Debian patches
 
 * Tue Jun 06 2017 Sergey V Turchin <zerg@altlinux.org> 6.4.1-alt2%ubt
 - rebuild with ffmpeg
