@@ -18,7 +18,7 @@
 
 Name: mlt
 Version: 6.4.1
-Release: alt4%ubt
+Release: alt4%ubt.1
 
 Summary: Multimedia framework designed for television broadcasting
 License: GPLv3
@@ -126,6 +126,9 @@ VDPAU_SONAME=`readelf -a %_libdir/libvdpau.so | grep SONAME| sed 's/.*\[//'| sed
 sed -i "s/__VDPAU_SONAME__/${VDPAU_SONAME}/" src/modules/avformat/vdpau.c
 
 %build
+%mIF_ver_lt %__gcc_version_major 6
+%add_optflags -std=c++11
+%endif
 export CC=gcc CXX=g++ CFLAGS="%optflags" QTDIR=%_qt5_prefix
 %configure \
 	--enable-gpl --enable-gpl3 \
@@ -192,6 +195,9 @@ install -pm 0755 src/swig/python/_%name.so %buildroot%python_sitelibdir/
 %_pkgconfigdir/mlt++.pc
 
 %changelog
+* Wed Nov 01 2017 Sergey V Turchin <zerg@altlinux.org> 6.4.1-alt4%ubt.1
+- fix compile flags
+
 * Wed Nov 01 2017 Sergey V Turchin <zerg@altlinux.org> 6.4.1-alt4%ubt
 - Allow Mlt::Repository to be deleted without bad side effect (ALT#34108)
 
