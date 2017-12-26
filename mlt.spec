@@ -18,7 +18,7 @@
 
 Name: mlt
 Version: 6.4.1
-Release: alt4%ubt.1
+Release: alt5%ubt
 
 Summary: Multimedia framework designed for television broadcasting
 License: GPLv3
@@ -40,6 +40,7 @@ Patch22: 02-crash-clipinfo-update.diff
 Patch101: alt-configure-mmx.patch
 Patch102: alt-no-version-script.patch
 Patch103: alt-freetype-include.patch
+Patch104: alt-glibc2.26.patch
 
 # Automatically added by buildreq on Wed Apr 27 2016 (-bi)
 # optimized out: elfutils fontconfig fontconfig-devel gcc-c++ glib2-devel libGL-devel libSDL-devel libX11-devel libatk-devel libavcodec-devel libavutil-devel libcairo-devel libcdio-paranoia libdc1394-22 libfreetype-devel libgdk-pixbuf libgdk-pixbuf-devel libgio-devel libgpg-error libgst-plugins libgtk+2-devel libjson-c liboil-devel libopencore-amrnb0 libopencore-amrwb0 libp11-kit libpango-devel libqt5-core libqt5-gui libqt5-opengl libqt5-svg libqt5-widgets libqt5-xml libraw1394-11 libstdc++-devel libvdpau-devel libwayland-client libwayland-server perl pkg-config python-base python-devel python-modules python3 python3-base qt5-base-devel rpm-build-gir rpm-build-python3 ruby ruby-stdlibs swig-data xorg-xproto-devel
@@ -118,6 +119,7 @@ This module allows to work with %Name using python..
 %patch101 -p1
 %patch102 -p1
 %patch103 -p1
+%patch104 -p1
 
 [ -f src/mlt++/config.h ] || \
     install -m 0644 %SOURCE1 src/mlt++/config.h
@@ -195,6 +197,9 @@ install -pm 0755 src/swig/python/_%name.so %buildroot%python_sitelibdir/
 %_pkgconfigdir/mlt++.pc
 
 %changelog
+* Tue Dec 26 2017 Sergey V Turchin <zerg@altlinux.org> 6.4.1-alt5%ubt
+- fix to build with glibc-2.26
+
 * Wed Nov 01 2017 Sergey V Turchin <zerg@altlinux.org> 6.4.1-alt4%ubt.1
 - fix compile flags
 
