@@ -126,7 +126,7 @@ VDPAU_SONAME=`readelf -a %_libdir/libvdpau.so | grep SONAME| sed 's/.*\[//'| sed
 sed -i "s/__VDPAU_SONAME__/${VDPAU_SONAME}/" src/modules/avformat/vdpau.c
 
 %build
-%mIF_ver_lt %__gcc_version_major 6
+%mIF_ver_lt %_qt5_version 5.9
 %add_optflags -std=c++11
 %endif
 export CC=gcc CXX=g++ CFLAGS="%optflags" QTDIR=%_qt5_prefix
