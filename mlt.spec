@@ -29,8 +29,6 @@ Packager: Maxim Ivanov <redbaron@altlinux.org>
 
 Source: %name-%version.tar
 Source1: mlt++-config.h
-Patch1: mlt-0.9.2-alt-configure-mmx.patch
-Patch2: mlt-0.9.0-alt-no-version-script.patch
 # SuSE
 Patch10: libmlt-0.8.2-vdpau.patch
 Patch11: rem_close.patch
@@ -39,7 +37,9 @@ Patch20: 01-changed-preset-path.diff
 Patch21: 01-crash-affine.diff
 Patch22: 02-crash-clipinfo-update.diff
 # ALT
-Patch100: alt-freetype-include.patch
+Patch101: alt-configure-mmx.patch
+Patch102: alt-no-version-script.patch
+Patch103: alt-freetype-include.patch
 
 # Automatically added by buildreq on Wed Apr 27 2016 (-bi)
 # optimized out: elfutils fontconfig fontconfig-devel gcc-c++ glib2-devel libGL-devel libSDL-devel libX11-devel libatk-devel libavcodec-devel libavutil-devel libcairo-devel libcdio-paranoia libdc1394-22 libfreetype-devel libgdk-pixbuf libgdk-pixbuf-devel libgio-devel libgpg-error libgst-plugins libgtk+2-devel libjson-c liboil-devel libopencore-amrnb0 libopencore-amrwb0 libp11-kit libpango-devel libqt5-core libqt5-gui libqt5-opengl libqt5-svg libqt5-widgets libqt5-xml libraw1394-11 libstdc++-devel libvdpau-devel libwayland-client libwayland-server perl pkg-config python-base python-devel python-modules python3 python3-base qt5-base-devel rpm-build-gir rpm-build-python3 ruby ruby-stdlibs swig-data xorg-xproto-devel
@@ -107,8 +107,6 @@ This module allows to work with %Name using python..
 
 %prep
 %setup -q
-%patch1 -p1
-%patch2 -p1
 %patch10 -p0
 %patch11 -p1
 %if %is_ffmpeg
@@ -117,7 +115,9 @@ This module allows to work with %Name using python..
 %endif
 %patch21 -p1
 %patch22 -p1
-%patch100 -p1
+%patch101 -p1
+%patch102 -p1
+%patch103 -p1
 
 [ -f src/mlt++/config.h ] || \
     install -m 0644 %SOURCE1 src/mlt++/config.h
