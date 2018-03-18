@@ -1,6 +1,6 @@
 /*
  * filter_avcolour_space.c -- Colour space filter
- * Copyright (C) 2004-2014 Meltytech, LLC
+ * Copyright (C) 2004-2017 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -26,6 +26,7 @@
 // ffmpeg Header files
 #include <libavformat/avformat.h>
 #include <libswscale/swscale.h>
+#include <libavutil/imgutils.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,6 +40,8 @@ static int is_big_endian( )
 	return big_endian_test.c[ 0 ] != 1;
 }
 #endif
+
+#define IMAGE_ALIGN (1)
 
 static int convert_mlt_to_av_cs( mlt_image_format format )
 {
@@ -58,6 +61,9 @@ static int convert_mlt_to_av_cs( mlt_image_format format )
 			break;
 		case mlt_image_yuv420p:
 			value = AV_PIX_FMT_YUV420P;
+			break;
+		case mlt_image_yuv422p16:
+			value = AV_PIX_FMT_YUV422P16LE;
 			break;
 		default:
 			mlt_log_error( NULL, "[filter avcolor_space] Invalid format %s\n",
@@ -118,18 +124,26 @@ static int set_luma_transfer( struct SwsContext *context, int src_colorspace, in
 static int av_convert_image( uint8_t *out, uint8_t *in, int out_fmt, int in_fmt,
 	int width, int height, int src_colorspace, int dst_colorspace, int use_full_range )
 {
-	AVPicture input;
-	AVPicture output;
+	uint8_t *in_data[4];
+	int in_stride[4];
+	uint8_t *out_data[4];
+	int out_stride[4];
 	int flags = SWS_BICUBIC | SWS_ACCURATE_RND;
 	int error = -1;
 
-	if ( out_fmt == AV_PIX_FMT_YUYV422 )
+	if ( out_fmt == AV_PIX_FMT_YUYV422 || out_fmt == AV_PIX_FMT_YUV422P16LE )
 		flags |= SWS_FULL_CHR_H_INP;
 	else
 		flags |= SWS_FULL_CHR_H_INT;
 
-	avpicture_fill( &input, in, in_fmt, width, height );
-	avpicture_fill( &output, out, out_fmt, width, height );
+	if ( in_fmt == AV_PIX_FMT_YUV422P16LE )
+		mlt_image_format_planes(mlt_image_yuv422p16, width, height, in, in_data, in_stride);
+	else
+		av_image_fill_arrays(in_data, in_stride, in, in_fmt, width, height, IMAGE_ALIGN);
+	if ( out_fmt == AV_PIX_FMT_YUV422P16LE )
+		mlt_image_format_planes(mlt_image_yuv422p16, width, height, out, out_data, out_stride);
+	else
+		av_image_fill_arrays(out_data, out_stride, out, out_fmt, width, height, IMAGE_ALIGN);
 	struct SwsContext *context = sws_getContext( width, height, in_fmt,
 		width, height, out_fmt, flags, NULL, NULL, NULL);
 	if ( context )
@@ -138,8 +152,8 @@ static int av_convert_image( uint8_t *out, uint8_t *in, int out_fmt, int in_fmt,
 		if ( out_fmt == AV_PIX_FMT_RGB24 || out_fmt == AV_PIX_FMT_RGBA )
 			dst_colorspace = 601;
 		error = set_luma_transfer( context, src_colorspace, dst_colorspace, use_full_range );
-		sws_scale( context, (const uint8_t* const*) input.data, input.linesize, 0, height,
-			output.data, output.linesize);
+		sws_scale(context, (const uint8_t* const*) in_data, in_stride, 0, height,
+			out_data, out_stride);
 		sws_freeContext( context );
 	}
 	return error;
@@ -169,7 +183,7 @@ static int convert_image( mlt_frame frame, uint8_t **image, mlt_image_format *fo
 
 		int in_fmt = convert_mlt_to_av_cs( *format );
 		int out_fmt = convert_mlt_to_av_cs( output_format );
-		int size = FFMAX( avpicture_get_size( out_fmt, width, height ),
+		int size = FFMAX( av_image_get_buffer_size(out_fmt, width, height, IMAGE_ALIGN),
 			mlt_image_format_size( output_format, width, height, NULL ) );
 		uint8_t *output = mlt_pool_alloc( size );
 
@@ -207,7 +221,9 @@ static int convert_image( mlt_frame frame, uint8_t **image, mlt_image_format *fo
 								colorspace, profile_colorspace, force_full_luma ) )
 		{
 			// The new colorspace is only valid if destination is YUV.
-			if ( output_format == mlt_image_yuv422 || output_format == mlt_image_yuv420p )
+			if ( output_format == mlt_image_yuv422 ||
+				output_format == mlt_image_yuv420p ||
+				output_format == mlt_image_yuv422p16 )
 				mlt_properties_set_int( properties, "colorspace", profile_colorspace );
 		}
 		*image = output;

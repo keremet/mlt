@@ -1,6 +1,6 @@
 /*
  * transition_mix.c -- mix two audio streams
- * Copyright (C) 2003-2016 Meltytech, LLC
+ * Copyright (C) 2003-2017 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -63,6 +63,28 @@ static void mix_audio( double weight_start, double weight_end, float *buffer_a,
 	}
 }
 
+static void sum_audio( double weight_start, double weight_end, float *buffer_a,
+	float *buffer_b, int channels_a, int channels_b, int channels_out, int samples )
+{
+	int i, j;
+	double a, b;
+
+	// Compute a smooth ramp over start to end
+	double mix = weight_start;
+	double mix_step = ( weight_end - weight_start ) / samples;
+
+	for ( i = 0; i < samples; i++ )
+	{
+		for ( j = 0; j < channels_out; j++ )
+		{
+			a = (double) buffer_a[ i * channels_a + j ];
+			b = (double) buffer_b[ i * channels_b + j ];
+			buffer_a[ i * channels_a + j ] = mix * b + a;
+		}
+		mix += mix_step;
+	}
+}
+
 // This filter uses an inline low pass filter to allow mixing without volume hacking.
 static void combine_audio( double weight, float *buffer_a, float *buffer_b,
 	int channels_a, int channels_b, int channels_out, int samples )
@@ -111,10 +133,14 @@ static int transition_get_audio( mlt_frame frame_a, void **buffer, mlt_audio_for
 	int channels_b = *channels, channels_a = *channels;
 	int samples_b = *samples, samples_a = *samples;
 
-	// We can only mix s16
+	// We can only mix interleaved 32-bit float.
 	*format = mlt_audio_f32le;
 	mlt_frame_get_audio( frame_b, (void**) &buffer_b, format, &frequency_b, &channels_b, &samples_b );
 	mlt_frame_get_audio( frame_a, (void**) &buffer_a, format, &frequency_a, &channels_a, &samples_a );
+
+	// Prevent dividing by zero.
+	if ( !channels_a || !channels_b )
+		return 1;
 
 	if ( buffer_b == buffer_a )
 	{
@@ -171,7 +197,21 @@ static int transition_get_audio( mlt_frame frame_a, void **buffer, mlt_audio_for
 	buffer_a = self->dest_buffer;
 
 	// Do the mixing.
-	if ( mlt_properties_get_int( MLT_TRANSITION_PROPERTIES(transition), "combine" ) )
+	if ( mlt_properties_get_int( MLT_TRANSITION_PROPERTIES(transition), "sum" ) )
+	{
+		double mix_start = 1.0, mix_end = 1.0;
+		if ( mlt_properties_get( b_props, "audio.previous_mix" ) )
+			mix_start = mlt_properties_get_double( b_props, "audio.previous_mix" );
+		if ( mlt_properties_get( b_props, "audio.mix" ) )
+			mix_end = mlt_properties_get_double( b_props, "audio.mix" );
+		if ( mlt_properties_get_int( b_props, "audio.reverse" ) )
+		{
+			mix_start = 1.0 - mix_start;
+			mix_end = 1.0 - mix_end;
+		}
+		sum_audio( mix_start, mix_end, buffer_a, buffer_b, channels_a, channels_b, *channels, *samples );
+	}
+	else if ( mlt_properties_get_int( MLT_TRANSITION_PROPERTIES(transition), "combine" ) )
 	{
 		double weight = 1.0;
 		if ( mlt_properties_get_int( MLT_FRAME_PROPERTIES( frame_a ), "meta.mixdown" ) )
@@ -321,7 +361,11 @@ static mlt_frame transition_process( mlt_transition transition, mlt_frame a_fram
 	mlt_frame_push_audio( a_frame, transition );
 	mlt_frame_push_audio( a_frame, b_frame );
 	mlt_frame_push_audio( a_frame, transition_get_audio );
-	
+
+	// Ensure transition_get_audio is called if test_audio=1.
+	if ( mlt_properties_get_int( properties, "accepts_blanks" ) )
+		mlt_properties_set_int( MLT_FRAME_PROPERTIES(a_frame), "test_audio", 0 );
+
 	return a_frame;
 }
 
@@ -345,7 +389,11 @@ mlt_transition transition_mix_init( mlt_profile profile, mlt_service_type type, 
 		transition->close = transition_close;
 		transition->process = transition_process;
 		if ( arg )
+		{
 			mlt_properties_set_double( MLT_TRANSITION_PROPERTIES( transition ), "start", atof( arg ) );
+			if ( atof( arg ) < 0 )
+				mlt_properties_set_int( MLT_TRANSITION_PROPERTIES( transition ), "accepts_blanks", 1 );
+		}
 		// Inform apps and framework that this is an audio only transition
 		mlt_properties_set_int( MLT_TRANSITION_PROPERTIES( transition ), "_transition_type", 2 );
 	} else {

@@ -1,6 +1,6 @@
 /*
  * melt.c -- MLT command line utility
- * Copyright (C) 2002-2016 Meltytech, LLC
+ * Copyright (C) 2002-2018 Meltytech, LLC
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -31,7 +31,7 @@
 
 #include <framework/mlt.h>
 
-#if (defined(__APPLE__) || defined(_WIN32)) && !defined(MELT_NOSDL)
+#if (defined(__APPLE__) || defined(_WIN32) || defined(HAVE_SDL2)) && !defined(MELT_NOSDL)
 #include <SDL.h>
 #endif
 
@@ -350,7 +350,7 @@ static void load_consumer( mlt_consumer *consumer, mlt_profile profile, int argc
 	}
 }
 
-#if (defined(__APPLE__) || defined(_WIN32)) && !defined(MELT_NOSDL)
+#if defined(SDL_MAJOR_VERSION)
 
 static void event_handling( mlt_producer producer, mlt_consumer consumer )
 {
@@ -365,12 +365,34 @@ static void event_handling( mlt_producer producer, mlt_consumer consumer )
 				break;
 
 			case SDL_KEYDOWN:
+#if SDL_MAJOR_VERSION == 2
+				if ( event.key.keysym.sym < 0x80 && event.key.keysym.sym > 0 )
+				{
+					char keyboard[ 2 ] = { event.key.keysym.sym, 0 };
+					transport_action( producer, keyboard );
+				}
+				break;
+
+			case SDL_WINDOWEVENT:
+				if ( mlt_properties_get( MLT_CONSUMER_PROPERTIES(consumer), "mlt_service" ) &&
+					 !strcmp( "sdl2", mlt_properties_get( MLT_CONSUMER_PROPERTIES(consumer), "mlt_service" ) ) )
+				if ( event.window.event == SDL_WINDOWEVENT_RESIZED ||
+					 event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED )
+				{
+					mlt_properties_set_int( MLT_CONSUMER_PROPERTIES(consumer),
+						"window_width", event.window.data1 );
+					mlt_properties_set_int( MLT_CONSUMER_PROPERTIES(consumer),
+						"window_height", event.window.data2 );
+				}
+				break;
+#else
 				if ( event.key.keysym.unicode < 0x80 && event.key.keysym.unicode > 0 )
 				{
 					char keyboard[ 2 ] = { event.key.keysym.unicode, 0 };
 					transport_action( producer, keyboard );
 				}
 				break;
+#endif
 		}
 	}
 }
@@ -421,7 +443,7 @@ static void transport( mlt_producer producer, mlt_consumer consumer )
 				transport_action( producer, string );
 			}
 
-#if (defined(__APPLE__) || defined(_WIN32)) && !defined(MELT_NOSDL)
+#if defined(SDL_MAJOR_VERSION)
 			event_handling( producer, consumer );
 #endif
 
@@ -497,9 +519,10 @@ static void show_usage( char *program_name )
 "  -track                                   Add a track\n"
 "  -transition id[:arg] [name=value]*       Add a transition\n"
 "  -verbose                                 Set the logging level to verbose\n"
+"  -timings                                 Set the logging level to timings\n"
 "  -version                                 Show the version and copyright\n"
 "  -video-track | -hide-audio               Add a video-only track\n"
-"For more help: <http://www.mltframework.org/>\n",
+"For more help: <https://www.mltframework.org/>\n",
 	basename( program_name ) );
 }
 
@@ -808,11 +831,15 @@ query_all:
 		{
 			mlt_log_set_level( MLT_LOG_VERBOSE );
 		}
+		else if ( !strcmp( argv[ i ], "-timings" ) )
+		{
+			mlt_log_set_level( MLT_LOG_TIMINGS );
+		}
 		else if ( !strcmp( argv[ i ], "-version" ) || !strcmp( argv[ i ], "--version" ) )
 		{
 			fprintf( stdout, "%s " VERSION "\n"
-				"Copyright (C) 2002-2016 Meltytech, LLC\n"
-				"<http://www.mltframework.org/>\n"
+				"Copyright (C) 2002-2018 Meltytech, LLC\n"
+				"<https://www.mltframework.org/>\n"
 				"This is free software; see the source for copying conditions.  There is NO\n"
 				"warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n",
 				basename( argv[0] ) );

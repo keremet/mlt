@@ -20,7 +20,6 @@
 #define __STDC_FORMAT_MACROS  /* see inttypes.h */
 #define __STDC_LIMIT_MACROS
 #define __STDC_CONSTANT_MACROS
-#define _XOPEN_SOURCE
 
 #include <stdint.h>
 #include <inttypes.h>
@@ -43,7 +42,7 @@ typedef struct
 	char* arg;
 	pthread_t th;
 	int count;
-	mlt_slices sliced_swab;
+	int sliced_swab;
 } consumer_ndi_t;
 
 static void* consumer_ndi_feeder( void* p )
@@ -79,7 +78,7 @@ static void* consumer_ndi_feeder( void* p )
 		strncat(ndi_con_str, mlt_properties_get_value( properties, i ), NDI_CON_STR_MAX);
 		strncat(ndi_con_str, "\"", NDI_CON_STR_MAX);
 	}
-	strncat(ndi_con_str, ">", NDI_CON_STR_MAX);
+	strncat(ndi_con_str, " />", NDI_CON_STR_MAX);
 
 	const NDIlib_metadata_frame_t ndi_con_type =
 	{
@@ -155,20 +154,13 @@ static void* consumer_ndi_feeder( void* p )
 					unsigned char *arg[3] = { image, buffer };
 					ssize_t size = stride * height;
 
-					// convert lower field first to top field first
-					if ( !progressive )
-					{
-						arg[1] += stride;
-						size -= stride;
-					}
-
 					// Normal non-keyer playout - needs byte swapping
 					if ( !self->sliced_swab )
 						swab2( arg[0], arg[1], size );
 					else
 					{
 						arg[2] = (unsigned char*)size;
-						mlt_slices_run( self->sliced_swab, 0, swab_sliced, arg);
+						mlt_slices_run_fifo( 0, swab_sliced, arg);
 					}
 				}
 				else if ( !mlt_properties_get_int( MLT_FRAME_PROPERTIES( frame ), "test_image" ) )
@@ -177,14 +169,6 @@ static void* consumer_ndi_feeder( void* p )
 					int y = height + 1;
 					uint32_t* s = (uint32_t*) image;
 					uint32_t* d = (uint32_t*) buffer;
-
-					if ( !progressive )
-					{
-						// Correct field order
-						height--;
-						y--;
-						d += width;
-					}
 
 					// Need to relocate alpha channel RGBA => ARGB
 					while ( --y )
@@ -275,13 +259,15 @@ static int consumer_ndi_start( mlt_consumer consumer )
 
 	mlt_properties properties = MLT_CONSUMER_PROPERTIES( consumer );
 
+	// Set interlacing properties
+	mlt_profile profile = mlt_service_profile( MLT_CONSUMER_SERVICE( consumer ) );
+	mlt_properties_set_int( properties, "top_field_first", !profile->progressive );
+
 	consumer_ndi_t* self = ( consumer_ndi_t* )consumer->child;
 
 	if ( !self->f_running )
 	{
-		if ( !self->sliced_swab && mlt_properties_get( properties, "sliced_swab" )
-			&& mlt_properties_get_int( properties, "sliced_swab" ) )
-			self->sliced_swab = mlt_slices_init(0, SCHED_FIFO, sched_get_priority_max( SCHED_FIFO ) );
+		self->sliced_swab = mlt_properties_get_int( properties, "sliced_swab" );
 
 		// set flags
 		self->f_exit = 0;
@@ -344,9 +330,6 @@ static void consumer_ndi_close( mlt_consumer consumer )
 	// free context
 	if ( self->arg )
 		free( self->arg );
-	if ( self->sliced_swab )
-		mlt_slices_close( self->sliced_swab );
-
 	free( self );
 
 	mlt_log_debug( NULL, "%s: exiting\n", __FUNCTION__ );

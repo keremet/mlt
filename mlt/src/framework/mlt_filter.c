@@ -3,7 +3,7 @@
  * \brief abstraction for all filter services
  * \see mlt_filter_s
  *
- * Copyright (C) 2003-2014 Meltytech, LLC
+ * Copyright (C) 2003-2016 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -254,11 +254,10 @@ mlt_position mlt_filter_get_position( mlt_filter self, mlt_frame frame )
 	mlt_properties properties = MLT_FILTER_PROPERTIES( self );
 	mlt_position in = mlt_properties_get_position( properties, "in" );
 	const char *unique_id = mlt_properties_get( properties, "_unique_id" );
-	char name[20];
+	char name[64];
 
 	// Make the properties key from unique id
-	snprintf( name, 20, "pos.%s", unique_id );
-	name[20 - 1] = '\0';
+	snprintf( name, sizeof(name), "pos.%s", unique_id );
 
 	return mlt_properties_get_position( MLT_FRAME_PROPERTIES( frame ), name ) - in;
 }
@@ -277,7 +276,10 @@ double mlt_filter_get_progress( mlt_filter self, mlt_frame frame )
 {
 	double position = mlt_filter_get_position( self, frame );
 	double length = mlt_filter_get_length2( self, frame );
-	return position / length;
+	if (length > 1)
+		return position / (length - 1);
+	else
+		return 1.0;
 }
 
 /** Process the frame.
@@ -299,11 +301,10 @@ mlt_frame mlt_filter_process( mlt_filter self, mlt_frame frame )
 	int disable = mlt_properties_get_int( properties, "disable" );
 	const char *unique_id = mlt_properties_get( properties, "_unique_id" );
 	mlt_position position = mlt_frame_get_position( frame );
-	char name[30];
+	char name[64];
 
 	// Make the properties key from unique id
 	snprintf( name, sizeof(name), "pos.%s", unique_id );
-	name[sizeof(name) -1] = '\0';
 
 	// Save the position on the frame
 	mlt_properties_set_position( MLT_FRAME_PROPERTIES( frame ), name, position );

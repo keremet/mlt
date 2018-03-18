@@ -38,6 +38,9 @@ else
 	then
 		qt_includedir="$QTDIR/include"
 		qt_libdir="$QTDIR/lib"
+		qt_version=$($QTDIR/bin/qmake -query QT_VERSION)
+	else
+		qt_version=$(qmake -query QT_VERSION)
 	fi
 
 	export without_kde=
@@ -57,6 +60,11 @@ else
 	done
 
 	echo > config.mak
+
+	if $(echo $qt_version | awk '{if ($0 + 0 > 5.6) exit 0; else exit 1;}')
+	then
+		echo "USE_CPP11=1" >> config.mak
+	fi
 
 	pkg-config --exists 'libexif'
 	if [ $? -eq 0 ]
@@ -107,14 +115,6 @@ else
 		then
 			echo QTCXXFLAGS=-I$qt_includedir -I$qt_includedir/QtCore -I$qt_includedir/QtGui -I$qt_includedir/QtXml -I$qt_includedir/QtSvg -I$qt_includedir/QtWidgets >> config.mak
 			echo QTLIBS=-Wl,-rpath-link,"$qt_libdir" -L"$qt_libdir" -lQt5Core -lQt5Gui -lQt5Xml -lQt5Svg -lQt5Widgets >> config.mak
-			if [ -f "$qt_libdir/libQt5OpenGL.so" ] || [ -f "$qt_libdir/libQt5OpenGL.a" ]
-			then
-				echo QTCXXFLAGS+=-I$qt_includedir/QtOpenGL >> config.mak
-				echo QTLIBS+=-lQt5OpenGL >> config.mak
-			else
-				echo "- Qt5OpenGL not found: disabling"
-				without_opengl=true
-			fi
 		# Qt5 on OS X
 		elif [ -d "$qt_libdir/QtWidgets.framework" ]
 		then
@@ -123,11 +123,10 @@ else
 				-I$qt_includedir/QtGui -I$qt_libdir/QtGui.framework/Headers \
 				-I$qt_includedir/QtXml -I$qt_libdir/QtXml.framework/Headers \
 				-I$qt_includedir/QtSvg -I$qt_libdir/QtSvg.framework/Headers \
-				-I$qt_includedir/QtOpenGL -I$qt_libdir/QtOpenGL.framework/Headers \
 				-I$qt_includedir/QtWidgets -I$qt_libdir/QtWidgets.framework/Headers \
 				>> config.mak
 			echo QTLIBS=-F"$qt_libdir" -framework QtCore -framework QtGui -framework \
-				QtXml -framework QtSvg -framework QtOpenGL -framework QtWidgets >> config.mak
+				QtXml -framework QtSvg -framework QtWidgets >> config.mak
 		# Qt4 on OS X
 		elif [ -d "$qt_libdir/QtGui.framework" ]
 		then
@@ -148,17 +147,9 @@ else
 		if [ $? -eq 0 ]
 		then
 			echo "- Qt version 5.x detected"
+			without_kde=true
 			echo QTCXXFLAGS=$(pkg-config --cflags Qt5Core Qt5Gui Qt5Xml Qt5Svg Qt5Widgets) >> config.mak
 			echo QTLIBS=$(pkg-config --libs Qt5Core Qt5Gui Qt5Xml Qt5Svg Qt5Widgets) >> config.mak
-			pkg-config --exists 'Qt5OpenGL'
-			if [ $? -eq 0 ]
-			then
-				echo QTCXXFLAGS+=$(pkg-config --cflags Qt5OpenGL) >> config.mak
-				echo QTLIBS+=$(pkg-config --libs Qt5OpenGL) >> config.mak
-			else
-				echo "- Qt5OpenGL not found: disabling"
-				without_opengl=true
-			fi
 		else
 			pkg-config --exists 'QtGui >= 4'
 			if [ $? -eq 0 ]
@@ -169,6 +160,7 @@ else
 			else
 				echo "- Qt not found - disabling"
 				touch ../disable-qt
+				exit 0
 			fi
 		fi
 	fi
@@ -181,7 +173,7 @@ else
 	if [ "$without_kde" = "" ]
 	then
 		kde4-config
-		if [ $? -eq 0 ] && [ "$qt4_found" != "" ]
+		if [ $? -eq 0 ]
 		then
 			# test if we have KDE4, required on some systems to get Qt extra formats (xcf, ...)
 			if [ "$kde_includedir" = "" ]
@@ -195,9 +187,9 @@ else
 			if [ -d "$kde_includedir" ] && [ -d "$kde_libdir" ]
 			then
 				echo "- KDE version 4.x detected, will enable extra image formats"
-				echo "#define USE_KDE4" >> config.h
 				echo "USE_KDE4=1" >> config.mak
 				echo KDECXXFLAGS=-I$kde_includedir >> config.mak
+				echo KDECXXFLAGS += -DUSE_KDE4 >> config.mak
 				# the -L with kde4/devel is for Fedora
 				echo KDELIBS=-L$kde_libdir -L${kde_libdir}/kde4/devel -lkdecore >> config.mak
 			fi

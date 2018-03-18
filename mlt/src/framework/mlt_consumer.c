@@ -486,18 +486,14 @@ static void set_image_format( mlt_consumer self )
 	const char* format = mlt_properties_get( properties, "mlt_image_format" );
 	if ( format )
 	{
-		if ( !strcmp( format, "rgb24" ) )
-			priv->image_format = mlt_image_rgb24;
-		else if ( !strcmp( format, "rgb24a" ) )
-			priv->image_format = mlt_image_rgb24a;
-		else if ( !strcmp( format, "yuv420p" ) )
-			priv->image_format = mlt_image_yuv420p;
-		else if ( !strcmp( format, "none" ) )
-			priv->image_format = mlt_image_none;
-		else if ( !strcmp( format, "glsl" ) )
-			priv->image_format = mlt_image_glsl_texture;
-		else
+		priv->image_format = mlt_image_format_id( format );
+		if ( mlt_image_invalid == priv->image_format )
 			priv->image_format = mlt_image_yuv422;
+		// mlt_image_glsl is for internal use only.
+		// Remapping it glsl_texture prevents breaking existing apps
+		// using the legacy "glsl" name.
+		else if ( mlt_image_glsl == priv->image_format )
+			priv->image_format = mlt_image_glsl_texture;
 	}
 }
 
@@ -852,8 +848,10 @@ static void *consumer_read_ahead_thread( void *arg )
 		pthread_cond_broadcast( &priv->queue_cond );
 		pthread_mutex_unlock( &priv->queue_mutex );
 
+		mlt_log_timings_begin();
 		// Get the next frame
 		frame = mlt_consumer_get_frame( self );
+		mlt_log_timings_end( NULL, "mlt_consumer_get_frame" );
 
 		// If there's no frame, we're probably stopped...
 		if ( frame == NULL )
@@ -894,7 +892,9 @@ static void *consumer_read_ahead_thread( void *arg )
 
 				// Get the image
 				mlt_events_fire( MLT_CONSUMER_PROPERTIES( self ), "consumer-frame-render", frame, NULL );
+				mlt_log_timings_begin();
 				mlt_frame_get_image( frame, &image, &priv->image_format, &width, &height, 0 );
+				mlt_log_timings_end( NULL, "mlt_frame_get_image" );
 			}
 
 			// Indicate the rendered image is available.
@@ -1572,9 +1572,11 @@ mlt_frame mlt_consumer_rt_frame( mlt_consumer self )
 
 		// Get frame from queue
 		pthread_mutex_lock( &priv->queue_mutex );
+		mlt_log_timings_begin();
 		while( priv->ahead && mlt_deque_count( priv->queue ) < size )
 			pthread_cond_wait( &priv->queue_cond, &priv->queue_mutex );
 		frame = mlt_deque_pop_front( priv->queue );
+		mlt_log_timings_end( NULL, "wait_for_frame_queue" );
 		pthread_cond_broadcast( &priv->queue_cond );
 		pthread_mutex_unlock( &priv->queue_mutex );
 		if ( priv->real_time == 1 && frame &&

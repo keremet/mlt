@@ -1,6 +1,6 @@
 /*
  * consumer_decklink.cpp -- output through Blackmagic Design DeckLink
- * Copyright (C) 2010-2015 Dan Dennedy <dan@dennedy.org>
+ * Copyright (C) 2010-2017 Dan Dennedy <dan@dennedy.org>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -79,7 +79,6 @@ private:
 	IDeckLinkKeyer*             m_deckLinkKeyer;
 	bool                        m_terminate_on_pause;
 	uint32_t                    m_preroll;
-	uint32_t                    m_acnt;
 	uint32_t                    m_reprio;
 
 	mlt_deque                   m_aqueue;
@@ -93,7 +92,7 @@ private:
 	int                         m_op_res;
 	int                         m_op_arg;
 	pthread_t                   m_op_thread;
-	mlt_slices                  m_sliced_swab;
+	bool                        m_sliced_swab;
 
 	IDeckLinkDisplayMode* getDisplayMode()
 	{
@@ -138,7 +137,6 @@ public:
 		m_deckLinkKeyer = NULL;
 		m_deckLinkOutput = NULL;
 		m_deckLink = NULL;
-		m_sliced_swab = NULL;
 
 		m_aqueue = mlt_deque_init();
 		m_frames = mlt_deque_init();
@@ -177,9 +175,6 @@ public:
 		pthread_mutex_destroy(&m_op_lock);
 		pthread_mutex_destroy(&m_op_arg_mutex);
 		pthread_cond_destroy(&m_op_arg_cond);
-
-		if ( m_sliced_swab )
-			mlt_slices_close( m_sliced_swab );
 
 		mlt_log_debug( getConsumer(), "%s: exiting\n", __FUNCTION__ );
 	}
@@ -287,7 +282,7 @@ protected:
 		result = CoCreateInstance( CLSID_CDeckLinkIterator, NULL, CLSCTX_ALL, IID_IDeckLinkIterator, (void**) &deckLinkIterator );
 		if ( FAILED( result ) )
 		{
-			mlt_log_error( getConsumer(), "The DeckLink drivers not installed.\n" );
+			mlt_log_warning( getConsumer(), "The DeckLink drivers not installed.\n" );
 			return false;
 		}
 #else
@@ -295,7 +290,7 @@ protected:
 
 		if ( !deckLinkIterator )
 		{
-			mlt_log_error( getConsumer(), "The DeckLink drivers not installed.\n" );
+			mlt_log_warning( getConsumer(), "The DeckLink drivers not installed.\n" );
 			return false;
 		}
 #endif
@@ -395,6 +390,7 @@ protected:
 			mlt_log_error( getConsumer(), "Profile is not compatible with decklink.\n" );
 			return false;
 		}
+		mlt_properties_set_int( properties, "top_field_first", m_displayMode->GetFieldDominance() == bmdUpperFieldFirst );
 
 		// Set the keyer
 		if ( m_deckLinkKeyer && ( m_isKeyer = mlt_properties_get_int( properties, "keyer" ) ) )
@@ -499,30 +495,11 @@ protected:
 
 	bool createFrame( IDeckLinkMutableVideoFrame** decklinkFrame )
 	{
-		uint8_t *buffer = 0;
-		int stride = m_width * ( m_isKeyer? 4 : 2 );
 		IDeckLinkMutableVideoFrame* frame = (IDeckLinkMutableVideoFrame*)mlt_deque_pop_front( m_frames );;
 
 		*decklinkFrame = frame;
 
-		if ( !frame )
-			return false;
-
-		// Make the first line black for field order correction.
-		if ( S_OK == frame->GetBytes( (void**) &buffer ) && buffer )
-		{
-			if ( m_isKeyer )
-			{
-				memset( buffer, 0, stride );
-			}
-			else for ( int i = 0; i < m_width; i++ )
-			{
-				*buffer++ = 128;
-				*buffer++ = 16;
-			}
-		}
-
-		return true;
+		return ( !frame ) ? false : true;
 	}
 
 	void renderVideo( mlt_frame frame )
@@ -537,9 +514,7 @@ protected:
 
 		mlt_log_debug( getConsumer(), "%s: entering\n", __FUNCTION__ );
 
-		if ( !m_sliced_swab && mlt_properties_get( consumer_properties, "sliced_swab" )
-			&& mlt_properties_get_int( consumer_properties, "sliced_swab" ) )
-			m_sliced_swab = mlt_slices_init(0, SCHED_FIFO, sched_get_priority_max( SCHED_FIFO ) );
+		m_sliced_swab = mlt_properties_get_int( consumer_properties, "sliced_swab" );
 
 		if ( rendered && !mlt_frame_get_image( frame, &image, &format, &m_width, &height, 0 ) )
 		{
@@ -551,8 +526,6 @@ protected:
 
 			if ( buffer )
 			{
-				int progressive = mlt_properties_get_int( MLT_FRAME_PROPERTIES( frame ), "progressive" );
-
 				// NTSC SDI is always 486 lines
 				if ( m_height == 486 && height == 480 )
 				{
@@ -573,20 +546,13 @@ protected:
 					unsigned char *arg[3] = { image, buffer };
 					ssize_t size = stride * height;
 
-					// convert lower field first to top field first
-					if ( !progressive )
-					{
-						arg[1] += stride;
-						size -= stride;
-					}
-
 					// Normal non-keyer playout - needs byte swapping
 					if ( !m_sliced_swab )
 						swab2( arg[0], arg[1], size );
 					else
 					{
 						arg[2] = (unsigned char*)size;
-						mlt_slices_run( m_sliced_swab, 0, swab_sliced, arg);
+						mlt_slices_run_fifo( 0, swab_sliced, arg);
 					}
 				}
 				else if ( !mlt_properties_get_int( MLT_FRAME_PROPERTIES( frame ), "test_image" ) )
@@ -595,14 +561,6 @@ protected:
 					int y = height + 1;
 					uint32_t* s = (uint32_t*) image;
 					uint32_t* d = (uint32_t*) buffer;
-
-					if ( !progressive && m_displayMode->GetFieldDominance() == bmdUpperFieldFirst )
-					{
-						// Correct field order
-						height--;
-						y--;
-						d += m_width;
-					}
 
 					// Need to relocate alpha channel RGBA => ARGB
 					while ( --y )
@@ -755,14 +713,6 @@ protected:
 				uint32_t written = 0;
 #endif
 				BMDTimeValue streamTime = m_count * frequency * m_duration / m_timescale;
-				m_deckLinkOutput->GetBufferedAudioSampleFrameCount( &written );
-				mlt_log_debug( getConsumer(), "%s:%d GetBufferedAudioSampleFrameCount=" DECKLINK_UNSIGNED_FORMAT "\n",
-					__FUNCTION__, __LINE__, written );
-				if ( written > (m_preroll + 1) * samples )
-				{
-					mlt_log_verbose( getConsumer(), "renderAudio: will flush " DECKLINK_UNSIGNED_FORMAT " audiosamples\n", written );
-					m_deckLinkOutput->FlushBufferedAudioSamples();
-				};
 #ifdef _WIN32
 				hr = m_deckLinkOutput->ScheduleAudioSamples( pcm, samples, streamTime, frequency, (unsigned long*) &written );
 #else
@@ -812,7 +762,6 @@ protected:
 		if ( bmdOutputFrameDisplayedLate == completed )
 		{
 			mlt_log_verbose( getConsumer(), "ScheduledFrameCompleted: bmdOutputFrameDisplayedLate == completed\n" );
-			m_count++;
 		}
 		if ( bmdOutputFrameDropped == completed )
 		{
@@ -844,10 +793,14 @@ protected:
 
 		if( mlt_properties_get_int( properties, "running" ) || preroll )
 		{
+			mlt_log_timings_begin();
 			frame = mlt_consumer_rt_frame( consumer );
+			mlt_log_timings_end( NULL, "mlt_consumer_rt_frame" );
 			if ( frame )
 			{
+				mlt_log_timings_begin();
 				render( frame );
+				mlt_log_timings_end( NULL, "render" );
 
 				mlt_events_fire( properties, "consumer-frame-show", frame, NULL );
 

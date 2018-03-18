@@ -1,6 +1,6 @@
 #!/bin/sh
 
-export version=6.4.1
+export version=6.6.0
 export soversion=6
 
 show_help()
@@ -94,9 +94,8 @@ build_config()
 
 		case $targetos in
 		Darwin)
-                echo "CFLAGS+=-fPIC `sdl-config --cflags`"
+		echo "CFLAGS+=-fPIC"
 		echo "SHFLAGS=-dynamiclib"
-		echo "LDFLAGS+=`sdl-config --libs`"
 		;;
 		Linux|GNU/kFreeBSD|GNU)
 		[ "$optimisations" = "true" ] &&

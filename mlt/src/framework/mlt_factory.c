@@ -2,7 +2,7 @@
  * \file mlt_factory.c
  * \brief the factory method interfaces
  *
- * Copyright (C) 2003-2014 Meltytech, LLC
+ * Copyright (C) 2003-2018 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -92,6 +92,33 @@ static void mlt_factory_create_done( mlt_listener listener, mlt_properties owner
 		listener( owner, self, ( char * )args[ 0 ], ( char * )args[ 1 ], ( mlt_service )args[ 2 ] );
 }
 
+#if defined(_WIN32) || (defined(__APPLE__) && defined(RELOCATABLE))
+// Replacement for buggy dirname() on some systems.
+// https://github.com/mltframework/mlt/issues/285
+static char* mlt_dirname( char *path )
+{
+	if ( path && strlen( path ) )
+	{
+		char *dirsep = strrchr( path, '/' );
+		// Handle back slash on Windows.
+		if ( !dirsep )
+			dirsep = strrchr( path, '\\' );
+		// Handle trailing slash.
+		if ( dirsep == &path[ strlen( path ) - 1 ] )
+		{
+			dirsep[0] = '\0';
+			dirsep = strrchr( path, '/' );
+			if ( !dirsep )
+				dirsep = strrchr( path, '\\' );
+		}
+		// Truncate string at last directory separator.
+		if ( dirsep )
+			dirsep[0] = '\0';
+	}
+	return path;
+}
+#endif
+
 /** Construct the repository and factories.
  *
  * \param directory an optional full path to a directory containing the modules that overrides the default and
@@ -112,7 +139,7 @@ mlt_repository mlt_factory_init( const char *directory )
 	{
 		mlt_properties_set_or_default( global_properties, "MLT_NORMALISATION", getenv( "MLT_NORMALISATION" ), "PAL" );
 		mlt_properties_set_or_default( global_properties, "MLT_PRODUCER", getenv( "MLT_PRODUCER" ), "loader" );
-		mlt_properties_set_or_default( global_properties, "MLT_CONSUMER", getenv( "MLT_CONSUMER" ), "sdl" );
+		mlt_properties_set_or_default( global_properties, "MLT_CONSUMER", getenv( "MLT_CONSUMER" ), "sdl2" );
 		mlt_properties_set( global_properties, "MLT_TEST_CARD", getenv( "MLT_TEST_CARD" ) );
 		mlt_properties_set_or_default( global_properties, "MLT_PROFILE", getenv( "MLT_PROFILE" ), "dv_pal" );
 		mlt_properties_set_or_default( global_properties, "MLT_DATA", getenv( "MLT_DATA" ), PREFIX_DATA );
@@ -128,7 +155,7 @@ mlt_repository mlt_factory_init( const char *directory )
 #endif
 #if defined(_WIN32) || (defined(__APPLE__) && defined(RELOCATABLE))
 		char *path2 = strdup( path );
-		char *appdir = dirname( path2 );
+		char *appdir = mlt_dirname( path2 );
 		mlt_properties_set( global_properties, "MLT_APPDIR", appdir );
 		free( path2 );
 #endif
@@ -402,12 +429,18 @@ mlt_consumer mlt_factory_consumer( mlt_profile profile, const char *service, con
 	if ( obj == NULL )
 	{
 		obj = mlt_repository_create( repository, profile, consumer_type, service, input );
-		mlt_events_fire( event_object, "consumer-create-done", service, input, obj, NULL );
+	}
+
+	if ( obj == NULL && !strcmp( service, "sdl2" ) )
+	{
+		service = "sdl";
+		obj = mlt_repository_create( repository, profile, consumer_type, service, input );
 	}
 
 	if ( obj != NULL )
 	{
 		mlt_properties properties = MLT_CONSUMER_PROPERTIES( obj );
+		mlt_events_fire( event_object, "consumer-create-done", service, input, obj, NULL );
 		set_common_properties( properties, profile, "consumer", service );
 	}
 	return obj;

@@ -3,7 +3,7 @@
  * \brief Properties class definition
  * \see mlt_properties_s
  *
- * Copyright (C) 2003-2016 Meltytech, LLC
+ * Copyright (C) 2003-2017 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -136,6 +136,7 @@ int mlt_properties_set_lcnumeric( mlt_properties self, const char *locale )
 {
 	int error = 0;
 
+#if !defined(_WIN32)
 	if ( self && locale )
 	{
 		property_list *list = self->local;
@@ -152,6 +153,7 @@ int mlt_properties_set_lcnumeric( mlt_properties self, const char *locale )
 	}
 	else
 		error = 1;
+#endif // _WIN32
 
 	return error;
 }
@@ -168,9 +170,10 @@ const char* mlt_properties_get_lcnumeric( mlt_properties self )
 {
 	if ( !self ) return NULL;
 
-	property_list *list = self->local;
 	const char *result = NULL;
 
+#if !defined(_WIN32)
+	property_list *list = self->local;
 	if ( list->locale )
 	{
 #if defined(__APPLE__)
@@ -190,18 +193,14 @@ const char* mlt_properties_get_lcnumeric( mlt_properties self )
 		}
 #endif
     }
+#endif // _WIN32
 	return result;
 }
 
 static int load_properties( mlt_properties self, const char *filename )
 {
-	// Convert filename string encoding.
-	mlt_properties_set( self, "_mlt_properties_load", filename );
-	mlt_properties_from_utf8( self, "_mlt_properties_load", "__mlt_properties_load" );
-	filename = mlt_properties_get( self, "__mlt_properties_load" );
-
 	// Open the file
-	FILE *file = fopen( filename, "r" );
+	FILE *file = mlt_fopen( filename, "r" );
 
 	// Load contents of file
 	if ( file != NULL )
@@ -516,13 +515,13 @@ static inline mlt_property mlt_properties_find( mlt_properties self, const char 
 	if ( i >= 0 )
 	{
 		// Check if we're hashed
-		if ( list->count > 0 &&
+		if ( list->count > 0 && list->name[ i ] &&
 		 	!strcmp( list->name[ i ], name ) )
 			value = list->value[ i ];
 
 		// Locate the item
 		for ( i = list->count - 1; value == NULL && i >= 0; i -- )
-			if ( !strcmp( list->name[ i ], name ) )
+			if ( list->name[ i ] && !strcmp( list->name[ i ], name ) )
 				value = list->value[ i ];
 	}
 	mlt_properties_unlock( self );
@@ -1177,7 +1176,7 @@ int mlt_properties_rename( mlt_properties self, const char *source, const char *
 		mlt_properties_lock( self );
 		for ( i = 0; i < list->count; i ++ )
 		{
-			if ( !strcmp( list->name[ i ], source ) )
+			if ( list->name[ i ] && !strcmp( list->name[ i ], source ) )
 			{
 				free( list->name[ i ] );
 				list->name[ i ] = strdup( dest );
@@ -1250,12 +1249,7 @@ int mlt_properties_save( mlt_properties self, const char *filename )
 	int error = 1;
 	if ( !self || !filename ) return error;
 
-	// Convert filename string encoding.
-	mlt_properties_set( self, "_mlt_properties_save", filename );
-	mlt_properties_from_utf8( self, "_mlt_properties_save", "__mlt_properties_save" );
-	filename = mlt_properties_get( self, "__mlt_properties_save" );
-
-	FILE *f = fopen( filename, "w" );
+	FILE *f = mlt_fopen( filename, "w" );
 	if ( f != NULL )
 	{
 		mlt_properties_dump( self, f );
@@ -1753,13 +1747,8 @@ mlt_properties mlt_properties_parse_yaml( const char *filename )
 
 	if ( self )
 	{
-		// Convert filename string encoding.
-		mlt_properties_set( self, "_mlt_properties_parse_yaml", filename );
-		mlt_properties_from_utf8( self, "_mlt_properties_parse_yaml", "__mlt_properties_parse_yaml" );
-		filename = mlt_properties_get( self, "__mlt_properties_parse_yaml" );
-	
 		// Open the file
-		FILE *file = fopen( filename, "r" );
+		FILE *file = mlt_fopen( filename, "r" );
 
 		// Load contents of file
 		if ( file )

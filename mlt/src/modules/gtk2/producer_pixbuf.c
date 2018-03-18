@@ -1,6 +1,6 @@
 /*
  * producer_pixbuf.c -- raster image loader based upon gdk-pixbuf
- * Copyright (C) 2003-2015 Meltytech, LLC
+ * Copyright (C) 2003-2017 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -50,6 +50,7 @@ struct producer_pixbuf_s
 
 	// File name list
 	mlt_properties filenames;
+	mlt_position *outs;
 	int count;
 	int image_idx;
 	int pixbuf_idx;
@@ -68,6 +69,24 @@ static void load_filenames( producer_pixbuf self, mlt_properties producer_proper
 static int refresh_pixbuf( producer_pixbuf self, mlt_frame frame );
 static int producer_get_frame( mlt_producer parent, mlt_frame_ptr frame, int index );
 static void producer_close( mlt_producer parent );
+
+static void refresh_length( mlt_properties properties, producer_pixbuf self )
+{
+	if ( self->count > mlt_properties_get_int( properties, "length" ) ||
+	     mlt_properties_get_int( properties, "autolength" ) )
+	{
+		int ttl = mlt_properties_get_int( properties, "ttl" );
+		mlt_position length = self->count * ttl;
+		mlt_properties_set_position( properties, "length", length );
+		mlt_properties_set_position( properties, "out", length - 1 );
+	}
+}
+
+static void on_property_changed( mlt_service owner, mlt_producer producer, char *name )
+{
+	if ( !strcmp( name, "ttl" ) )
+		refresh_length( MLT_PRODUCER_PROPERTIES(producer), producer->child );
+}
 
 mlt_producer producer_pixbuf_init( char *filename )
 {
@@ -129,6 +148,10 @@ mlt_producer producer_pixbuf_init( char *filename )
 		{
 			producer_close( producer );
 			producer = NULL;
+		}
+		else
+		{
+			mlt_events_listen( properties, self, "property-changed", (mlt_listener) on_property_changed );
 		}
 		return producer;
 	}
@@ -283,20 +306,93 @@ static int load_folder( producer_pixbuf self, mlt_properties properties, const c
 	return result;
 }
 
+static int load_sequence_csv( producer_pixbuf self, mlt_properties properties, const char *filename )
+{
+	int result = 0;
+	const char *csv_extension = strstr( filename, ".csv" );
+
+	if ( csv_extension != NULL && csv_extension[4] == '\0' )
+	{
+		FILE *csv = fopen( filename, "r" );
+		if ( csv != NULL )
+		{
+			int keyvalue = 0;
+			int out = 0;
+
+			int nlines = 0;
+			while ( !feof( csv ) )
+			{
+				char line[ 1024 ];
+				if ( fgets( line, 1024, csv ) != NULL )
+				{
+					nlines++;
+				}
+			}
+
+			self->outs = (mlt_position*)malloc(nlines * sizeof(mlt_position));
+
+			fseek(csv, 0, SEEK_SET);
+			int index = 0;
+			while ( !feof( csv ) )
+			{
+				char line[ 1024 ];
+				if ( fgets( line, 1024, csv ) != NULL )
+				{
+					char *sep = strchr(line, ';');
+					if ( sep != NULL )
+					{
+						int ttl = 0;
+						int n = 0;
+						char key[ 50 ];
+						struct stat buf;
+
+						*sep++ = '\0';
+						n = sscanf( sep, "%d", &ttl);
+						if ( n == 0 )
+						{
+							break;
+						}
+
+						if ( stat( line, &buf ) != 0 )
+						{
+							break;
+						}
+
+						out += ttl;
+						mlt_log_debug( MLT_PRODUCER_SERVICE( &self->parent ), "file:'%s' ttl=%d out=%d\n", line, ttl, out );
+
+						sprintf( key, "%d", keyvalue++ );
+						mlt_properties_set( self->filenames, key, line );
+						self->outs[index++] = out;
+					}
+				}
+			}
+
+			fclose( csv );
+			result = 1;
+		}
+	}
+
+	return result;
+}
+
 static void load_filenames( producer_pixbuf self, mlt_properties properties )
 {
 	char *filename = mlt_properties_get( properties, "resource" );
 	self->filenames = mlt_properties_new( );
+	self->outs = NULL;
 
 	if (!load_svg( self, properties, filename ) &&
 		!load_sequence_querystring( self, properties, filename ) &&
 		!load_sequence_sprintf( self, properties, filename ) &&
 		!load_sequence_deprecated( self, properties, filename ) &&
+		!load_sequence_csv( self, properties, filename ) &&
 		!load_folder( self, properties, filename ) )
 	{
 		mlt_properties_set( self->filenames, "0", filename );
 	}
 	self->count = mlt_properties_count( self->filenames );
+	refresh_length( properties, self );
 }
 
 static GdkPixbuf* reorient_with_exif( producer_pixbuf self, int image_idx, GdkPixbuf *pixbuf )
@@ -379,20 +475,45 @@ static int refresh_pixbuf( producer_pixbuf self, mlt_frame frame )
 		mlt_properties_set_int( producer_props, "force_reload", 0 );
 	}
 
-	// Get the time to live for each frame
-	double ttl = mlt_properties_get_int( producer_props, "ttl" );
-
 	// Get the original position of this frame
 	mlt_position position = mlt_frame_original_position( frame );
 	position += mlt_producer_get_in( producer );
 
-	// Image index
 	int loop = mlt_properties_get_int( producer_props, "loop" );
-	int current_idx;
-	if (loop) {
-		current_idx = ( int )floor( ( double )position / ttl ) % self->count;
-	} else {
-		current_idx = MIN(( double )position / ttl, self->count - 1);
+
+	// Image index
+	int current_idx = 0;
+	if ( !self->outs )
+	{
+		// Get the time to live for each frame
+		double ttl = mlt_properties_get_int( producer_props, "ttl" );
+		if (loop) {
+			current_idx = ( int )floor( ( double )position / ttl ) % self->count;
+		} else {
+			current_idx = MIN(( double )position / ttl, self->count - 1);
+		}
+	}
+	else
+	{
+		int total_ttl = ( int )floor( self->outs[self->count - 1]);
+		mlt_position looped_pos = loop ? ( int )floor( position ) % total_ttl : position;
+
+		while ( current_idx < self->count )
+		{
+			if (self->outs[ current_idx ] > looped_pos)
+			{
+				break;
+			}
+
+			current_idx++;
+		}
+
+		if ( current_idx >= self->count )
+		{
+			current_idx = self->count - 1;
+		}
+
+		mlt_log_debug( MLT_PRODUCER_SERVICE( &self->parent ), "position=%d current_idx=%d\n", position, current_idx );
 	}
 
 	int disable_exif = mlt_properties_get_int( producer_props, "disable_exif" );
@@ -683,6 +804,8 @@ static void producer_close( mlt_producer parent )
 	parent->close = NULL;
 	mlt_service_cache_purge( MLT_PRODUCER_SERVICE(parent) );
 	mlt_producer_close( parent );
+	free( self->outs );
+	self->outs = NULL;
 	mlt_properties_close( self->filenames );
 	free( self );
 }

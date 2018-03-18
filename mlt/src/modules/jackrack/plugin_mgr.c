@@ -79,7 +79,7 @@ plugin_mgr_get_object_file_plugins (plugin_mgr_t * plugin_mgr, const char * file
   int err;
   
   /* open the object file */
-  dl_handle = dlopen (filename, RTLD_NOW);
+  dl_handle = dlopen (filename, RTLD_LAZY);
   if (!dl_handle)
     {
       mlt_log_info( NULL, "%s: error opening shared object file '%s': %s\n",
@@ -286,6 +286,7 @@ plugin_mgr_destroy (plugin_mgr_t * plugin_mgr)
   
   g_slist_free (plugin_mgr->plugins);
   g_slist_free (plugin_mgr->all_plugins);
+  mlt_properties_close(plugin_mgr->blacklist);
   free (plugin_mgr);
 }
 

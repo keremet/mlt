@@ -27,6 +27,7 @@
 #include <iconv.h>
 #include <locale.h>
 #include <ctype.h>
+#include <stdio.h>
 #include "../framework/mlt_properties.h"
 #include "../framework/mlt_log.h"
 
@@ -164,4 +165,102 @@ int mlt_properties_to_utf8( mlt_properties properties, const char *prop_name, co
 		mlt_log_warning( NULL, "iconv failed to convert \"%s\" from code page %u to UTF-8\n", prop_name, codepage );
 	}
 	return result;
+}
+
+/* Adapted from g_win32_getlocale() - free() the result */
+char* getlocale()
+{
+	LCID lcid;
+	LANGID langid;
+	char *ev;
+	int primary, sub;
+	char iso639[10];
+	char iso3166[10];
+	const char *script = "";
+	char result[33];
+
+	/* Let the user override the system settings through environment
+	 * variables, as on POSIX systems.
+	 */
+	if (((ev = getenv ("LC_ALL")) != NULL && ev[0] != '\0')
+		|| ((ev = getenv ("LC_MESSAGES")) != NULL && ev[0] != '\0')
+		|| ((ev = getenv ("LANG")) != NULL && ev[0] != '\0'))
+	  return strdup (ev);
+
+	lcid = GetThreadLocale ();
+
+	if (!GetLocaleInfo (lcid, LOCALE_SISO639LANGNAME, iso639, sizeof (iso639)) ||
+		!GetLocaleInfo (lcid, LOCALE_SISO3166CTRYNAME, iso3166, sizeof (iso3166)))
+	  return strdup ("C");
+
+	/* Strip off the sorting rules, keep only the language part.  */
+	langid = LANGIDFROMLCID (lcid);
+
+	/* Split into language and territory part.  */
+	primary = PRIMARYLANGID (langid);
+	sub = SUBLANGID (langid);
+
+	/* Handle special cases */
+	switch (primary)
+	  {
+	  case LANG_AZERI:
+		switch (sub)
+		 {
+		 case SUBLANG_AZERI_LATIN:
+		   script = "@Latn";
+		   break;
+		 case SUBLANG_AZERI_CYRILLIC:
+		   script = "@Cyrl";
+		   break;
+		 }
+		break;
+	  case LANG_SERBIAN:             /* LANG_CROATIAN == LANG_SERBIAN */
+		switch (sub)
+		 {
+		 case SUBLANG_SERBIAN_LATIN:
+		 case 0x06: /* Serbian (Latin) - Bosnia and Herzegovina */
+		   script = "@Latn";
+		   break;
+		 }
+		break;
+	  case LANG_UZBEK:
+		switch (sub)
+		 {
+		 case SUBLANG_UZBEK_LATIN:
+		   script = "@Latn";
+		   break;
+		 case SUBLANG_UZBEK_CYRILLIC:
+		   script = "@Cyrl";
+		   break;
+		 }
+		break;
+	  }
+	snprintf (result, sizeof(result), "%s_%s%s", iso639, iso3166, script);
+	result[sizeof(result) - 1] = '\0';
+	return strdup (result);
+}
+
+FILE* win32_fopen(const char *filename_utf8, const char *mode_utf8)
+{
+	// Convert UTF-8 to wide chars.
+	int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, filename_utf8, -1, NULL, 0);
+	if (n > 0) {
+		wchar_t *filename_w = (wchar_t *) calloc(n, sizeof(wchar_t));
+		if (filename_w) {
+			int m = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, mode_utf8, -1, NULL, 0);
+			if (m > 0) {
+				wchar_t *mode_w = (wchar_t *) calloc(m, sizeof(wchar_t));
+				if (mode_w) {
+					MultiByteToWideChar(CP_UTF8, 0, filename_utf8, -1, filename_w, n);
+					MultiByteToWideChar(CP_UTF8, 0, mode_utf8, -1, mode_w, n);
+					FILE *fh = _wfopen(filename_w, mode_w);
+					free(filename_w);
+					if (fh)
+						return fh;
+				}
+			}
+		}
+	}
+	// Try with regular old fopen.
+	return fopen(filename_utf8, mode_utf8);
 }

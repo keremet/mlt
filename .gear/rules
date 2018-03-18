@@ -1,4 +1,4 @@
-tar: mlt name=mlt-@version@
+tar.gz: mlt
 copy?: *.patch
 copy?: *.diff
 copy?: *.h

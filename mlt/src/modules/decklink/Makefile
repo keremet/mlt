@@ -18,6 +18,7 @@ else
 ifeq ($(targetos), Darwin)
 CFLAGS += -Idarwin
 OBJS += darwin/DeckLinkAPIDispatch.o
+LDFLAGS += -framework CoreFoundation
 else
 CFLAGS += -Ilinux
 OBJS += linux/DeckLinkAPIDispatch.o
@@ -50,7 +51,7 @@ install: all
 	install -m 644 *.yml "$(DESTDIR)$(mltdatadir)/decklink"
 
 uninstall:
-	rm "$(DESTDIR)$(moduledir)/libmltdecklink$(LIBSUF)" 2> /dev/null || true
+	rm -f "$(DESTDIR)$(moduledir)/libmltdecklink$(LIBSUF)"
 	rm -rf "$(DESTDIR)$(mltdatadir)/decklink"
 
 ifneq ($(wildcard .depend),)

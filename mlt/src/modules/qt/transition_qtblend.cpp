@@ -36,13 +36,9 @@ static int get_image( mlt_frame a_frame, uint8_t **image, mlt_image_format *form
 	uint8_t *b_image = NULL;
 	bool hasAlpha = false;
 	double opacity = 1.0;
-	int b_width = *width;
-	int b_height = *height;
 	QTransform transform;
 	// reference rect
 	mlt_rect rect;
-	rect.w = -1;
-	rect.h = -1;
 
 	// Determine length
 	mlt_position length = mlt_transition_get_length( transition );
@@ -53,29 +49,46 @@ static int get_image( mlt_frame a_frame, uint8_t **image, mlt_image_format *form
 	mlt_profile profile = mlt_service_profile( MLT_TRANSITION_SERVICE( transition ) );
 	int normalised_width = profile->width;
 	int normalised_height = profile->height;
+	double consumer_ar = mlt_profile_sar( profile );
+	int b_width = mlt_properties_get_int( b_properties, "meta.media.width" );
+	int b_height = mlt_properties_get_int( b_properties, "meta.media.height" );
+	if ( b_height == 0 )
+	{
+		b_width = normalised_width;
+		b_height = normalised_height;
+	}
+	double b_ar = mlt_frame_get_aspect_ratio( b_frame );
+	double b_dar = b_ar * b_width / b_height;
+	rect.w = -1;
+	rect.h = -1;
 
 	// Check transform
 	if ( mlt_properties_get( transition_properties, "rect" ) )
 	{
 		rect = mlt_properties_anim_get_rect( transition_properties, "rect", position, length );
 		transform.translate(rect.x, rect.y);
-		b_width = rect.w;
-		b_height = rect.h;
 		opacity = rect.o;
-	}
-	else
-	{
-		b_width = normalised_width;
-		b_height = normalised_height;
 	}
 
 	double output_ar = mlt_profile_sar( profile );
-	mlt_frame_set_aspect_ratio( b_frame, output_ar );
+	if ( mlt_frame_get_aspect_ratio( b_frame ) == 0 )
+	{
+		mlt_frame_set_aspect_ratio( b_frame, output_ar );
+	}
 
 	if ( mlt_properties_get( transition_properties, "rotation" ) )
 	{
 		double angle = mlt_properties_anim_get_double( transition_properties, "rotation", position, length );
-		transform.rotate( angle );
+		if ( mlt_properties_get_int( properties, "rotate_center" ) )
+		{
+			transform.translate( rect.w / 2.0, rect.h / 2.0 );
+			transform.rotate( angle );
+			transform.translate( -rect.w / 2.0, -rect.h / 2.0 );
+		}
+		else
+		{
+			transform.rotate( angle );
+		}
 		hasAlpha = true;
 	}
 
@@ -86,9 +99,6 @@ static int get_image( mlt_frame a_frame, uint8_t **image, mlt_image_format *form
 	char *interps = mlt_properties_get( properties, "rescale.interp" );
 	if ( interps )
 		interps = strdup( interps );
-
-	// Required for yuv scaling
-	b_width -= b_width % 2;
 
 	if ( error )
 	{
@@ -104,8 +114,11 @@ static int get_image( mlt_frame a_frame, uint8_t **image, mlt_image_format *form
 		}
 		else
 		{
-			double scale = qMin( rect.w / b_width, rect.h / b_height );
-			transform.scale( scale, scale );
+			// Determine scale with respect to aspect ratio.
+			float scale_x = MIN( rect.w / b_width * ( consumer_ar / b_ar ) , rect.h / b_height );
+			float scale_y = scale_x;
+			transform.translate((rect.w - (b_width * scale_x)) / 2.0, (rect.h - (b_height * scale_y)) / 2.0);
+			transform.scale( scale_x, scale_y );
 		}
 
 		if ( opacity < 1 || transform.isScaling() || transform.isTranslating() )
@@ -114,7 +127,18 @@ static int get_image( mlt_frame a_frame, uint8_t **image, mlt_image_format *form
 			hasAlpha = true;
 		}
 	}
-	if ( !hasAlpha && ( mlt_properties_get_int( transition_properties, "compositing" ) != 0 || b_width < *width || b_height < *height || mlt_properties_get_int( b_properties, "meta.media.width" ) < normalised_width || mlt_properties_get_int( b_properties, "meta.media.height" )  < normalised_height ) )
+	else
+	{
+		// No transform, request profile sized image
+		if (b_dar != mlt_profile_dar( profile ) )
+		{
+			// Activate transparency if the clips don't have the same aspect ratio
+			hasAlpha = true;
+		}
+		b_width = *width;
+		b_height = *height;
+	}
+	if ( !hasAlpha && ( mlt_properties_get_int( transition_properties, "compositing" ) != 0 || b_width < *width || b_height < *height || b_width < normalised_width || b_height  < normalised_height ) )
 	{
 		hasAlpha = true;
 	}
@@ -123,31 +147,23 @@ static int get_image( mlt_frame a_frame, uint8_t **image, mlt_image_format *form
 	if ( !hasAlpha )
 	{
 		// fetch image
-		error = mlt_frame_get_image( b_frame, &b_image, format, &b_width, &b_height, writable );
-		uint8_t *alpha_b = mlt_frame_get_alpha( b_frame );
-		hasAlpha = alpha_b != NULL;
+		error = mlt_frame_get_image( b_frame, &b_image, format, width, height, 1 );
+		if ( *format == mlt_image_rgb24a || mlt_frame_get_alpha( b_frame ) )
+		{
+			hasAlpha = true;
+		}
 	}
-
 	if ( !hasAlpha )
 	{
 		// Prepare output image
-		*width = b_width;
-		*height = b_height;
-		int image_size = mlt_image_format_size( *format, *width, *height, NULL );
-		*image = (uint8_t *) mlt_pool_alloc( image_size );
-		// No transparency, return top frame
-		memcpy( *image, b_image, image_size );
-		mlt_properties_set_data( properties, "image", *image, image_size, mlt_pool_release, NULL );
+		*image = b_image;
+		mlt_frame_replace_image( a_frame, b_image, *format, *width, *height );
 		free( interps );
 		return 0;
 	}
 	// Get RGBA image to process
 	*format = mlt_image_rgb24a;
 	error = mlt_frame_get_image( b_frame, &b_image, format, &b_width, &b_height, writable );
-
-	// Prepare output image
-	int image_size = mlt_image_format_size( *format, *width, *height, NULL );
-	*image = (uint8_t *) mlt_pool_alloc( image_size );
 
 	// Get bottom frame
 	uint8_t *a_image = NULL;
@@ -157,6 +173,9 @@ static int get_image( mlt_frame a_frame, uint8_t **image, mlt_image_format *form
 		free( interps );
 		return error;
 	}
+	// Prepare output image
+	int image_size = mlt_image_format_size( *format, *width, *height, NULL );
+	*image = (uint8_t *) mlt_pool_alloc( image_size );
 
 	// Copy bottom frame in output
 	memcpy( *image, a_image, image_size );
@@ -192,7 +211,7 @@ static int get_image( mlt_frame a_frame, uint8_t **image, mlt_image_format *form
 	// finish Qt drawing
 	painter.end();
 	convert_qimage_to_mlt_rgba( &bottomImg, *image, *width, *height );
-	mlt_properties_set_data( properties, "image", *image, image_size, mlt_pool_release, NULL );
+	mlt_frame_set_image( a_frame, *image, image_size, mlt_pool_release);
 	free( interps );
 	return error;
 }
@@ -225,6 +244,7 @@ mlt_transition transition_qtblend_init( mlt_profile profile, mlt_service_type ty
 		mlt_properties_set( properties, "rect", (char *) arg );
 		mlt_properties_set_int( properties, "compositing", 0 );
 		mlt_properties_set_int( properties, "distort", 0 );
+		mlt_properties_set_int( properties, "rotate_center", 0 );
 	}
 
 	return transition;

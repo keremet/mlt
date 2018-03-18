@@ -1,7 +1,7 @@
 /*
  * filter_glsl_manager.cpp
  * Copyright (C) 2011-2012 Christophe Thommeret <hftom@free.fr>
- * Copyright (C) 2013 Dan Dennedy <dan@dennedy.org>
+ * Copyright (C) 2013-2017 Dan Dennedy <dan@dennedy.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -42,6 +42,10 @@ extern "C" {
 #else
 #include <GL/glx.h>
 #endif
+
+// Texture pool may cause frames to appear out-of-order with NVIDIA
+// threaded optimizations.
+#define USE_TEXTURE_POOL 1
 
 using namespace movit;
 
@@ -107,6 +111,7 @@ GlslManager* GlslManager::get_instance()
 
 glsl_texture GlslManager::get_texture(int width, int height, GLint internal_format)
 {
+#if USE_TEXTURE_POOL
 	lock();
 	for (int i = 0; i < texture_list.count(); ++i) {
 		glsl_texture tex = (glsl_texture) texture_list.peek(i);
@@ -121,6 +126,7 @@ glsl_texture GlslManager::get_texture(int width, int height, GLint internal_form
 		}
 	}
 	unlock();
+#endif
 
 	GLuint tex = 0;
 	glGenTextures(1, &tex);
@@ -147,15 +153,24 @@ glsl_texture GlslManager::get_texture(int width, int height, GLint internal_form
 	gtex->height = height;
 	gtex->internal_format = internal_format;
 	gtex->used = 1;
+#if USE_TEXTURE_POOL
 	lock();
 	texture_list.push_back(gtex);
 	unlock();
+#endif
 	return gtex;
 }
 
 void GlslManager::release_texture(glsl_texture texture)
 {
+#if USE_TEXTURE_POOL
 	texture->used = 0;
+#else
+	GlslManager* g = GlslManager::get_instance();
+	g->lock();
+	g->texture_list.push_back(texture);
+	g->unlock();
+#endif
 }
 
 void GlslManager::delete_sync(GLsync sync)
@@ -391,6 +406,13 @@ int GlslManager::render_frame_texture(EffectChain *chain, mlt_frame frame, int w
 		GLsync sync = (GLsync) syncs_to_delete.pop_front();
 		glDeleteSync( sync );
 	}
+#if !USE_TEXTURE_POOL
+	while (texture_list.count() > 0) {
+		glsl_texture texture = (glsl_texture) texture_list.pop_back();
+		glDeleteTextures(1, &texture->texture);
+		delete texture;
+	}
+#endif
 	unlock();
 
 	// Make sure we never have more than one frame pending at any time.
