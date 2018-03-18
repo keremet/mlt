@@ -23,7 +23,7 @@ Release: alt5%ubt
 Summary: Multimedia framework designed for television broadcasting
 License: GPLv3
 Group: Video
-URL: http://sourceforge.net/projects/%name
+URL: https://www.mltframework.org/
 
 Packager: Maxim Ivanov <redbaron@altlinux.org>
 
