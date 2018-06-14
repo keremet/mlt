@@ -1,6 +1,6 @@
 /*
  * producer_avformat.c -- avformat producer
- * Copyright (C) 2003-2017 Meltytech, LLC
+ * Copyright (C) 2003-2018 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,6 +16,8 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
+
+#include "common.h"
 
 // MLT Header files
 #include <framework/mlt_producer.h>
@@ -1266,7 +1268,7 @@ static int pick_av_pixel_format( int *pix_fmt )
 	return 0;
 }
 
-#if LIBSWSCALE_VERSION_INT >= AV_VERSION_INT( 3, 1, 101 )
+#if defined(FFUDIV) && (LIBSWSCALE_VERSION_INT >= ((3<<16)+(1<<8)+101))
 struct sliced_pix_fmt_conv_t
 {
 	int width, height, slice_w;
@@ -1461,7 +1463,7 @@ static int convert_image( producer_avformat self, AVFrame *frame, uint8_t *buffe
 		sws_freeContext( context );
 	}
 	else
-#if LIBSWSCALE_VERSION_INT >= AV_VERSION_INT( 3, 1, 101 )
+#if defined(FFUDIV) && (LIBSWSCALE_VERSION_INT >= ((3<<16)+(1<<8)+101))
 	{
 		int i, c;
 		struct sliced_pix_fmt_conv_t ctx =
@@ -1691,6 +1693,13 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 			*format = mlt_image_rgb24;
 	}
 #endif
+	else if ( codec_context->pix_fmt == AV_PIX_FMT_YUVA444P10LE
+#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(56,0,0)
+			|| codec_context->pix_fmt == AV_PIX_FMT_GBRAP10LE
+			|| codec_context->pix_fmt == AV_PIX_FMT_GBRAP12LE
+#endif
+			)
+		*format = mlt_image_rgb24a;
 
 	// Duplicate the last image if necessary
 	if ( self->video_frame && self->video_frame->linesize[0]
@@ -2038,11 +2047,12 @@ static void apply_properties( void *obj, mlt_properties properties, int flags )
 	for ( i = 0; i < count; i++ )
 	{
 		const char *opt_name = mlt_properties_get_name( properties, i );
-		const AVOption *opt = av_opt_find( obj, opt_name, NULL, flags, flags );
+		int search_flags = AV_OPT_SEARCH_CHILDREN;
+		const AVOption *opt = av_opt_find( obj, opt_name, NULL, flags, search_flags );
 		if ( opt_name && mlt_properties_get( properties, opt_name ) )
 		{
 			if ( opt )
-				av_opt_set( obj, opt_name, mlt_properties_get( properties, opt_name), 0 );
+				av_opt_set( obj, opt_name, mlt_properties_get( properties, opt_name), search_flags );
 		}
 	}
 }
@@ -2613,6 +2623,7 @@ static int producer_get_audio( mlt_frame frame, void **buffer, mlt_audio_format 
 		int ret	= 0;
 		int got_audio = 0;
 		AVPacket pkt;
+		mlt_channel_layout layout;
 
 		av_init_packet( &pkt );
 		
@@ -2706,9 +2717,14 @@ static int producer_get_audio( mlt_frame frame, void **buffer, mlt_audio_format 
 			*frequency = self->audio_codec[ index ]->sample_rate;
 			*format = pick_audio_format( self->audio_codec[ index ]->sample_fmt );
 			sizeof_sample = sample_bytes( self->audio_codec[ index ] );
+			if( self->audio_codec[ index ]->channel_layout == 0 )
+				layout = av_channel_layout_to_mlt( av_get_default_channel_layout( self->audio_codec[ index ]->channels ) );
+			else
+				layout = av_channel_layout_to_mlt( self->audio_codec[ index ]->channel_layout );
 		}
 		else if ( self->audio_index == INT_MAX )
 		{
+			layout = mlt_channel_independent;
 			for ( index = 0; index < index_max; index++ )
 				if ( self->audio_codec[ index ] )
 				{
@@ -2718,6 +2734,7 @@ static int producer_get_audio( mlt_frame frame, void **buffer, mlt_audio_format 
 					break;
 				}
 		}
+		mlt_properties_set( MLT_FRAME_PROPERTIES(frame), "channel_layout", mlt_channel_layout_name( layout ) );
 
 		// Allocate and set the frame's audio buffer
 		int size = mlt_audio_format_size( *format, *samples, *channels );

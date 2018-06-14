@@ -3,7 +3,7 @@
  * \brief Property Animation class definition
  * \see mlt_animation_s
  *
- * Copyright (C) 2004-2014 Meltytech, LLC
+ * Copyright (C) 2004-2018 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -192,6 +192,8 @@ int mlt_animation_parse(mlt_animation self, const char *data, int length, double
 	self->fps = fps;
 	self->locale = locale;
 	item.property = mlt_property_init();
+	item.frame = item.is_key = 0;
+	item.keyframe_type = mlt_keyframe_discrete;
 
 	// Tokenise
 	if ( data )
@@ -585,6 +587,8 @@ char *mlt_animation_serialize_cut( mlt_animation self, int in, int out )
 	size_t size = 1000;
 
 	item.property = mlt_property_init();
+	item.frame = item.is_key = 0;
+	item.keyframe_type = mlt_keyframe_discrete;
 	if ( in == -1 )
 		in = 0;
 	if ( out == -1 )
@@ -726,7 +730,7 @@ int mlt_animation_key_count( mlt_animation self )
  * \public \memberof mlt_animation_s
  * \param self an animation
  * \param item an already allocated animation item that will be filled in
- * \param position the frame number for the point in time
+ * \param index the N-th keyframe (0 based) in this animation
  * \return true if there was an error
  */
 
@@ -770,4 +774,62 @@ void mlt_animation_close( mlt_animation self )
 		mlt_animation_clean( self );
 		free( self );
 	}
+}
+
+/** Change the interpolation for the N-th keyframe.
+ *
+ * \public \memberof mlt_animation_s
+ * \param self an animation
+ * \param index the N-th keyframe (0 based) in this animation
+ * \param type the method of interpolation for this key frame
+ * \return true if there was an error
+ */
+
+int mlt_animation_key_set_type(mlt_animation self, int index, mlt_keyframe_type type)
+{
+	int error = 0;
+	animation_node node = self->nodes;
+
+	// Iterate through the keyframes.
+	int i = index;
+	while ( i-- && node )
+		node = node->next;
+
+	if ( node ) {
+		node->item.keyframe_type = type;
+		mlt_animation_interpolate(self);
+	} else {
+		error = 1;
+	}
+
+	return error;
+}
+
+/** Change the frame number for the N-th keyframe.
+ *
+ * \public \memberof mlt_animation_s
+ * \param self an animation
+ * \param index the N-th keyframe (0 based) in this animation
+ * \param frame the position of this keyframe in frame units
+ * \return true if there was an error
+ */
+
+int mlt_animation_key_set_frame(mlt_animation self, int index, int frame)
+{
+	int error = 0;
+	animation_node node = self->nodes;
+
+	// Iterate through the keyframes.
+	int i = index;
+	while ( i-- && node )
+		node = node->next;
+
+	if ( node ) {
+		node->item.frame = frame;
+		mlt_animation_interpolate(self);
+	} else {
+		error = 1;
+	}
+
+	return error;
 }

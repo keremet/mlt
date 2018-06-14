@@ -1,6 +1,6 @@
 /*
- * consumer_sdl_audio.c -- A Simple DirectMedia Layer audio-only consumer
- * Copyright (C) 2009-2017 Meltytech, LLC
+ * consumer_sdl2_audio.c -- A Simple DirectMedia Layer audio-only consumer
+ * Copyright (C) 2009-2018 Meltytech, LLC
  * Author: Dan Dennedy <dan@dennedy.org>
  *
  * This library is free software; you can redistribute it and/or
@@ -17,6 +17,8 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
+
+#include "common.h"
 
 #include <framework/mlt_consumer.h>
 #include <framework/mlt_frame.h>
@@ -52,6 +54,7 @@ struct consumer_sdl_s
 	pthread_cond_t audio_cond;
 	pthread_mutex_t video_mutex;
 	pthread_cond_t video_cond;
+	int out_channels;
 	int playing;
 
 	pthread_cond_t refresh_cond;
@@ -75,7 +78,7 @@ static void consumer_refresh_cb( mlt_consumer sdl, mlt_consumer self, char *name
 	via the argument, but keep it simple.
 */
 
-mlt_consumer consumer_sdl_audio_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg )
+mlt_consumer consumer_sdl2_audio_init( mlt_profile profile, mlt_service_type type, const char *id, char *arg )
 {
 	// Create the consumer object
 	consumer_sdl self = calloc( 1, sizeof( struct consumer_sdl_s ) );
@@ -115,9 +118,6 @@ mlt_consumer consumer_sdl_audio_init( mlt_profile profile, mlt_service_type type
 
 		// Default audio buffer
 		mlt_properties_set_int( self->properties, "audio_buffer", 2048 );
-#if defined(_WIN32) && SDL_MAJOR_VERSION == 2
-		mlt_properties_set( self->properties, "audio_driver", "DirectSound" );
-#endif
 
 		// Ensure we don't join on a non-running object
 		self->joined = 1;
@@ -271,10 +271,9 @@ static void sdl_fill_audio( void *udata, uint8_t *stream, int len )
 	{
 		// Place in the audio buffer
 		if ( volume != 1.0 )
-			SDL_MixAudio( stream, self->audio_buffer, len, ( int )( ( float )SDL_MIX_MAXVOLUME * volume ) );
+			SDL_MixAudioFormat( stream, self->audio_buffer, AUDIO_S16SYS, len, ( int )( ( float )SDL_MIX_MAXVOLUME * volume ) );
 		else
 			memcpy( stream, self->audio_buffer, len );
-
 		// Remove len from the audio available
 		self->audio_avail -= len;
 
@@ -284,7 +283,7 @@ static void sdl_fill_audio( void *udata, uint8_t *stream, int len )
 	else
 	{
 		// Mix the audio
-		SDL_MixAudio( stream, self->audio_buffer, self->audio_avail,
+		SDL_MixAudioFormat( stream, self->audio_buffer, self->audio_avail, AUDIO_S16SYS,
 			( int )( ( float )SDL_MIX_MAXVOLUME * volume ) );
 
 		// No audio left
@@ -306,7 +305,6 @@ static int consumer_play_audio( consumer_sdl self, mlt_frame frame, int init_aud
 
 	// Set the preferred params of the test card signal
 	int channels = mlt_properties_get_int( properties, "channels" );
-	int dest_channels = channels;
 	int frequency = mlt_properties_get_int( properties, "frequency" );
 	int scrub = mlt_properties_get_int( properties, "scrub_audio" );
 	static int counter = 0;
@@ -328,7 +326,7 @@ static int consumer_play_audio( consumer_sdl self, mlt_frame frame, int init_aud
 	{
 		SDL_AudioSpec request;
 		SDL_AudioSpec got;
-
+		SDL_AudioDeviceID dev;
 		int audio_buffer = mlt_properties_get_int( properties, "audio_buffer" );
 
 		// specify audio format
@@ -336,19 +334,27 @@ static int consumer_play_audio( consumer_sdl self, mlt_frame frame, int init_aud
 		self->playing = 0;
 		request.freq = frequency;
 		request.format = AUDIO_S16SYS;
-		request.channels = dest_channels;
+		request.channels = mlt_properties_get_int( properties, "channels" );
 		request.samples = audio_buffer;
 		request.callback = sdl_fill_audio;
 		request.userdata = (void *)self;
-		if ( SDL_OpenAudio( &request, &got ) != 0 )
+
+		dev = sdl2_open_audio( &request, &got );
+		if( dev == 0 )
 		{
-			mlt_log_error( MLT_CONSUMER_SERVICE( self ), "SDL failed to open audio: %s\n", SDL_GetError() );
+			mlt_log_error( MLT_CONSUMER_SERVICE( self ), "SDL failed to open audio\n" );
 			init_audio = 2;
 		}
-		else if ( got.size != 0 )
+		else
 		{
-			SDL_PauseAudio( 0 );
+			if( got.channels != request.channels )
+			{
+				mlt_log_info( MLT_CONSUMER_SERVICE( self ), "Unable to output %d channels. Change to %d\n", request.channels, got.channels );
+			}
+				mlt_log_info( MLT_CONSUMER_SERVICE( self ), "Audio Opened: driver=%s channels=%d frequency=%d\n", SDL_GetCurrentAudioDriver(), got.channels, got.freq );
+			SDL_PauseAudioDevice( dev, 0 );
 			init_audio = 0;
+			self->out_channels = got.channels;
 		}
 	}
 
@@ -356,7 +362,7 @@ static int consumer_play_audio( consumer_sdl self, mlt_frame frame, int init_aud
 	{
 		mlt_properties properties = MLT_FRAME_PROPERTIES( frame );
 		int samples_copied = 0;
-		int dst_stride = dest_channels * sizeof( *pcm );
+		int dst_stride = self->out_channels * sizeof( *pcm );
 
 		pthread_mutex_lock( &self->audio_mutex );
 
@@ -379,7 +385,7 @@ static int consumer_play_audio( consumer_sdl self, mlt_frame frame, int init_aud
 
 				if ( scrub || mlt_properties_get_double( properties, "_speed" ) == 1 )
 				{
-					if ( channels == dest_channels )
+					if ( channels == self->out_channels )
 					{
 						memcpy( &self->audio_buffer[ self->audio_avail ], pcm, dst_bytes );
 						pcm += samples_to_copy * channels;
@@ -392,7 +398,7 @@ static int consumer_play_audio( consumer_sdl self, mlt_frame frame, int init_aud
 						{
 							memcpy( dest, pcm, dst_stride );
 							pcm += channels;
-							dest += dest_channels;
+							dest += self->out_channels;
 						}
 					}
 				}

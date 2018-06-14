@@ -17,6 +17,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
+#include "common.h"
+
 #include <framework/mlt_consumer.h>
 #include <framework/mlt_frame.h>
 #include <framework/mlt_deque.h>
@@ -59,6 +61,7 @@ struct consumer_sdl_s
 	int previous_height;
 	int width;
 	int height;
+	int out_channels;
 	int playing;
 	SDL_Window *sdl_window;
 	SDL_Renderer *sdl_renderer;
@@ -124,9 +127,9 @@ mlt_consumer consumer_sdl2_init( mlt_profile profile, mlt_service_type type, con
 
 		// Default audio buffer
 		mlt_properties_set_int( self->properties, "audio_buffer", 2048 );
-#if defined(_WIN32) && SDL_MAJOR_VERSION == 2
-		mlt_properties_set( self->properties, "audio_driver", "DirectSound" );
-#endif
+
+		// Default scrub audio
+		mlt_properties_set_int( self->properties, "scrub_audio", 1 );
 
 		// Ensure we don't join on a non-running object
 		self->joined = 1;
@@ -356,15 +359,12 @@ static int consumer_play_audio( consumer_sdl self, mlt_frame frame, int init_aud
 
 	// Set the preferred params of the test card signal
 	int channels = mlt_properties_get_int( properties, "channels" );
-	int dest_channels = channels;
 	int frequency = mlt_properties_get_int( properties, "frequency" );
+	int scrub = mlt_properties_get_int( properties, "scrub_audio" );
 	static int counter = 0;
 
 	int samples = mlt_sample_calculator( mlt_properties_get_double( self->properties, "fps" ), frequency, counter++ );
-	
 	int16_t *pcm;
-	int bytes;
-
 	mlt_frame_get_audio( frame, (void**) &pcm, &afmt, &frequency, &channels, &samples );
 	*duration = ( ( samples * 1000 ) / frequency );
 	pcm += mlt_properties_get_int( properties, "audio_offset" );
@@ -380,7 +380,7 @@ static int consumer_play_audio( consumer_sdl self, mlt_frame frame, int init_aud
 	{
 		SDL_AudioSpec request;
 		SDL_AudioSpec got;
-
+		SDL_AudioDeviceID dev;
 		int audio_buffer = mlt_properties_get_int( properties, "audio_buffer" );
 
 		// specify audio format
@@ -388,58 +388,84 @@ static int consumer_play_audio( consumer_sdl self, mlt_frame frame, int init_aud
 		self->playing = 0;
 		request.freq = frequency;
 		request.format = AUDIO_S16SYS;
-		request.channels = dest_channels;
+		request.channels = mlt_properties_get_int( properties, "channels" );
 		request.samples = audio_buffer;
 		request.callback = sdl_fill_audio;
 		request.userdata = (void *)self;
-		if ( SDL_OpenAudio( &request, &got ) != 0 )
+
+		dev = sdl2_open_audio( &request, &got );
+		if( dev == 0 )
 		{
-			mlt_log_error( MLT_CONSUMER_SERVICE( self ), "SDL failed to open audio: %s\n", SDL_GetError() );
+			mlt_log_error( MLT_CONSUMER_SERVICE( self ), "SDL failed to open audio\n" );
 			init_audio = 2;
 		}
-		else if ( got.size != 0 )
+		else
 		{
-			SDL_PauseAudio( 0 );
+			if( got.channels != request.channels )
+			{
+				mlt_log_info( MLT_CONSUMER_SERVICE( self ), "Unable to output %d channels. Change to %d\n", request.channels, got.channels );
+			}
+			mlt_log_info( MLT_CONSUMER_SERVICE( self ), "Audio Opened: driver=%s channels=%d frequency=%d\n", SDL_GetCurrentAudioDriver(), got.channels, got.freq );
+			SDL_PauseAudioDevice( dev, 0 );
 			init_audio = 0;
+			self->out_channels = got.channels;
 		}
 	}
 
 	if ( init_audio == 0 )
 	{
 		mlt_properties properties = MLT_FRAME_PROPERTIES( frame );
-		
-		bytes = samples * dest_channels * sizeof(*pcm);
+		int samples_copied = 0;
+		int dst_stride = self->out_channels * sizeof( *pcm );
+
 		pthread_mutex_lock( &self->audio_mutex );
-		while ( self->running && bytes > ( sizeof( self->audio_buffer) - self->audio_avail ) )
-			pthread_cond_wait( &self->audio_cond, &self->audio_mutex );
-		if ( self->running )
+
+		while ( self->running && samples_copied < samples )
 		{
-			if ( mlt_properties_get_double( properties, "_speed" ) == 1 )
+			int sample_space = ( sizeof( self->audio_buffer ) - self->audio_avail ) / dst_stride;
+			while ( self->running && sample_space == 0 )
 			{
-				if ( channels == dest_channels )
+				pthread_cond_wait( &self->audio_cond, &self->audio_mutex );
+				sample_space = ( sizeof( self->audio_buffer ) - self->audio_avail ) / dst_stride;
+			}
+			if ( self->running )
+			{
+				int samples_to_copy = samples - samples_copied;
+				if ( samples_to_copy > sample_space )
 				{
-					memcpy( &self->audio_buffer[ self->audio_avail ], pcm, bytes );
+					samples_to_copy = sample_space;
+				}
+				int dst_bytes = samples_to_copy * dst_stride;
+
+				if ( scrub || mlt_properties_get_double( properties, "_speed" ) == 1 )
+				{
+					if ( channels == self->out_channels )
+					{
+						memcpy( &self->audio_buffer[ self->audio_avail ], pcm, dst_bytes );
+						pcm += samples_to_copy * channels;
+					}
+					else
+					{
+						int16_t *dest = (int16_t*) &self->audio_buffer[ self->audio_avail ];
+						int i = samples_to_copy + 1;
+						while ( --i )
+						{
+							memcpy( dest, pcm, dst_stride );
+							pcm += channels;
+							dest += self->out_channels;
+						}
+					}
 				}
 				else
 				{
-					int16_t *dest = (int16_t*) &self->audio_buffer[ self->audio_avail ];
-					int i = samples + 1;
-					
-					while ( --i )
-					{
-						memcpy( dest, pcm, dest_channels * sizeof(*pcm) );
-						pcm += channels;
-						dest += dest_channels;
-					}
+					memset( &self->audio_buffer[ self->audio_avail ], 0, dst_bytes );
+					pcm += samples_to_copy * channels;
 				}
+				self->audio_avail += dst_bytes;
+				samples_copied += samples_to_copy;
 			}
-			else
-			{
-				memset( &self->audio_buffer[ self->audio_avail ], 0, bytes );
-			}
-			self->audio_avail += bytes;
+			pthread_cond_broadcast( &self->audio_cond );
 		}
-		pthread_cond_broadcast( &self->audio_cond );
 		pthread_mutex_unlock( &self->audio_mutex );
 	}
 	else
