@@ -49,9 +49,9 @@ Patch104: alt-glibc2.26.patch
 BuildRequires(pre): rpm-build-kf5 rpm-build-ubt
 BuildRequires: qt5-svg-devel
 BuildRequires: frei0r-devel libSDL2_image-devel libalsa-devel libexif-devel
-BuildRequires: libavfilter-devel libswscale-devel libavdevice-devel libavformat-devel
+BuildRequires: libavfilter-devel libswscale-devel libavdevice-devel libavformat-devel libswresample-devel
 BuildRequires: libfftw3-devel libjack-devel libpulseaudio-devel libsamplerate-devel libsox-devel
-buildRequires: libvidstab-devel
+BuildRequires: libvidstab-devel
 BuildRequires: libxml2-devel swig python-devel ladspa_sdk
 %if_enabled vdpau
 BuildRequires: libvdpau-devel
