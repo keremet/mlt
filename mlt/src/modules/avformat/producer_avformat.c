@@ -38,6 +38,7 @@
 #include <libavutil/opt.h>
 #include <libavutil/channel_layout.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/version.h>
 
 #ifdef VDPAU
 #  include <libavcodec/vdpau.h>
@@ -582,8 +583,9 @@ static char* parse_url( mlt_profile profile, const char* URL, AVInputFormat **fo
 			}
 			free( width );
 			free( height );
+			result = strdup(result);
 			free( protocol );
-			return strdup( result );
+			return result;
 		}
 	}
 	free( protocol );
@@ -1492,16 +1494,18 @@ static int convert_image( producer_avformat self, AVFrame *frame, uint8_t *buffe
 			ctx.slice_w = ( width < 1000 )
 				? ( 256 >> frame->interlaced_frame )
 				: ( 512 >> frame->interlaced_frame );
+		} else {
+			ctx.slice_w = width;
 		}
 
 		c = ( width + ctx.slice_w - 1 ) / ctx.slice_w;
 		int last_slice_w = width - ctx.slice_w * (c - 1);
 		c *= frame->interlaced_frame ? 2 : 1;
 
-		if ( (last_slice_w % 8) || !getenv("MLT_AVFORMAT_SLICED_PIXFMT_DISABLE") ) {
-			ctx.slice_w = width;
+		if ( (last_slice_w % 8) == 0 && !getenv("MLT_AVFORMAT_SLICED_PIXFMT_DISABLE") ) {
 			mlt_slices_run_normal( c, sliced_h_pix_fmt_conv_proc, &ctx );
 		} else {
+			ctx.slice_w = width;
 			for ( i = 0 ; i < c; i++ )
 				sliced_h_pix_fmt_conv_proc( i, i, c, &ctx );
 		}
@@ -2434,6 +2438,7 @@ static int decode_audio( producer_avformat self, int *ignore, AVPacket pkt, int 
 	int channels = codec_context->channels;
 	int audio_used = self->audio_used[ index ];
 	int ret = 0;
+	int discarded = 1;
 
 	while ( pkt.data && pkt.size > 0 )
 	{
@@ -2492,6 +2497,7 @@ static int decode_audio( producer_avformat self, int *ignore, AVPacket pkt, int 
 				}
 			}
 			audio_used += convert_samples;
+			discarded = 0;
 		}
 		
 		// Handle ignore
@@ -2507,7 +2513,7 @@ static int decode_audio( producer_avformat self, int *ignore, AVPacket pkt, int 
 
 	// If we're behind, ignore this packet
 	// Skip this on non-seekable, audio-only inputs.
-	if ( pkt.pts >= 0 && ( self->seekable || self->video_format ) && *ignore == 0 && audio_used > samples / 2 )
+	if ( !discarded && pkt.pts >= 0 && ( self->seekable || self->video_format ) && *ignore == 0 && audio_used > samples / 2 )
 	{
 		int64_t pts = pkt.pts;
 		if ( self->first_pts != AV_NOPTS_VALUE )
