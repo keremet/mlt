@@ -56,7 +56,6 @@ BuildRequires: libxml2-devel swig python-devel ladspa_sdk
 %if_enabled vdpau
 BuildRequires: libvdpau-devel
 %endif
-#BuildRequires: libswfdec-devel
 
 %description
 %Name is a multimedia framework designed for television broadcasting.
@@ -154,6 +153,7 @@ export CC=gcc CXX=g++ CFLAGS="%optflags" QTDIR=%_qt5_prefix
 	--kde-includedir=%_K5inc \
         --kde-libdir=%_K5link \
         --swig-languages=python \
+        --disable-swfdec \
         #
 #	--luma-compress \
 
