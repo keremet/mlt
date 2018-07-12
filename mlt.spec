@@ -38,6 +38,7 @@ Patch20: 01-changed-preset-path.diff
 # ALT
 Patch101: alt-configure-mmx.patch
 Patch102: alt-no-version-script.patch
+Patch103: alt-libav.patch
 
 # Automatically added by buildreq on Sun Mar 18 2018 (-bi)
 # optimized out: elfutils gcc-c++ glib2-devel glibc-kernheaders-generic glibc-kernheaders-x86 libGL-devel libSDL-devel libX11-devel libavcodec-devel libavformat-devel libavutil-devel libcdio-paranoia libdc1394-22 libgpg-error libopencore-amrnb0 libopencore-amrwb0 libp11-kit libqt5-core libqt5-gui libqt5-svg libqt5-widgets libqt5-xml libraw1394-11 libstdc++-devel libvdpau-devel libx265-130 perl pkg-config python-base python-devel python-modules qt5-base-devel rpm-build-gir swig-data xorg-xproto-devel
@@ -117,6 +118,10 @@ This module allows to work with %Name using python..
 %endif
 %patch101 -p1
 %patch102 -p1
+%if %is_ffmpeg
+%else
+%patch103 -p1
+%endif
 
 [ -f src/mlt++/config.h ] || \
     install -m 0644 %SOURCE1 src/mlt++/config.h
