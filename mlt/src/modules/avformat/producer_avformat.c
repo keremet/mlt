@@ -633,6 +633,13 @@ static int get_basic_info( producer_avformat self, mlt_profile profile, const ch
 			if ( mlt_properties_get_position( properties, "length" ) <= 0 )
 				mlt_properties_set_position( properties, "length", frames );
 		}
+		else if ( format->nb_streams > 0 && format->streams[0]->codec && format->streams[0]->codec->codec_id == AV_CODEC_ID_WEBP )
+		{
+			char *e = getenv( "MLT_DEFAULT_PRODUCER_LENGTH" );
+			int p = e ? atoi( e ) : 15000;
+			mlt_properties_set_int( properties, "out", MAX(0, p - 1) );
+			mlt_properties_set_int( properties, "length", p );
+		}
 		else
 		{
 			// Set live sources to run forever
@@ -654,8 +661,9 @@ static int get_basic_info( producer_avformat self, mlt_profile profile, const ch
 	}
 	if ( self->seekable )
 	{
-		// Do a more rigourous test of seekable on a disposable context
-		self->seekable = av_seek_frame( format, -1, format->start_time, AVSEEK_FLAG_BACKWARD ) >= 0;
+		// Do a more rigorous test of seekable on a disposable context
+		if ( format->nb_streams > 0 && format->streams[0]->codec && format->streams[0]->codec->codec_id != AV_CODEC_ID_WEBP )
+			self->seekable = av_seek_frame( format, -1, format->start_time, AVSEEK_FLAG_BACKWARD ) >= 0;
 		mlt_properties_set_int( properties, "seekable", self->seekable );
 		self->dummy_context = format;
 		self->video_format = NULL;
@@ -1134,55 +1142,6 @@ static void get_audio_streams_info( producer_avformat self )
 		self->audio_streams, self->audio_max_stream, self->total_channels, self->max_channel );
 }
 
-static int set_luma_transfer( struct SwsContext *context, int src_colorspace,
-	int dst_colorspace, int src_full_range, int dst_full_range )
-{
-	const int *src_coefficients = sws_getCoefficients( SWS_CS_DEFAULT );
-	const int *dst_coefficients = sws_getCoefficients( SWS_CS_DEFAULT );
-	int brightness = 0;
-	int contrast = 1 << 16;
-	int saturation = 1  << 16;
-	int src_range = src_full_range ? 1 : 0;
-	int dst_range = dst_full_range ? 1 : 0;
-
-	switch ( src_colorspace )
-	{
-	case 170:
-	case 470:
-	case 601:
-	case 624:
-		src_coefficients = sws_getCoefficients( SWS_CS_ITU601 );
-		break;
-	case 240:
-		src_coefficients = sws_getCoefficients( SWS_CS_SMPTE240M );
-		break;
-	case 709:
-		src_coefficients = sws_getCoefficients( SWS_CS_ITU709 );
-		break;
-	default:
-		break;
-	}
-	switch ( dst_colorspace )
-	{
-	case 170:
-	case 470:
-	case 601:
-	case 624:
-		dst_coefficients = sws_getCoefficients( SWS_CS_ITU601 );
-		break;
-	case 240:
-		dst_coefficients = sws_getCoefficients( SWS_CS_SMPTE240M );
-		break;
-	case 709:
-		dst_coefficients = sws_getCoefficients( SWS_CS_ITU709 );
-		break;
-	default:
-		break;
-	}
-	return sws_setColorspaceDetails( context, src_coefficients, src_range, dst_coefficients, dst_range,
-		brightness, contrast, saturation );
-}
-
 static mlt_image_format pick_image_format( enum AVPixelFormat pix_fmt )
 {
 	switch ( pix_fmt )
@@ -1240,7 +1199,7 @@ static mlt_audio_format pick_audio_format( int sample_fmt )
 }
 
 /**
- * Handle deprecated pixel format (JPEG range in YUV420P for exemple).
+ * Handle deprecated pixel format (JPEG range in YUV420P for example).
  *
  * Replace pix_fmt with the official pixel format to use.
  * @return 0 if no pix_fmt replacement, 1 otherwise
@@ -1614,6 +1573,13 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 
 	mlt_log_timings_begin();
 
+	// Always use the image cache for album art.
+	int is_album_art = (codec_context->codec_id == AV_CODEC_ID_MJPEG
+		&& mlt_properties_get_int(properties, "meta.media.frame_rate_num") == 90000
+		&& mlt_properties_get_int(properties, "meta.media.frame_rate_den") == 1);
+	if (is_album_art)
+		position = 0;
+
 	// Get the image cache
 	if ( ! self->image_cache )
 	{
@@ -1983,7 +1949,14 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 		mlt_properties_set_int( frame_properties, "format", *format );
 		// Cache the image for rapid repeated access.
 		if ( self->image_cache ) {
-			mlt_cache_put_frame( self->image_cache, frame );
+			if (is_album_art) {
+				mlt_position original_pos = mlt_frame_original_position( frame );
+				mlt_properties_set_position(frame_properties, "original_position", 0);
+				mlt_cache_put_frame( self->image_cache, frame );
+				mlt_properties_set_position(frame_properties, "original_position", original_pos);
+			} else {
+				mlt_cache_put_frame( self->image_cache, frame );
+			}
 		}
 		// Clone frame for error concealment.
 		if ( self->current_position >= self->last_good_position ) {
@@ -2077,6 +2050,16 @@ static int video_codec_init( producer_avformat self, int index, mlt_properties p
 
 		// Find the codec
 		AVCodec *codec = avcodec_find_decoder( codec_context->codec_id );
+		if ( mlt_properties_get( properties, "vcodec" ) ) {
+			if ( !( codec = avcodec_find_decoder_by_name( mlt_properties_get( properties, "vcodec" ) ) ) )
+				codec = avcodec_find_decoder( codec_context->codec_id );
+		} else if ( codec_context->codec_id == AV_CODEC_ID_VP9 ) {
+			if ( !( codec = avcodec_find_decoder_by_name( "libvpx-vp9" ) ) )
+				codec = avcodec_find_decoder( codec_context->codec_id );
+		} else if ( codec_context->codec_id == AV_CODEC_ID_VP8 ) {
+			if ( !( codec = avcodec_find_decoder_by_name( "libvpx" ) ) )
+				codec = avcodec_find_decoder( codec_context->codec_id );
+		}
 #ifdef VDPAU
 		if ( codec_context->codec_id == AV_CODEC_ID_H264 )
 		{
@@ -2105,6 +2088,18 @@ static int video_codec_init( producer_avformat self, int index, mlt_properties p
 		pthread_mutex_lock( &self->open_mutex );
 		if ( codec && avcodec_open2( codec_context, codec, NULL ) >= 0 )
 		{
+			// Switch to the native vp8/vp9 decoder if not yuva420p
+			if ( codec_context->pix_fmt != AV_PIX_FMT_YUVA420P
+				 && !mlt_properties_get( properties, "vcodec" )
+				 && ( !strcmp(codec->name, "libvpx") || !strcmp(codec->name, "libvpx-vp9") ) )
+			{
+				codec = avcodec_find_decoder( codec_context->codec_id );
+				if ( codec && avcodec_open2( codec_context, codec, NULL ) < 0 ) {
+					self->video_index = -1;
+					pthread_mutex_unlock( &self->open_mutex );
+					return 0;
+				}
+			}
 			// Now store the codec with its destructor
 			self->video_codec = codec_context;
 		}
@@ -2518,7 +2513,7 @@ static int decode_audio( producer_avformat self, int *ignore, AVPacket pkt, int 
 		int64_t pts = pkt.pts;
 		if ( self->first_pts != AV_NOPTS_VALUE )
 			pts -= self->first_pts;
-		else if ( context->start_time != AV_NOPTS_VALUE )
+		else if ( context->start_time != AV_NOPTS_VALUE && self->video_index != -1 )
 			pts -= context->start_time;
 		double timebase = av_q2d( context->streams[ index ]->time_base );
 		int64_t int_position = llrint( timebase * pts * fps );
@@ -2535,8 +2530,11 @@ static int decode_audio( producer_avformat self, int *ignore, AVPacket pkt, int 
 				// We are behind, so skip some
 				*ignore = lrint( timebase * (req_pts - pts) * codec_context->sample_rate );
 			} else if ( self->audio_index != INT_MAX && int_position > req_position + 2 && !self->is_audio_synchronizing ) {
-				// We are ahead, so seek backwards some more
-				seek_audio( self, req_position, timecode - 1.0 );
+				// We are ahead, so seek backwards some more.
+				// Supply -1 as the position to defeat the checks needed by for the other
+				// call to seek_audio() at the beginning of producer_get_audio(). Otherwise,
+				// more often than not, req_position will equal audio_expected.
+				seek_audio( self, -1, timecode - 1.0 );
 				self->is_audio_synchronizing = 1;
 			}
 		}
@@ -2827,6 +2825,11 @@ static int audio_codec_init( producer_avformat self, int index, mlt_properties p
 
 		// Find the codec
 		AVCodec *codec = avcodec_find_decoder( codec_context->codec_id );
+		if ( mlt_properties_get( properties, "acodec" ) )
+		{
+			if ( !( codec = avcodec_find_decoder_by_name( mlt_properties_get( properties, "acodec" ) ) ) )
+				codec = avcodec_find_decoder( codec_context->codec_id );
+		}
 
 		// If we don't have a codec and we can't initialise it, we can't do much more...
 		pthread_mutex_lock( &self->open_mutex );

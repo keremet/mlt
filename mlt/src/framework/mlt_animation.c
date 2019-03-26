@@ -66,7 +66,7 @@ mlt_animation mlt_animation_new( )
 	return self;
 }
 
-/** Re-interpolate non-keyframe nodess after a series of insertions or removals.
+/** Re-interpolate non-keyframe nodes after a series of insertions or removals.
  *
  * \public \memberof mlt_animation_s
  * \param self an animation
@@ -217,8 +217,19 @@ int mlt_animation_parse(mlt_animation self, const char *data, int length, double
 		// Reset item
 		item.frame = item.is_key = 0;
 
-		// Now parse the item
-		mlt_animation_parse_item( self, &item, value );
+		// Do not parse a string enclosed entirely within quotes as animation.
+		// (mlt_tokeniser already skips splitting on delimiter inside quotes).
+		if ( value[0] == '\"' && value[strlen(value) - 1] == '\"' )
+		{
+			// Remove the quotes.
+			value[strlen(value) - 1] = '\0';
+			mlt_property_set_string( item.property, &value[1] );
+		}
+		else
+		{
+			// Now parse the item
+			mlt_animation_parse_item( self, &item, value );
+		}
 
 		// Now insert into place
 		mlt_animation_insert( self, &item );
@@ -300,8 +311,8 @@ void mlt_animation_set_length( mlt_animation self, int length )
  * of the animation for the parsing (e.g. fps, locale).
  * It parses into a mlt_animation_item that you provide.
  * \p item->frame should be specified if the string does not have an equal sign and time field.
- * If an exclamation point (!) or vertical bar (|) character preceeds the equal sign, then
- * the keyframe interpolation is set to discrete. If a tilde (~) preceeds the equal sign,
+ * If an exclamation point (!) or vertical bar (|) character precedes the equal sign, then
+ * the keyframe interpolation is set to discrete. If a tilde (~) precedes the equal sign,
  * then the keyframe interpolation is set to smooth (spline).
  *
  * \public \memberof mlt_animation_s
@@ -328,10 +339,11 @@ int mlt_animation_parse_item( mlt_animation self, mlt_animation_item item, const
 			char *p = strchr( s, '=' );
 			p[0] = '\0';
 			mlt_property_set_string( item->property, s );
+			
 			item->frame = mlt_property_get_int( item->property, self->fps, self->locale );
 			free( s );
 
-			// The character preceeding the equal sign indicates interpolation method.
+			// The character preceding the equal sign indicates interpolation method.
 			p = strchr( value, '=' ) - 1;
 			if ( p[0] == '|' || p[0] == '!' )
 				item->keyframe_type = mlt_keyframe_discrete;
@@ -340,6 +352,14 @@ int mlt_animation_parse_item( mlt_animation self, mlt_animation_item item, const
 			else
 				item->keyframe_type = mlt_keyframe_linear;
 			value = &p[2];
+
+			// Check if the value is quoted.
+			p = &p[2];
+			if ( p && p[0] == '\"' && p[strlen(p) - 1] == '\"' ) {
+				// Remove the quotes.
+				p[strlen(p) - 1] = '\0';
+				value = &p[1];
+			}
 		}
 
 		// Special case - frame < 0
@@ -373,7 +393,7 @@ int mlt_animation_get_item( mlt_animation self, mlt_animation_item item, int pos
 	if (!self || !item) return 1;
 
 	int error = 0;
-	// Need to find the nearest keyframe to the position specifed
+	// Need to find the nearest keyframe to the position specified
 	animation_node node = self->nodes;
 
 	// Iterate through the keyframes until we reach last or have
@@ -557,7 +577,7 @@ int mlt_animation_next_key( mlt_animation self, mlt_animation_item item, int pos
 	return ( node == NULL );
 }
 
-/** Get the keyfame at the position or the next preceeding.
+/** Get the keyfame at the position or the next preceding.
  *
  * \public \memberof mlt_animation_s
  * \param self an animation
@@ -657,8 +677,14 @@ char *mlt_animation_serialize_cut_tf( mlt_animation self, int in, int out, mlt_t
 
 			// Determine length of string to be appended.
 			item_len += 100;
-			if ( item.is_key )
-				item_len += strlen( mlt_property_get_string_l( item.property, self->locale ) );
+			const char* value = mlt_property_get_string_l( item.property, self->locale );
+			if ( item.is_key && value )
+			{
+				item_len += strlen( value );
+				// Check if the value must be quoted.
+				if ( strchr(value, ';') || strchr(value, '=') )
+					item_len += 2;
+			}
 
 			// Reallocate return string to be long enough.
 			while ( used + item_len + 2 > size ) // +2 for ';' and NULL
@@ -688,17 +714,25 @@ char *mlt_animation_serialize_cut_tf( mlt_animation self, int in, int out, mlt_t
 					s = "";
 					break;
 				}
-				if ( time_property && self->fps > 0.0 ) {
+				if ( time_property && self->fps > 0.0 )
+				{
 					mlt_property_set_int( time_property, item.frame - in );
 					const char *time = mlt_property_get_time( time_property, time_format, self->fps, self->locale );
 					sprintf( ret + used, "%s%s=", time, s );
 				} else {
 					sprintf( ret + used, "%d%s=", item.frame - in, s );
 				}
+				used = strlen( ret );
 
 				// Append item value.
-				if ( item.is_key )
-					strcat( ret, mlt_property_get_string_l( item.property, self->locale ) );
+				if ( item.is_key && value )
+				{
+					// Check if the value must be quoted.
+					if ( strchr(value, ';') || strchr(value, '=') )
+						sprintf( ret + used, "\"%s\"", value );
+					else
+						strcat( ret, value );
+				}
 				used = strlen( ret );
 			}
 			item.frame ++;

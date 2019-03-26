@@ -1,7 +1,5 @@
 /*
  * qimage_wrapper.cpp -- a QT/QImage based producer for MLT
- * Copyright (C) 2006 Visual Media
- * Author: Charles Yates <charles.yates@gmail.com>
  *
  * NB: This module is designed to be functionally equivalent to the 
  * gtk2 image loading module so it can be used as replacement.
@@ -66,7 +64,9 @@ static void qimage_delete( void *data )
 /// Returns false if this is animated.
 int init_qimage(const char *filename)
 {
-	QImageReader reader( filename );
+	QImageReader reader;
+	reader.setDecideFormatFromContent( true );
+	reader.setFileName( filename );
 	if ( reader.canRead() && reader.imageCount() > 1 ) {
 		return 0;
 	}
@@ -171,7 +171,10 @@ int refresh_qimage( producer_qimage self, mlt_frame frame )
 	if ( !self->qimage || mlt_properties_get_int( producer_props, "_disable_exif" ) != disable_exif )
 	{
 		self->current_image = NULL;
-		QImage *qimage = new QImage( QString::fromUtf8( mlt_properties_get_value( self->filenames, image_idx ) ) );
+		QImageReader reader;
+		reader.setDecideFormatFromContent( true );
+		reader.setFileName( QString::fromUtf8( mlt_properties_get_value( self->filenames, image_idx ) ) );
+		QImage *qimage = new  QImage( reader.read() );
 		self->qimage = qimage;
 
 		if ( !qimage->isNull( ) )
@@ -219,7 +222,7 @@ void refresh_image( producer_qimage self, mlt_frame frame, mlt_image_format form
 	// Get index and qimage
 	int image_idx = refresh_qimage( self, frame );
 
-	// optimization for subsequent iterations on single pictur
+	// optimization for subsequent iterations on single picture
 	if ( image_idx != self->image_idx || width != self->current_width || height != self->current_height )
 		self->current_image = NULL;
 
@@ -242,8 +245,11 @@ void refresh_image( producer_qimage self, mlt_frame frame, mlt_image_format form
 			mlt_service_cache_put( MLT_PRODUCER_SERVICE( producer ), "qimage.qimage", qimage, 0, ( mlt_destructor )qimage_delete );
 			self->qimage_cache = mlt_service_cache_get( MLT_PRODUCER_SERVICE( producer ), "qimage.qimage" );
 		}
-		QImage scaled = interp? qimage->scaled( QSize( width, height ) ) :
-			qimage->scaled( QSize(width, height), Qt::IgnoreAspectRatio, Qt::SmoothTransformation );
+		QImage scaled = interp? qimage->scaled( QSize( width, height ), Qt::IgnoreAspectRatio, Qt::SmoothTransformation ) :
+			qimage->scaled( QSize(width, height) );
+
+		// Convert scaled image to target format (it might be premultiplied after scaling).
+		scaled = scaled.convertToFormat( qimageFormat );
 
 		// Store width and height
 		self->current_width = width;
@@ -254,6 +260,7 @@ void refresh_image( producer_qimage self, mlt_frame frame, mlt_image_format form
 		int image_size = mlt_image_format_size( self->format, self->current_width, self->current_height, NULL );
 		self->current_image = ( uint8_t * )mlt_pool_alloc( image_size );
 		self->current_alpha = NULL;
+		self->alpha_size = 0;
 
 		// Copy the image
 		int y = self->current_height + 1;
@@ -294,10 +301,10 @@ void refresh_image( producer_qimage self, mlt_frame frame, mlt_image_format form
 				self->current_image = (uint8_t*) mlt_pool_alloc( image_size );
 				memcpy( self->current_image, buffer, image_size );
 			}
-			if ( ( buffer = mlt_frame_get_alpha( frame ) ) )
+			if ( ( buffer = (uint8_t*) mlt_properties_get_data( properties, "alpha", &self->alpha_size ) ) )
 			{
-				self->current_alpha = (uint8_t*) mlt_pool_alloc( width * height );
-				memcpy( self->current_alpha, buffer, width * height );
+				self->current_alpha = (uint8_t*) mlt_pool_alloc( self->alpha_size );
+				memcpy( self->current_alpha, buffer, self->alpha_size );
 			}
 		}
 
@@ -310,7 +317,7 @@ void refresh_image( producer_qimage self, mlt_frame frame, mlt_image_format form
 		self->alpha_cache = NULL;
 		if ( self->current_alpha )
 		{
-			mlt_service_cache_put( MLT_PRODUCER_SERVICE( producer ), "qimage.alpha", self->current_alpha, width * height, mlt_pool_release );
+			mlt_service_cache_put( MLT_PRODUCER_SERVICE( producer ), "qimage.alpha", self->current_alpha, self->alpha_size, mlt_pool_release );
 			self->alpha_cache = mlt_service_cache_get( MLT_PRODUCER_SERVICE( producer ), "qimage.alpha" );
 		}
 	}

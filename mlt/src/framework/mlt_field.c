@@ -3,7 +3,7 @@
  * \brief a field for planting multiple transitions and filters
  * \see mlt_field_s
  *
- * Copyright (C) 2003-2014 Meltytech, LLC
+ * Copyright (C) 2003-2018 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -173,7 +173,7 @@ int mlt_field_plant_filter( mlt_field self, mlt_filter that, int track )
 	// Connect the filter to the last producer
 	int result = mlt_filter_connect( that, self->producer, track );
 
-	// If sucessful, then we'll use this for connecting in the future
+	// If successful, then we'll use this for connecting in the future
 	if ( result == 0 )
 	{
 		// This is now the new producer
@@ -204,7 +204,7 @@ int mlt_field_plant_transition( mlt_field self, mlt_transition that, int a_track
 	// Connect the transition to the last producer
 	int result = mlt_transition_connect( that, self->producer, a_track, b_track );
 
-	// If sucessful, then we'll use self for connecting in the future
+	// If successful, then we'll use self for connecting in the future
 	if ( result == 0 )
 	{
 		// This is now the new producer

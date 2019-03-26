@@ -69,6 +69,9 @@ struct consumer_sdl_s
 	SDL_Rect sdl_rect;
 	uint8_t *buffer;
 	int is_purge;
+#ifdef _WIN32
+	int no_quit_subsystem;
+#endif
 };
 
 /** Forward references to static functions.
@@ -275,6 +278,9 @@ int consumer_stop( mlt_consumer parent )
 		if ( self->sdl_window )
 			SDL_DestroyWindow( self->sdl_window );
 		self->sdl_window = NULL;
+#ifdef _WIN32
+		if ( !self->no_quit_subsystem )
+#endif
 		if ( !mlt_properties_get_int( MLT_CONSUMER_PROPERTIES( parent ), "audio_off" ) )
 			SDL_QuitSubSystem( SDL_INIT_AUDIO );
 		if ( mlt_properties_get_int( MLT_CONSUMER_PROPERTIES( parent ), "sdl_started" ) == 0 )
@@ -425,8 +431,24 @@ static int consumer_play_audio( consumer_sdl self, mlt_frame frame, int init_aud
 			int sample_space = ( sizeof( self->audio_buffer ) - self->audio_avail ) / dst_stride;
 			while ( self->running && sample_space == 0 )
 			{
-				pthread_cond_wait( &self->audio_cond, &self->audio_mutex );
+				struct timeval now;
+				struct timespec tm;
+
+				gettimeofday( &now, NULL );
+				tm.tv_sec = now.tv_sec + 1;
+				tm.tv_nsec = now.tv_usec * 1000;
+				pthread_cond_timedwait( &self->audio_cond, &self->audio_mutex, &tm );
 				sample_space = ( sizeof( self->audio_buffer ) - self->audio_avail ) / dst_stride;
+
+				if ( sample_space == 0 )
+				{
+					mlt_log_warning( MLT_CONSUMER_SERVICE(&self->parent), "audio timed out\n" );
+					pthread_mutex_unlock( &self->audio_mutex );
+#ifdef _WIN32
+					self->no_quit_subsystem = 1;
+#endif
+					return 1;
+				}
 			}
 			if ( self->running )
 			{
@@ -792,7 +814,7 @@ static void *consumer_thread( void *arg )
 	// Video thread
 	pthread_t thread;
 
-	// internal intialization
+	// internal initialization
 	int init_audio = 1;
 	int init_video = 1;
 	mlt_frame frame = NULL;

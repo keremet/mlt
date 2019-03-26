@@ -153,20 +153,6 @@ static mlt_geometry composite_calculate( mlt_transition transition, struct mlt_g
 	return start;
 }
 
-static inline double composite_calculate_key( mlt_transition transition, const char *name, const char *store, int norm, double position )
-{
-	// Struct for the result
-	struct mlt_geometry_item_s result;
-
-	// Structures for geometry
-	transition_parse_keys( transition, name, store, norm, 0 );
-
-	// Do the calculation
-	geometry_calculate( transition, store, &result, position );
-
-	return result.x;
-}
-
 typedef struct
 {
 	double matrix[3][3];
@@ -427,7 +413,7 @@ static int sliced_proc( int id, int index, int jobs, void* cookie )
 			for (j = 0, x = ctx.lower_x; j < ctx.a_width; j++, x++) {
 				dx = MapX( ctx.affine.matrix, x, y ) / ctx.dz + ctx.x_offset;
 				dy = MapY( ctx.affine.matrix, x, y ) / ctx.dz + ctx.y_offset;
-				if (dx >= ctx.minima && dx < ctx.xmax && dy >= ctx.minima && dy < ctx.ymax)
+				if (dx >= ctx.minima && dx <= ctx.xmax && dy >= ctx.minima && dy <= ctx.ymax)
 					ctx.interp(ctx.b_image, ctx.b_width, ctx.b_height, dx, dy, ctx.mix, ctx.a_image, ctx.b_alpha);
 				ctx.a_image += 4;
 			}
@@ -556,12 +542,20 @@ static int transition_get_image( mlt_frame a_frame, uint8_t **image, mlt_image_f
 	result.x = ( result.x * *width / normalised_width );
 	result.y = ( result.y * *height / normalised_height );
 
-	// Request full resolution of b frame image.
-	mlt_properties_set_int( b_props, "rescale_width", b_width );
-	mlt_properties_set_int( b_props, "rescale_height", b_height );
+	if (mlt_properties_get_int(properties, "b_scaled")) {
+		// Request b frame image size just what is needed.
+		b_width = result.w;
+		b_height = result.h;
+		// Set the rescale interpolation to match the frame
+		mlt_properties_set( b_props, "rescale.interp", mlt_properties_get( a_props, "rescale.interp" ) );
+	} else {
+		// Request full resolution of b frame image.
+		mlt_properties_set_int( b_props, "rescale_width", b_width );
+		mlt_properties_set_int( b_props, "rescale_height", b_height );
 
-	// Suppress padding and aspect normalization.
-	mlt_properties_set( b_props, "rescale.interp", "none" );
+		// Suppress padding and aspect normalization.
+		mlt_properties_set( b_props, "rescale.interp", "none" );
+	}
 
 	// This is not a field-aware transform.
 	mlt_properties_set_int( b_props, "consumer_deinterlace", 1 );

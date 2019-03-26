@@ -37,7 +37,7 @@
 #define FREI0R_PLUGIN_PATH "\\lib\\frei0r-1"
 #elif defined(__APPLE__) && defined(RELOCATABLE)
 #define LIBSUF ".so"
-#define FREI0R_PLUGIN_PATH "/lib/frei0r-1"
+#define FREI0R_PLUGIN_PATH "/PlugIns/frei0r-1"
 #else
 #define LIBSUF ".so"
 #define FREI0R_PLUGIN_PATH "/usr/lib/frei0r-1:/usr/lib64/frei0r-1:/opt/local/lib/frei0r-1:/usr/local/lib/frei0r-1:$HOME/.frei0r-1/lib"
@@ -147,7 +147,7 @@ static mlt_properties fill_param_info ( mlt_service_type type, const char *servi
 	}
 	plginfo(&info);
 	snprintf ( string, sizeof(string) , "%d" , info.minor_version );
-	mlt_properties_set_double ( metadata, "schema_version" , 0.1 );
+	mlt_properties_set_double ( metadata, "schema_version" , 0.3 );
 	mlt_properties_set ( metadata, "title" , info.name );
 	mlt_properties_set_double ( metadata, "version",
 		info.major_version +  info.minor_version / pow( 10, strlen( string ) ) );
@@ -356,7 +356,7 @@ static void * create_frei0r_item ( mlt_profile profile, mlt_service_type type, c
 		MLT_DIRLIST_DELIMITER
 	);
 	void* ret=NULL;
-	while (dircount--){
+	while (dircount-- && !ret){
 		char soname[PATH_MAX];
 		char *myid = strdup( id );
 

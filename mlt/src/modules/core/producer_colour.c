@@ -1,6 +1,6 @@
 /*
  * producer_colour.c
- * Copyright (C) 2003-2017 Meltytech, LLC
+ * Copyright (C) 2003-2018 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -95,7 +95,7 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 	if ( *height <= 0 )
 		*height = mlt_service_profile( MLT_PRODUCER_SERVICE(producer) )->height;
 	
-	// Choose default image format if specific request is unsuported
+	// Choose default image format if specific request is unsupported
 	if (*format!=mlt_image_yuv420p  && *format!=mlt_image_yuv422  && *format!=mlt_image_rgb24 && *format!= mlt_image_glsl && *format!= mlt_image_glsl_texture)
 		*format = mlt_image_rgb24a;
 
@@ -126,10 +126,11 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 			int plane_size =  *width * *height;
 			uint8_t y, u, v;
 
-			RGB2YUV_601_SCALED( color.r, color.g, color.b, y, u, v );			
+			RGB2YUV_601_SCALED( color.r, color.g, color.b, y, u, v );
 			memset(p + 0, y, plane_size);
 			memset(p + plane_size, u, plane_size/4);
 			memset(p + plane_size + plane_size/4, v, plane_size/4);
+			mlt_properties_set_int( properties, "colorspace", 601 );
 			break;
 		}
 		case mlt_image_yuv422:
@@ -156,6 +157,7 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 					*p ++ = u;
 				}
 			}
+			mlt_properties_set_int( properties, "colorspace", 601 );
 			break;
 		}
 		case mlt_image_rgb24:
@@ -190,12 +192,18 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 	}
 
 	// Create the alpha channel
-	int alpha_size = *width * *height;
-	uint8_t *alpha = mlt_pool_alloc( alpha_size );
+	int alpha_size = 0;
+	uint8_t *alpha = NULL;
 
 	// Initialise the alpha
-	if ( alpha )
-		memset( alpha, color.a, alpha_size );
+	if (color.a < 255 || *format == mlt_image_rgb24a) {
+		alpha_size = *width * *height;
+		alpha = mlt_pool_alloc( alpha_size );
+		if ( alpha )
+			memset( alpha, color.a, alpha_size );
+		else
+			alpha_size = 0;
+	}
 
 	// Clone our image
 	if (buffer && image && size > 0) {

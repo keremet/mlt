@@ -1,6 +1,6 @@
 /*
  * filter_dynamictext.c -- dynamic text overlay filter
- * Copyright (C) 2011-2014 Meltytech, LLC
+ * Copyright (C) 2011-2018 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -54,7 +54,7 @@ static int get_next_token(char* str, int* pos, char* token, int* is_keyword)
 	{
 		if( str[*pos] == '\\' && str[(*pos) + 1] == '#' )
 		{
-			// Escape Sequence - "#" preceeded by "\" - copy the # into the token.
+			// Escape Sequence - "#" preceded by "\" - copy the # into the token.
 			token[token_pos] = '#';
 			token_pos++;
 			(*pos)++; // skip "\"
@@ -229,14 +229,10 @@ static int setup_producer( mlt_filter filter, mlt_producer producer, mlt_frame f
 	if ( !dynamic_text || !strcmp( "", dynamic_text ) )
 		return 0;
 
-	// Check for keywords in dynamic text
-	if ( dynamic_text )
-	{
-		// Apply keyword substitution before passing the text to the filter.
-		char result[MAX_TEXT_LEN] = "";
-		substitute_keywords( filter, result, dynamic_text, frame );
-		mlt_properties_set( producer_properties, "text", (char*)result );
-	}
+	// Apply keyword substitution before passing the text to the filter.
+	char result[MAX_TEXT_LEN] = "";
+	substitute_keywords( filter, result, dynamic_text, frame );
+	mlt_properties_set( producer_properties, "text", (char*)result );
 
 	// Pass the properties to the pango producer
 	mlt_properties_set( producer_properties, "family", mlt_properties_get( my_properties, "family" ) );
@@ -253,22 +249,19 @@ static int setup_producer( mlt_filter filter, mlt_producer producer, mlt_frame f
 	return 1;
 }
 
-static void setup_transition( mlt_filter filter, mlt_transition transition )
+static void setup_transition( mlt_frame frame, mlt_filter filter, mlt_transition transition )
 {
 	mlt_properties my_properties = MLT_FILTER_PROPERTIES( filter );
 	mlt_properties transition_properties = MLT_TRANSITION_PROPERTIES( transition );
+	mlt_position position = mlt_filter_get_position( filter, frame );
+	mlt_position length = mlt_filter_get_length2( filter, frame );
 
 	mlt_service_lock( MLT_TRANSITION_SERVICE(transition) );
-	if ( mlt_properties_get( my_properties, "geometry" ) && mlt_properties_get( transition_properties, "rect" )
-		 && strcmp( mlt_properties_get( my_properties, "geometry" ), mlt_properties_get( transition_properties, "rect" ) ) )
-	{
-		mlt_properties_set( transition_properties, "rect", mlt_properties_get( my_properties, "geometry" ) );
-	}
+	mlt_rect rect = mlt_properties_anim_get_rect( my_properties, "geometry", position, length );
+	mlt_properties_set_rect( transition_properties, "rect", rect );
 	mlt_properties_set( transition_properties, "halign", mlt_properties_get( my_properties, "halign" ) );
 	mlt_properties_set( transition_properties, "valign", mlt_properties_get( my_properties, "valign" ) );
 	mlt_properties_set_int( transition_properties, "out", mlt_properties_get_int( my_properties, "_out" ) );
-	mlt_properties_set_int( transition_properties, "fill", 0 );
-	mlt_properties_set_int( transition_properties, "refresh", 1 );
 	mlt_service_unlock( MLT_TRANSITION_SERVICE(transition) );
 }
 
@@ -289,9 +282,9 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 	mlt_service_lock( MLT_FILTER_SERVICE( filter ) );
 	if ( !setup_producer( filter, producer, frame ) ) {
 		mlt_service_unlock( MLT_FILTER_SERVICE( filter ) );
-		return 1;
+		return mlt_frame_get_image( frame, image, format, width, height, writable );
 	}
-	setup_transition( filter, transition );
+	setup_transition( frame, filter, transition );
 
 	// Make sure the producer is in the correct position
 	position = mlt_filter_get_position( filter, frame );
@@ -372,7 +365,9 @@ mlt_filter filter_dynamictext_init( mlt_profile profile, mlt_service_type type, 
 		mlt_properties my_properties = MLT_FILTER_PROPERTIES( filter );
 
 		// Register the transition for reuse/destruction
-    	mlt_properties_set_data( my_properties, "_transition", transition, 0, ( mlt_destructor )mlt_transition_close, NULL );
+		mlt_properties_set_int( MLT_TRANSITION_PROPERTIES(transition), "fill", 0 );
+		mlt_properties_set_int( MLT_TRANSITION_PROPERTIES(transition), "b_scaled", 1 );
+		mlt_properties_set_data( my_properties, "_transition", transition, 0, ( mlt_destructor )mlt_transition_close, NULL );
 
 		// Register the producer for reuse/destruction
 		mlt_properties_set_data( my_properties, "_producer", producer, 0, ( mlt_destructor )mlt_producer_close, NULL );
