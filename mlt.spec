@@ -159,6 +159,7 @@ export CC=gcc CXX=g++ CFLAGS="%optflags" QTDIR=%_qt5_prefix
         --kde-libdir=%_K5link \
         --swig-languages=python \
         --disable-swfdec \
+        --disable-opencv \
         #
 #	--luma-compress \
 
