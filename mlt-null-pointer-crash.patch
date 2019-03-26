@@ -1,0 +1,12 @@
+--- src/modules/opengl/filter_movit_convert.cpp.orig	2019-02-02 12:18:50.717478538 +0100
++++ src/modules/opengl/filter_movit_convert.cpp	2019-02-02 12:20:46.476448239 +0100
+@@ -346,7 +346,8 @@
+ 	if ( service == (mlt_service) -1 ) {
+ 		mlt_producer producer = mlt_producer_cut_parent( mlt_frame_get_original_producer( frame ) );
+ 		MltInput* input = chain->inputs[ producer ];
+-		input->set_pixel_data( GlslManager::get_input_pixel_pointer( producer, frame ) );
++ 		if (input)
++			input->set_pixel_data( GlslManager::get_input_pixel_pointer( producer, frame ) );
+ 		return;
+ 	}
+ 

@@ -30,7 +30,7 @@ Packager: Maxim Ivanov <redbaron@altlinux.org>
 Source: %name-%version.tar.gz
 Source1: mlt++-config.h
 # FC
-Patch1: Revert-Prefer-qimage-over-pixbuf.patch
+Patch1: mlt-null-pointer-crash.patch
 # SuSE
 Patch10: libmlt-0.8.2-vdpau.patch
 # Debian
@@ -110,7 +110,7 @@ This module allows to work with %Name using python..
 
 %prep
 %setup
-%patch1 -p1
+%patch1 -p0
 %patch10 -p0
 %if %is_ffmpeg
 %else
