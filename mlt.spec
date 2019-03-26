@@ -17,8 +17,8 @@
 %define libmltxx libmlt++%mltxx_sover
 
 Name: mlt
-Version: 6.10.0
-Release: alt1%ubt.1
+Version: 6.12.0
+Release: alt1
 
 Summary: Multimedia framework designed for television broadcasting
 License: GPLv3
@@ -200,6 +200,9 @@ install -pm 0755 src/swig/python/_%name.so %buildroot%python_sitelibdir/
 %_pkgconfigdir/mlt++.pc
 
 %changelog
+* Tue Mar 26 2019 Sergey V Turchin <zerg@altlinux.org> 6.12.0-alt1
+- new version
+
 * Wed Jul 11 2018 Sergey V Turchin <zerg@altlinux.org> 6.10.0-alt1%ubt.1
 - fix build requires
 
