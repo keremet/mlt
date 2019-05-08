@@ -1,5 +1,5 @@
---- mlt-0.9.0/src/framework/Makefile~	2014-05-27 15:11:26.000000000 +0400
-+++ mlt-0.9.0/src/framework/Makefile	2014-05-27 15:12:45.600000000 +0400
+--- a/src/framework/Makefile
++++ b/src/framework/Makefile
 @@ -21,7 +21,7 @@ SHFLAGS += -Wl,-soname,$(SONAME)
  endif
  
@@ -9,19 +9,19 @@
  endif
  
  OBJS = mlt_frame.o \
---- mlt-0.9.0/src/mlt++/Makefile~	2014-05-27 15:40:13.304000000 +0400
-+++ mlt-0.9.0/src/mlt++/Makefile	2014-05-27 15:40:30.836000000 +0400
-@@ -19,11 +19,11 @@ SONAME = $(NAME).$(soversion)
- LIBFLAGS += -Wl,-soname,$(SONAME)
+--- a/src/mlt++/Makefile
++++ b/src/mlt++/Makefile
+@@ -19,11 +19,11 @@ endif
+ ifneq (, $(shell $(CXX) --version | grep -is -e g++ -e clang))
+ 	CXXFLAGS += -std=c++11
  endif
- 
 -CXXFLAGS += -I.. $(RDYNAMIC) -DVERSION=\"$(version)\" -fvisibility=hidden
 +CXXFLAGS += -I.. $(RDYNAMIC) -DVERSION=\"$(version)\"
  
- LDFLAGS += -L../framework -lmlt
+ LDFLAGS := -L../framework -lmlt $(LDFLAGS)
  ifeq ($(targetos), Linux)
 -LDFLAGS += -Wl,--version-script=mlt++.vers
 +LDFLAGS += 
  endif
  
- OBJS = MltConsumer.o \
+ OBJS = MltAnimation.o \
