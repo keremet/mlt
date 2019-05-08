@@ -1,6 +1,6 @@
 /*
  * producer_avformat.c -- avformat producer
- * Copyright (C) 2003-2018 Meltytech, LLC
+ * Copyright (C) 2003-2019 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -57,10 +57,6 @@
 #include <limits.h>
 #include <math.h>
 #include <wchar.h>
-
-#if LIBAVCODEC_VERSION_MAJOR < 55
-#define AV_CODEC_ID_H264    CODEC_ID_H264
-#endif
 
 #define POSITION_INITIAL (-2)
 #define POSITION_INVALID (-1)
@@ -293,7 +289,6 @@ static int first_video_index( producer_avformat self )
 	return i;
 }
 
-#if (LIBAVFORMAT_VERSION_INT >= ((55<<16)+(39<<8)+100))
 #include <libavutil/display.h>
 
 static double get_rotation(AVStream *st)
@@ -316,12 +311,6 @@ static double get_rotation(AVStream *st)
 
 	return theta;
 }
-#else
-static double get_rotation(AVStream *st)
-{
-	return 0.0;
-}
-#endif
 
 static char* filter_restricted( const char *in )
 {
@@ -393,10 +382,6 @@ static mlt_properties find_default_streams( producer_avformat self )
 				mlt_properties_set( meta_media, key, "video" );
 				snprintf( key, sizeof(key), "meta.media.%d.stream.frame_rate", i );
 				double ffmpeg_fps = av_q2d( context->streams[ i ]->avg_frame_rate );
-#if LIBAVFORMAT_VERSION_MAJOR < 55
-				if ( isnan( ffmpeg_fps ) || ffmpeg_fps == 0 )
-					ffmpeg_fps = av_q2d( context->streams[ i ]->r_frame_rate );
-#endif
 				mlt_properties_set_double( meta_media, key, ffmpeg_fps );
 
 				snprintf( key, sizeof(key), "meta.media.%d.stream.sample_aspect_ratio", i );
@@ -405,10 +390,8 @@ static mlt_properties find_default_streams( producer_avformat self )
 				mlt_properties_set_int( meta_media, key, codec_context->width );
 				snprintf( key, sizeof(key), "meta.media.%d.codec.height", i );
 				mlt_properties_set_int( meta_media, key, codec_context->height );
-#if (LIBAVFORMAT_VERSION_INT >= ((55<<16)+(39<<8)+100))
 				snprintf( key, sizeof(key), "meta.media.%d.codec.rotate", i );
 				mlt_properties_set_int( meta_media, key, get_rotation(context->streams[i]) );
-#endif
 				snprintf( key, sizeof(key), "meta.media.%d.codec.frame_rate", i );
 				AVRational frame_rate = { codec_context->time_base.den, codec_context->time_base.num * codec_context->ticks_per_frame };
 				mlt_properties_set_double( meta_media, key, av_q2d( frame_rate ) );
@@ -601,7 +584,7 @@ static enum AVPixelFormat pick_pix_fmt( enum AVPixelFormat pix_fmt )
 	case AV_PIX_FMT_ABGR:
 	case AV_PIX_FMT_BGRA:
 		return AV_PIX_FMT_RGBA;
-#if defined(FFUDIV) && (LIBSWSCALE_VERSION_INT >= ((2<<16)+(5<<8)+102))
+#if defined(FFUDIV)
 	case AV_PIX_FMT_BAYER_RGGB16LE:
 		return AV_PIX_FMT_RGB24;
 #endif
@@ -1162,7 +1145,7 @@ static mlt_image_format pick_image_format( enum AVPixelFormat pix_fmt )
 	case AV_PIX_FMT_MONOBLACK:
 	case AV_PIX_FMT_RGB8:
 	case AV_PIX_FMT_BGR8:
-#if defined(FFUDIV) && (LIBSWSCALE_VERSION_INT >= ((2<<16)+(5<<8)+102))
+#if defined(FFUDIV)
 	case AV_PIX_FMT_BAYER_RGGB16LE:
 		return mlt_image_rgb24;
 #endif
@@ -1206,7 +1189,7 @@ static mlt_audio_format pick_audio_format( int sample_fmt )
  */
 static int pick_av_pixel_format( int *pix_fmt )
 {
-#if defined(FFUDIV) && (LIBAVFORMAT_VERSION_INT >= ((55<<16)+(48<<8)+100))
+#if defined(FFUDIV)
 	switch (*pix_fmt)
 	{
 	case AV_PIX_FMT_YUVJ420P:
@@ -1281,7 +1264,7 @@ static int sliced_h_pix_fmt_conv_proc( int id, int idx, int jobs, void* cookie )
 	av_opt_set_int( sws, "dstw", slice_w, 0 );
 	av_opt_set_int( sws, "dsth", h, 0 );
 	av_opt_set_int( sws, "dst_format", ctx->dst_format, 0 );
-	av_opt_set_int( sws, "sws_flags", ctx->flags | SWS_FULL_CHR_H_INP, 0 );
+	av_opt_set_int( sws, "sws_flags", ctx->flags, 0 );
 
 	av_opt_set_int( sws, "src_h_chr_pos", -513, 0 );
 	av_opt_set_int( sws, "src_v_chr_pos", src_v_chr_pos, 0 );
@@ -1295,7 +1278,7 @@ static int sliced_h_pix_fmt_conv_proc( int id, int idx, int jobs, void* cookie )
 		return 0;
 	}
 
-	set_luma_transfer( sws, ctx->src_colorspace, ctx->dst_colorspace, ctx->src_full_range, ctx->dst_full_range );
+	mlt_set_luma_transfer( sws, ctx->src_colorspace, ctx->dst_colorspace, ctx->src_full_range, ctx->dst_full_range );
 
 #if LIBAVUTIL_VERSION_INT < AV_VERSION_INT(55, 0, 100)
 #define PIX_DESC_BPP(DESC) (DESC.step_minus1 + 1)
@@ -1303,9 +1286,6 @@ static int sliced_h_pix_fmt_conv_proc( int id, int idx, int jobs, void* cookie )
 #define PIX_DESC_BPP(DESC) (DESC.step)
 #endif
 
-#if LIBAVUTIL_VERSION_INT < AV_VERSION_INT(52, 32, 100)
-#define AV_PIX_FMT_FLAG_PLANAR PIX_FMT_PLANAR
-#endif
 	for( i = 0; i < 4; i++ )
 	{
 		int in_offset = (AV_PIX_FMT_FLAG_PLANAR & ctx->src_desc->flags)
@@ -1338,7 +1318,7 @@ static int sliced_h_pix_fmt_conv_proc( int id, int idx, int jobs, void* cookie )
 static int convert_image( producer_avformat self, AVFrame *frame, uint8_t *buffer, int pix_fmt,
 	mlt_image_format *format, int width, int height, uint8_t **alpha )
 {
-	int flags = SWS_BICUBIC | SWS_ACCURATE_RND;
+	int flags = mlt_default_sws_flags;
 	mlt_profile profile = mlt_service_profile( MLT_PRODUCER_SERVICE( self->parent ) );
 	int result = self->yuv_colorspace;
 
@@ -1374,7 +1354,7 @@ static int convert_image( producer_avformat self, AVFrame *frame, uint8_t *buffe
 		// This is a special case. Movit wants the full range, if available.
 		// Thankfully, there is not much other use of yuv420p except consumer
 		// avformat with no filters and explicitly requested.
-#if defined(FFUDIV) && (LIBAVFORMAT_VERSION_INT >= ((55<<16)+(48<<8)+100))
+#if defined(FFUDIV)
 		struct SwsContext *context = sws_getContext(width, height, src_pix_fmt,
 			width, height, AV_PIX_FMT_YUV420P, flags, NULL, NULL, NULL);
 #else
@@ -1391,7 +1371,7 @@ static int convert_image( producer_avformat self, AVFrame *frame, uint8_t *buffe
 		out_stride[0] = width;
 		out_stride[1] = width >> 1;
 		out_stride[2] = width >> 1;
-		if ( !set_luma_transfer( context, self->yuv_colorspace, profile->colorspace, self->full_luma, self->full_luma ) )
+		if ( !mlt_set_luma_transfer( context, self->yuv_colorspace, profile->colorspace, self->full_luma, self->full_luma ) )
 			result = profile->colorspace;
 		sws_scale( context, (const uint8_t* const*) frame->data, frame->linesize, 0, height,
 			out_data, out_stride);
@@ -1400,12 +1380,12 @@ static int convert_image( producer_avformat self, AVFrame *frame, uint8_t *buffe
 	else if ( *format == mlt_image_rgb24 )
 	{
 		struct SwsContext *context = sws_getContext( width, height, src_pix_fmt,
-			width, height, AV_PIX_FMT_RGB24, flags | SWS_FULL_CHR_H_INT, NULL, NULL, NULL);
+			width, height, AV_PIX_FMT_RGB24, flags, NULL, NULL, NULL);
 		uint8_t *out_data[4];
 		int out_stride[4];
 		av_image_fill_arrays(out_data, out_stride, buffer, AV_PIX_FMT_RGB24, width, height, IMAGE_ALIGN);
 		// libswscale wants the RGB colorspace to be SWS_CS_DEFAULT, which is = SWS_CS_ITU601.
-		set_luma_transfer( context, self->yuv_colorspace, 601, self->full_luma, 0 );
+		mlt_set_luma_transfer( context, self->yuv_colorspace, 601, self->full_luma, 0 );
 		sws_scale( context, (const uint8_t* const*) frame->data, frame->linesize, 0, height,
 			out_data, out_stride);
 		sws_freeContext( context );
@@ -1413,12 +1393,12 @@ static int convert_image( producer_avformat self, AVFrame *frame, uint8_t *buffe
 	else if ( *format == mlt_image_rgb24a || *format == mlt_image_opengl )
 	{
 		struct SwsContext *context = sws_getContext( width, height, src_pix_fmt,
-			width, height, AV_PIX_FMT_RGBA, flags | SWS_FULL_CHR_H_INT, NULL, NULL, NULL);
+			width, height, AV_PIX_FMT_RGBA, flags, NULL, NULL, NULL);
 		uint8_t *out_data[4];
 		int out_stride[4];
 		av_image_fill_arrays(out_data, out_stride, buffer, AV_PIX_FMT_RGBA, width, height, IMAGE_ALIGN);
 		// libswscale wants the RGB colorspace to be SWS_CS_DEFAULT, which is = SWS_CS_ITU601.
-		set_luma_transfer( context, self->yuv_colorspace, 601, self->full_luma, 0 );
+		mlt_set_luma_transfer( context, self->yuv_colorspace, 601, self->full_luma, 0 );
 		sws_scale( context, (const uint8_t* const*) frame->data, frame->linesize, 0, height,
 			out_data, out_stride);
 		sws_freeContext( context );
@@ -1439,17 +1419,14 @@ static int convert_image( producer_avformat self, AVFrame *frame, uint8_t *buffe
 			.src_full_range = self->full_luma,
 			.dst_full_range = 0,
 		};
-#if defined(FFUDIV) && (LIBAVFORMAT_VERSION_INT >= ((55<<16)+(48<<8)+100))
 		ctx.src_format = src_pix_fmt;
-#else
-		ctx.src_format = pix_fmt;
-#endif
 		ctx.src_desc = av_pix_fmt_desc_get( ctx.src_format );
 		ctx.dst_desc = av_pix_fmt_desc_get( ctx.dst_format );
 
 		av_image_fill_arrays(ctx.out_data, ctx.out_stride, buffer, ctx.dst_format, width, height, IMAGE_ALIGN);
 
-		if ( !getenv("MLT_AVFORMAT_SLICED_PIXFMT_DISABLE") ) {
+		int sliced = !getenv("MLT_AVFORMAT_SLICED_PIXFMT_DISABLE");
+		if ( sliced ) {
 			ctx.slice_w = ( width < 1000 )
 				? ( 256 >> frame->interlaced_frame )
 				: ( 512 >> frame->interlaced_frame );
@@ -1459,11 +1436,12 @@ static int convert_image( producer_avformat self, AVFrame *frame, uint8_t *buffe
 
 		c = ( width + ctx.slice_w - 1 ) / ctx.slice_w;
 		int last_slice_w = width - ctx.slice_w * (c - 1);
-		c *= frame->interlaced_frame ? 2 : 1;
 
-		if ( (last_slice_w % 8) == 0 && !getenv("MLT_AVFORMAT_SLICED_PIXFMT_DISABLE") ) {
+		if ( sliced && (last_slice_w % 8) == 0 && !(ctx.src_format == AV_PIX_FMT_YUV422P && last_slice_w % 16) ) {
+			c *= frame->interlaced_frame ? 2 : 1;
 			mlt_slices_run_normal( c, sliced_h_pix_fmt_conv_proc, &ctx );
 		} else {
+			c = frame->interlaced_frame ? 2 : 1;
 			ctx.slice_w = width;
 			for ( i = 0 ; i < c; i++ )
 				sliced_h_pix_fmt_conv_proc( i, i, c, &ctx );
@@ -1473,16 +1451,16 @@ static int convert_image( producer_avformat self, AVFrame *frame, uint8_t *buffe
 	}
 #else
 	{
-#if defined(FFUDIV) && (LIBAVFORMAT_VERSION_INT >= ((55<<16)+(48<<8)+100))
+#if defined(FFUDIV)
 		struct SwsContext *context = sws_getContext( width, height, src_pix_fmt,
-			width, height, AV_PIX_FMT_YUYV422, flags | SWS_FULL_CHR_H_INP, NULL, NULL, NULL);
+			width, height, AV_PIX_FMT_YUYV422, flags, NULL, NULL, NULL);
 #else
 		struct SwsContext *context = sws_getContext( width, height, pix_fmt,
-			width, height, AV_PIX_FMT_YUYV422, flags | SWS_FULL_CHR_H_INP, NULL, NULL, NULL);
+			width, height, AV_PIX_FMT_YUYV422, flags, NULL, NULL, NULL);
 #endif
 		AVPicture output;
 		avpicture_fill( &output, buffer, AV_PIX_FMT_YUYV422, width, height );
-		if ( !set_luma_transfer( context, self->yuv_colorspace, profile->colorspace, self->full_luma, 0 ) )
+		if ( !mlt_set_luma_transfer( context, self->yuv_colorspace, profile->colorspace, self->full_luma, 0 ) )
 			result = profile->colorspace;
 		sws_scale( context, (const uint8_t* const*) frame->data, frame->linesize, 0, height,
 			output.data, output.linesize);
@@ -1655,7 +1633,7 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 			codec_context->pix_fmt == AV_PIX_FMT_ABGR ||
 			codec_context->pix_fmt == AV_PIX_FMT_BGRA )
 		*format = pick_image_format( codec_context->pix_fmt );
-#if defined(FFUDIV) && (LIBSWSCALE_VERSION_INT >= ((2<<16)+(5<<8)+102))
+#if defined(FFUDIV)
 	else if ( codec_context->pix_fmt == AV_PIX_FMT_BAYER_RGGB16LE ) {
 		if ( *format == mlt_image_yuv422 )
 			*format = mlt_image_yuv420p;
@@ -1673,6 +1651,7 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 
 	// Duplicate the last image if necessary
 	if ( self->video_frame && self->video_frame->linesize[0]
+		 && (self->pkt.stream_index == self->video_index )
 		 && ( paused || self->current_position >= req_position ) )
 	{
 		// Duplicate it
@@ -1709,11 +1688,7 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 
 		// Construct an AVFrame for YUV422 conversion
 		if ( !self->video_frame )
-#if LIBAVCODEC_VERSION_INT >= ((55<<16)+(45<<8)+0)
 			self->video_frame = av_frame_alloc();
-#else
-			self->video_frame = avcodec_alloc_frame( );
-#endif
 
 		while( ret >= 0 && !got_picture )
 		{
@@ -1837,6 +1812,12 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 					pts = best_pts( self, self->video_frame->pkt_pts, self->video_frame->pkt_dts );
 					if ( pts != AV_NOPTS_VALUE )
 					{
+						// Some streams are not marking their key frames even though
+						// there are I frames, and find_first_pts() fails as a result.
+						// Try to set first_pts here after getting pict_type.
+						if ( self->first_pts == AV_NOPTS_VALUE &&
+							(self->video_frame->key_frame || self->video_frame->pict_type == AV_PICTURE_TYPE_I) )
+							 self->first_pts = pts;
 						if ( self->first_pts != AV_NOPTS_VALUE )
 							pts -= self->first_pts;
 						else if ( context->start_time != AV_NOPTS_VALUE )
@@ -2126,15 +2107,13 @@ static int video_codec_init( producer_avformat self, int index, mlt_properties p
 		AVRational frame_rate = stream->avg_frame_rate;
 		double fps = av_q2d( frame_rate );
 
-#if LIBAVFORMAT_VERSION_MAJOR < 55 || defined(FFUDIV)
+#if defined(FFUDIV)
 		// Verify and sanitize the muxer frame rate.
 		if ( isnan( fps ) || isinf( fps ) || fps == 0 )
 		{
 			frame_rate = stream->r_frame_rate;
 			fps = av_q2d( frame_rate );
 		}
-#endif
-#if (LIBAVFORMAT_VERSION_MAJOR < 55) || defined(FFUDIV)
 		// With my samples when r_frame_rate != 1000 but avg_frame_rate is valid,
 		// avg_frame_rate gives some approximate value that does not well match the media.
 		// Also, on my sample where r_frame_rate = 1000, using avg_frame_rate directly
@@ -2442,15 +2421,9 @@ static int decode_audio( producer_avformat self, int *ignore, AVPacket pkt, int 
 
 		// Decode the audio
 		if ( !self->audio_frame )
-#if LIBAVCODEC_VERSION_INT >= ((55<<16)+(45<<8)+0)
 			self->audio_frame = av_frame_alloc();
 		else
 			av_frame_unref( self->audio_frame );
-#else
-			self->audio_frame = avcodec_alloc_frame();
-		else
-			avcodec_get_frame_defaults( self->audio_frame );
-#endif
 		ret = avcodec_decode_audio4( codec_context, self->audio_frame, &got_frame, &pkt );
 		if ( ret < 0 )
 		{
@@ -2909,7 +2882,7 @@ static void producer_set_up_audio( producer_avformat self, mlt_frame frame )
 	}
 
 	// Update the audio properties if the index changed
-	if ( context && index > -1 && self->audio_index > -1 && index != self->audio_index )
+	if ( context && self->audio_index < context->nb_streams && index > -1 && self->audio_index > -1 && index != self->audio_index )
 	{
 		pthread_mutex_lock( &self->open_mutex );
 		if ( self->audio_codec[ self->audio_index ] )
