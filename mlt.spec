@@ -18,7 +18,7 @@
 
 Name: mlt
 Version: 6.16.0
-Release: alt1
+Release: alt2
 
 Summary: Multimedia framework designed for television broadcasting
 License: GPLv3
@@ -199,6 +199,9 @@ install -pm 0755 src/swig/python/_%name.so %buildroot%python_sitelibdir/
 %_pkgconfigdir/mlt++.pc
 
 %changelog
+* Sun Jun 23 2019 Igor Vlasenko <viy@altlinux.ru> 6.16.0-alt2
+- NMU: remove rpm-build-ubt from BR:
+
 * Wed May 08 2019 Sergey V Turchin <zerg@altlinux.org> 6.16.0-alt1
 - new version
 
