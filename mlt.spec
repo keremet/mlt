@@ -43,7 +43,7 @@ Patch103: alt-libav.patch
 # optimized out: elfutils gcc-c++ glib2-devel glibc-kernheaders-generic glibc-kernheaders-x86 libGL-devel libSDL-devel libX11-devel libavcodec-devel libavformat-devel libavutil-devel libcdio-paranoia libdc1394-22 libgpg-error libopencore-amrnb0 libopencore-amrwb0 libp11-kit libqt5-core libqt5-gui libqt5-svg libqt5-widgets libqt5-xml libraw1394-11 libstdc++-devel libvdpau-devel libx265-130 perl pkg-config python-base python-devel python-modules qt5-base-devel rpm-build-gir swig-data xorg-xproto-devel
 #BuildRequires: frei0r-devel ladspa_sdk libSDL2-devel libSDL2_image-devel libalsa-devel libavdevice-devel libavfilter-devel libexif-devel libfftw3-devel libjack-devel libopencv-devel libpulseaudio-devel libsamplerate-devel libsox-devel libswscale-devel libxml2-devel qt5-svg-devel swig
 #BuildRequires: frei0r-devel ladspa_sdk libSDL_image-devel libalsa-devel libavdevice-devel libavformat-devel libexif-devel libfftw3-devel libjack-devel libpulseaudio-devel libsamplerate-devel libsox-devel libswfdec-devel libswscale-devel libxml2-devel python-module-google python3-dev qt5-svg-devel rpm-build-ruby swig
-BuildRequires(pre): rpm-build-kf5 rpm-build-ubt libavformat-devel
+BuildRequires(pre): rpm-build-kf5 rpm-build-python3 libavformat-devel
 BuildRequires: qt5-svg-devel
 BuildRequires: frei0r-devel libSDL2_image-devel libalsa-devel libexif-devel
 BuildRequires: libavfilter-devel libswscale-devel libavdevice-devel libavformat-devel
@@ -52,7 +52,7 @@ BuildRequires: libswresample-devel
 %endif
 BuildRequires: libfftw3-devel libjack-devel libpulseaudio-devel libsamplerate-devel libsox-devel
 BuildRequires: libvidstab-devel
-BuildRequires: libxml2-devel swig python-devel ladspa_sdk
+BuildRequires: libxml2-devel swig ladspa_sdk
 %if_enabled vdpau
 BuildRequires: libvdpau-devel
 %endif
@@ -205,38 +205,38 @@ install -pm 0755 src/swig/python/_%name.so %buildroot%python_sitelibdir/
 * Tue Mar 26 2019 Sergey V Turchin <zerg@altlinux.org> 6.12.0-alt1
 - new version
 
-* Wed Jul 11 2018 Sergey V Turchin <zerg@altlinux.org> 6.10.0-alt1%ubt.1
+* Wed Jul 11 2018 Sergey V Turchin <zerg@altlinux.org> 6.10.0-alt1.1
 - fix build requires
 
-* Fri Jul 06 2018 Sergey V Turchin <zerg@altlinux.org> 6.10.0-alt1%ubt
+* Fri Jul 06 2018 Sergey V Turchin <zerg@altlinux.org> 6.10.0-alt1
 - new version
 
-* Thu Jun 14 2018 Sergey V Turchin <zerg@altlinux.org> 6.8.0-alt1%ubt
+* Thu Jun 14 2018 Sergey V Turchin <zerg@altlinux.org> 6.8.0-alt1
 - new version
 
-* Thu Apr 05 2018 Oleg Solovyov <mcpain@altlinux.org> 6.6.0-alt2%ubt
+* Thu Apr 05 2018 Oleg Solovyov <mcpain@altlinux.org> 6.6.0-alt2
 - rebuild with libvidstab
 
 * Sun Mar 18 2018 Fr. Br. George <george@altlinux.ru> 6.6.0-alt1
 - Autobuild version bump to 6.6.0
 
-* Tue Dec 26 2017 Sergey V Turchin <zerg@altlinux.org> 6.4.1-alt5%ubt
+* Tue Dec 26 2017 Sergey V Turchin <zerg@altlinux.org> 6.4.1-alt5
 - fix to build with glibc-2.26
 
-* Wed Nov 01 2017 Sergey V Turchin <zerg@altlinux.org> 6.4.1-alt4%ubt.1
+* Wed Nov 01 2017 Sergey V Turchin <zerg@altlinux.org> 6.4.1-alt4.1
 - fix compile flags
 
-* Wed Nov 01 2017 Sergey V Turchin <zerg@altlinux.org> 6.4.1-alt4%ubt
+* Wed Nov 01 2017 Sergey V Turchin <zerg@altlinux.org> 6.4.1-alt4
 - Allow Mlt::Repository to be deleted without bad side effect (ALT#34108)
 
-* Tue Jun 20 2017 Sergey V Turchin <zerg@altlinux.org> 6.4.1-alt3%ubt
+* Tue Jun 20 2017 Sergey V Turchin <zerg@altlinux.org> 6.4.1-alt3
 - fix find ffmpeg presets
 - update Debian patches
 
-* Tue Jun 06 2017 Sergey V Turchin <zerg@altlinux.org> 6.4.1-alt2%ubt
+* Tue Jun 06 2017 Sergey V Turchin <zerg@altlinux.org> 6.4.1-alt2
 - rebuild with ffmpeg
 
-* Tue Apr 04 2017 Sergey V Turchin <zerg@altlinux.org> 6.4.1-alt1%ubt
+* Tue Apr 04 2017 Sergey V Turchin <zerg@altlinux.org> 6.4.1-alt1
 - new version
 - build without libswfdec (ALT#33326)
 
