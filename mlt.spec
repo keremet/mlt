@@ -18,7 +18,7 @@
 
 Name: mlt
 Version: 6.16.0
-Release: alt2
+Release: alt3
 
 Summary: Multimedia framework designed for television broadcasting
 License: GPLv3
@@ -56,6 +56,7 @@ BuildRequires: libxml2-devel swig ladspa_sdk
 %if_enabled vdpau
 BuildRequires: libvdpau-devel
 %endif
+BuildRequires: python3-devel
 
 %description
 %Name is a multimedia framework designed for television broadcasting.
@@ -101,10 +102,10 @@ Group: Development/C++
 %description -n libmlt++-devel
 Development files for %Name.
 
-%package -n python-module-%name
+%package -n python3-module-%name
 Summary: Python package to work with %Name
 Group: Development/Python
-%description -n python-module-%name
+%description -n python3-module-%name
 This module allows to work with %Name using python..
 
 %prep
@@ -126,6 +127,12 @@ This module allows to work with %Name using python..
 
 VDPAU_SONAME=`readelf -a %_libdir/libvdpau.so | grep SONAME| sed 's/.*\[//'| sed 's/\].*//'`
 sed -i "s/__VDPAU_SONAME__/${VDPAU_SONAME}/" src/modules/avformat/vdpau.c
+
+find src/swig/python -name '*.py' | xargs sed -i '1s|^#!/usr/bin/env python|#!%{__python3}|'
+sed -i -e 's|which python|which python3|' src/swig/python/build
+sed -i -e 's|python -c|python3 -c|' src/swig/python/build
+sed -i -e 's|python-config|python3-config|' src/swig/python/build
+sed -i -e 's|python{}.{}|python{}.{}m|' src/swig/python/build
 
 %build
 %mIF_ver_lt %_qt5_version 5.9
@@ -165,9 +172,9 @@ export CC=gcc CXX=g++ CFLAGS="%optflags" QTDIR=%_qt5_prefix
 
 %install
 %make DESTDIR=%buildroot install
-install -d %buildroot%python_sitelibdir
-install -pm 0644 src/swig/python/%name.py %buildroot%python_sitelibdir/
-install -pm 0755 src/swig/python/_%name.so %buildroot%python_sitelibdir/
+install -d %buildroot/%python3_sitelibdir
+install -pm 0644 src/swig/python/%name.py %buildroot/%python3_sitelibdir/
+install -pm 0755 src/swig/python/_%name.so %buildroot/%python3_sitelibdir/
 
 %files -n %name-utils
 #%doc docs/melt.txt
@@ -184,8 +191,8 @@ install -pm 0755 src/swig/python/_%name.so %buildroot%python_sitelibdir/
 %_libdir/libmlt++.so.%mltxx_sover
 %_libdir/libmlt++.so.*
 
-%files -n python-module-%name
-%python_sitelibdir/*
+%files -n python3-module-%name
+%python3_sitelibdir/*
 
 %files -n libmlt-devel
 #%doc docs/framework.txt
@@ -199,6 +206,9 @@ install -pm 0755 src/swig/python/_%name.so %buildroot%python_sitelibdir/
 %_pkgconfigdir/mlt++.pc
 
 %changelog
+* Fri Jul 05 2019 Sergey V Turchin <zerg@altlinux.org> 6.16.0-alt3
+- build with python3
+
 * Sun Jun 23 2019 Igor Vlasenko <viy@altlinux.ru> 6.16.0-alt2
 - NMU: remove rpm-build-ubt from BR:
 
