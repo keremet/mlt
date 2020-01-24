@@ -2,7 +2,7 @@
  * \file mlt_factory.c
  * \brief the factory method interfaces
  *
- * Copyright (C) 2003-2018 Meltytech, LLC
+ * Copyright (C) 2003-2019 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -32,23 +32,30 @@
 #define PRESETS_DIR "/presets"
 
 #ifdef _WIN32
-#ifdef PREFIX_LIB
-#undef PREFIX_LIB
-#endif
-#ifdef PREFIX_DATA
-#undef PREFIX_DATA
-#endif
-#include <windows.h>
-/** the default subdirectory of the libdir for holding modules (plugins) */
-#define PREFIX_LIB "\\lib\\mlt"
-/** the default subdirectory of the install prefix for holding module (plugin) data */
-#define PREFIX_DATA "\\share\\mlt"
+#  include <windows.h>
+#  ifdef PREFIX_LIB
+#    undef PREFIX_LIB
+#  endif
+#  ifdef PREFIX_DATA
+#    undef PREFIX_DATA
+#  endif
+   /** the default subdirectory of the libdir for holding modules (plugins) */
+#  define PREFIX_LIB "\\lib\\mlt"
+   /** the default subdirectory of the install prefix for holding module (plugin) data */
+#  define PREFIX_DATA "\\share\\mlt"
+
 #elif defined(__APPLE__) && defined(RELOCATABLE)
-#include <mach-o/dyld.h>
-/** the default subdirectory of the libdir for holding modules (plugins) */
-#define PREFIX_LIB "/PlugIns/mlt"
-/** the default subdirectory of the install prefix for holding module (plugin) data */
-#define PREFIX_DATA "/Resources/mlt"
+#  include <mach-o/dyld.h>
+#  ifdef PREFIX_LIB
+#    undef PREFIX_LIB
+#  endif
+#  ifdef PREFIX_DATA
+#    undef PREFIX_DATA
+#  endif
+   /** the default subdirectory of the libdir for holding modules (plugins) */
+#  define PREFIX_LIB "/PlugIns/mlt"
+   /** the default subdirectory of the install prefix for holding module (plugin) data */
+#  define PREFIX_DATA "/Resources/mlt"
 #endif
 
 /** holds the full path to the modules directory - initialized and retained for the entire session */
@@ -129,7 +136,12 @@ static char* mlt_dirname( char *path )
 mlt_repository mlt_factory_init( const char *directory )
 {
 	// Load the system locales
-	setlocale( LC_ALL, "" );
+	const char* locale = "";
+#if defined(_WIN32)
+	if (getenv("LC_ALL"))
+		locale = getenv("LC_ALL");
+#endif
+	setlocale( LC_ALL, locale );
 
 	if ( ! global_properties )
 		global_properties = mlt_properties_new( );
@@ -173,26 +185,30 @@ mlt_repository mlt_factory_init( const char *directory )
 		if ( directory == NULL || !strcmp( directory, "" ) )
 			directory = getenv( "MLT_REPOSITORY" );
 #endif
-		// If no directory is specified, default to install directory
-		if ( directory == NULL )
-			directory = PREFIX_LIB;
 
 		// Store the prefix for later retrieval
 #if defined(_WIN32) || (defined(__APPLE__) && defined(RELOCATABLE))
-		char *exedir = mlt_environment( "MLT_APPDIR" );
-		size_t size = strlen( exedir );
-		if ( global_properties && !getenv( "MLT_DATA" ) )
-		{
-			mlt_directory = calloc( 1, size + strlen( PREFIX_DATA ) + 1 );
+		if ( directory ) {
+			mlt_directory = strdup( directory );
+		} else {
+			char *exedir = mlt_environment( "MLT_APPDIR" );
+			size_t size = strlen( exedir );
+			if ( global_properties && !getenv( "MLT_DATA" ) )
+			{
+				mlt_directory = calloc( 1, size + strlen( PREFIX_DATA ) + 1 );
+				strcpy( mlt_directory, exedir );
+				strcat( mlt_directory, PREFIX_DATA );
+				mlt_properties_set( global_properties, "MLT_DATA", mlt_directory );
+				free( mlt_directory );
+			}
+			mlt_directory = calloc( 1, size + strlen( PREFIX_LIB ) + 1 );
 			strcpy( mlt_directory, exedir );
-			strcat( mlt_directory, PREFIX_DATA );
-			mlt_properties_set( global_properties, "MLT_DATA", mlt_directory );
-			free( mlt_directory );
+			strcat( mlt_directory, PREFIX_LIB );
 		}
-		mlt_directory = calloc( 1, size + strlen( directory ) + 1 );
-		strcpy( mlt_directory, exedir );
-		strcat( mlt_directory, directory );
 #else
+		// If no directory is specified, default to install directory
+		if ( directory == NULL )
+			directory = PREFIX_LIB;
 		mlt_directory = strdup( directory );
 #endif
 		

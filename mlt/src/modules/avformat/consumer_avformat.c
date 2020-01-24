@@ -189,16 +189,24 @@ static int init_vaapi(mlt_properties properties, AVCodecContext *codec_context)
 {
 	int err = 0;
 	const char* vaapi_device = mlt_properties_get(properties, "vaapi_device");
+	AVDictionary *opts = NULL;
 	
+	av_dict_set(&opts, "connection_type",
+		mlt_properties_get(properties, "connection_type"), 0);
+	av_dict_set(&opts, "driver",
+		mlt_properties_get(properties, "driver"), 0);
+	av_dict_set(&opts, "kernel_driver",
+		mlt_properties_get(properties, "kernel_driver"), 0);
+
 	if ((err = av_hwdevice_ctx_create(&hw_device_ctx, AV_HWDEVICE_TYPE_VAAPI,
-									  vaapi_device, NULL, 0)) < 0) {
+									  vaapi_device, opts, 0)) < 0) {
 		mlt_log_warning(NULL, "Failed to create VAAPI device.\n");
-		return err;
+	} else {
+		codec_context->hw_device_ctx = av_buffer_ref(hw_device_ctx);
+		mlt_properties_set_data(properties, "hw_device_ctx", &hw_device_ctx, 0,
+								(mlt_destructor) av_buffer_unref, NULL);
 	}
-	codec_context->hw_device_ctx = av_buffer_ref(hw_device_ctx);
-	mlt_properties_set_data(properties, "hw_device_ctx", &hw_device_ctx, 0,
-							(mlt_destructor) av_buffer_unref, NULL);
-	
+	av_dict_free(&opts);		
 	return err;
 }
 
@@ -271,22 +279,24 @@ mlt_consumer consumer_avformat_init( mlt_profile profile, char *arg )
 static void recompute_aspect_ratio( mlt_properties properties )
 {
 	double ar = mlt_properties_get_double( properties, "aspect" );
-	AVRational rational = av_d2q( ar, 255 );
-	int width = mlt_properties_get_int( properties, "width" );
-	int height = mlt_properties_get_int( properties, "height" );
-
-	// Update the profile and properties as well since this is an alias
-	// for mlt properties that correspond to profile settings
-	mlt_properties_set_int( properties, "display_aspect_num", rational.num );
-	mlt_properties_set_int( properties, "display_aspect_den", rational.den );
-
-	// Now compute the sample aspect ratio
-	rational = av_d2q( ar * height / FFMAX(width, 1), 255 );
-
-	// Update the profile and properties as well since this is an alias
-	// for mlt properties that correspond to profile settings
-	mlt_properties_set_int( properties, "sample_aspect_num", rational.num );
-	mlt_properties_set_int( properties, "sample_aspect_den", rational.den );
+	if (ar > 0.0) {
+		AVRational rational = av_d2q( ar, 255 );
+		int width = mlt_properties_get_int( properties, "width" );
+		int height = mlt_properties_get_int( properties, "height" );
+	
+		// Update the profile and properties as well since this is an alias
+		// for mlt properties that correspond to profile settings
+		mlt_properties_set_int( properties, "display_aspect_num", rational.num );
+		mlt_properties_set_int( properties, "display_aspect_den", rational.den );
+	
+		// Now compute the sample aspect ratio
+		rational = av_d2q( ar * height / FFMAX(width, 1), 255 );
+	
+		// Update the profile and properties as well since this is an alias
+		// for mlt properties that correspond to profile settings
+		mlt_properties_set_int( properties, "sample_aspect_num", rational.num );
+		mlt_properties_set_int( properties, "sample_aspect_den", rational.den );
+	}
 }
 
 static void color_trc_from_colorspace( mlt_properties properties )

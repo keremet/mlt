@@ -107,7 +107,7 @@ static void analyze( mlt_filter filter, cv::Mat cvFrame, private_data* data, int
 
 	// Create tracker and initialize it
 	if (!data->initialized)
-        {
+	{
 		// Build tracker
 		data->algo = mlt_properties_get( filter_properties, "algo" );
 #if CV_VERSION_MAJOR > 3 || (CV_VERSION_MAJOR == 3 && CV_VERSION_MINOR >= 3)
@@ -160,7 +160,7 @@ static void analyze( mlt_filter filter, cv::Mat cvFrame, private_data* data, int
 			if ( data->tracker->init( cvFrame, data->boundingBox ) ) {
 				data->initialized = true;
 				data->analyze = true;
-				data->last_position = -1;
+				data->last_position = position - 1;
 			}
 			// init anim property
 			mlt_properties_anim_get_int( filter_properties, "_results", 0, length );
@@ -191,6 +191,7 @@ static void analyze( mlt_filter filter, cv::Mat cvFrame, private_data* data, int
 	rect.w = data->boundingBox.width;
 	rect.h = data->boundingBox.height;
 	rect.o = 0;
+
 	int steps = mlt_properties_get_int(filter_properties, "steps");
 	if ( steps > 1 && position > 0 && position < length - 1 )
 	{
@@ -208,6 +209,7 @@ static void analyze( mlt_filter filter, cv::Mat cvFrame, private_data* data, int
 		mlt_properties_set( filter_properties, "results", strdup( mlt_animation_serialize( anim ) ) );
 		// Discard temporary data
 		mlt_properties_set( filter_properties, "_results", (char*) NULL );
+
 		data->playback = true;
 	}
 	data->last_position = position;
@@ -236,17 +238,17 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 		cvFrame = cv::Mat( *height, *width, CV_8UC3, *image );
 	}
 	private_data* data = (private_data*) filter->child;
-	if ( !data->initialized )
-        {
-		if ( data->producer_length == 0 )
+	if ( data->producer_length == 0 )
+	{
+		mlt_producer producer = mlt_frame_get_original_producer( frame );
+		if ( producer )
 		{
-			mlt_producer producer = mlt_frame_get_original_producer( frame );
-			if ( producer )
-			{
-				data->producer_in = mlt_producer_get_in( producer );
-				data->producer_length = mlt_producer_get_playtime( producer );
-			}
+			data->producer_in = mlt_producer_get_in( producer );
+			data->producer_length = mlt_producer_get_playtime( producer );
 		}
+	}
+	if ( !data->initialized )
+	{
 		mlt_properties_anim_get_int( filter_properties, "results", 0, data->producer_length );
 		mlt_animation anim = mlt_properties_get_animation( filter_properties, "results" );
 		if ( anim && mlt_animation_key_count(anim) > 0 )
@@ -259,11 +261,11 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 	if( data->playback )
 	{
 		// Clip already analysed, don't re-process
-		apply( filter, data, *width, *height, position - data->producer_in, data->producer_length );
+		apply( filter, data, *width, *height, position, data->producer_in + data->producer_length );
 	}
 	else
 	{
-		analyze( filter, cvFrame, data, *width, *height, position - data->producer_in, data->producer_length );
+		analyze( filter, cvFrame, data, *width, *height, position, data->producer_in + data->producer_length );
 	}
 
 	if ( blur > 0 )

@@ -1,6 +1,7 @@
 /*
  * filter_frei0r.c -- frei0r filter
  * Copyright (c) 2008 Marco Gittler <g.marco@freenet.de>
+ * Copyright (C) 2009-2019 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -32,9 +33,9 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 
 	if ( error == 0 && *image )
 	{
-		double position = mlt_filter_get_position( filter, frame );
+		mlt_position position = mlt_filter_get_position( filter, frame );
 		mlt_profile profile = mlt_service_profile( MLT_FILTER_SERVICE( filter ) );
-		double time = position / mlt_profile_fps( profile );
+		double time = (double) position / mlt_profile_fps( profile );
 		int length = mlt_filter_get_length2( filter, frame );
 		process_frei0r_item( MLT_FILTER_SERVICE(filter), position, time, length, frame, image, width, height );
 	}

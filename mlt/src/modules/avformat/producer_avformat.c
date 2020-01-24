@@ -57,6 +57,7 @@
 #include <limits.h>
 #include <math.h>
 #include <wchar.h>
+#include <stdatomic.h>
 
 #define POSITION_INITIAL (-2)
 #define POSITION_INVALID (-1)
@@ -83,12 +84,12 @@ struct producer_avformat_s
 	int audio_index;
 	int video_index;
 	int64_t first_pts;
-	int64_t last_position;
+	atomic_int_fast64_t last_position;
 	int video_seekable;
 	int seekable; /// This one is used for both audio and file level seekability.
-	int64_t current_position;
+	atomic_int_fast64_t current_position;
 	mlt_position nonseek_position;
-	int top_field_first;
+	atomic_int top_field_first;
 	uint8_t *audio_buffer[ MAX_AUDIO_STREAMS ];
 	size_t audio_buffer_size[ MAX_AUDIO_STREAMS ];
 	uint8_t *decode_buffer[ MAX_AUDIO_STREAMS ];
@@ -355,7 +356,7 @@ static mlt_properties find_default_streams( producer_avformat self )
 
 	// Default to the first audio and video streams found
 	self->audio_index = -1;
-	self->video_index = -1;
+	int first_video_index = self->video_index = -1;
 
 	mlt_properties_set_int( meta_media, "meta.media.nb_streams", context->nb_streams );
 
@@ -376,9 +377,16 @@ static mlt_properties find_default_streams( producer_avformat self )
 		switch( codec_context->codec_type )
 		{
 			case AVMEDIA_TYPE_VIDEO:
-				// Use first video stream
-				if ( self->video_index < 0 )
+				// Save the first video stream
+				if ( first_video_index < 0 )
+					first_video_index = i;
+				// Only set the video stream if not album art
+				if (self->video_index < 0 &&
+						(codec_context->codec_id != AV_CODEC_ID_MJPEG ||
+						 codec_context->time_base.num != 1 ||
+						 codec_context->time_base.den != 90000)) {
 					self->video_index = i;
+				}
 				mlt_properties_set( meta_media, key, "video" );
 				snprintf( key, sizeof(key), "meta.media.%d.stream.frame_rate", i );
 				double ffmpeg_fps = av_q2d( context->streams[ i ]->avg_frame_rate );
@@ -448,7 +456,7 @@ static mlt_properties find_default_streams( producer_avformat self )
 		snprintf( key, sizeof(key), "meta.media.%d.codec.long_name", i );
 		mlt_properties_set( meta_media, key, codec->long_name );
 		snprintf( key, sizeof(key), "meta.media.%d.codec.bit_rate", i );
-		mlt_properties_set_int( meta_media, key, codec_context->bit_rate );
+		mlt_properties_set_int64( meta_media, key, codec_context->bit_rate );
 // 		snprintf( key, sizeof(key), "meta.media.%d.codec.time_base", i );
 // 		mlt_properties_set_double( meta_media, key, av_q2d( codec_context->time_base ) );
 //		snprintf( key, sizeof(key), "meta.media.%d.codec.profile", i );
@@ -468,6 +476,11 @@ static mlt_properties find_default_streams( producer_avformat self )
 			}
 		}
 	}
+	
+	// Use the album art if that is all we have
+	if (self->video_index < 0 && first_video_index >= 0)
+		self->video_index = first_video_index;
+
 	while ( ( tag = av_dict_get( context->metadata, "", tag, AV_DICT_IGNORE_SUFFIX ) ) )
 	{
 		if ( tag->value && strcmp( tag->value, "" ) && strcmp( tag->value, "und" ) )
@@ -1419,7 +1432,7 @@ static int convert_image( producer_avformat self, AVFrame *frame, uint8_t *buffe
 			.src_full_range = self->full_luma,
 			.dst_full_range = 0,
 		};
-		ctx.src_format = src_pix_fmt;
+		ctx.src_format = (self->full_luma && src_pix_fmt == AV_PIX_FMT_YUV422P) ? AV_PIX_FMT_YUVJ422P : src_pix_fmt;
 		ctx.src_desc = av_pix_fmt_desc_get( ctx.src_format );
 		ctx.dst_desc = av_pix_fmt_desc_get( ctx.dst_format );
 
@@ -1572,7 +1585,10 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 			cache_size = mlt_properties_get_int( properties, "cache" );
 		}
 		if ( mlt_properties_get_int( properties, "noimagecache" ) )
+		{
+			cache_supplied = 1;
 			cache_size = 0;
+		}
 		// create cache if not disabled
 		if ( !cache_supplied || cache_size > 0 )
 			self->image_cache = mlt_cache_init();
@@ -1616,11 +1632,8 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 	double delay = mlt_properties_get_double( properties, "video_delay" );
 
 	// Seek if necessary
-	int preseek = must_decode && codec_context->has_b_frames;
-#if defined(FFUDIV)
-	const char *interp = mlt_properties_get( frame_properties, "rescale.interp" );
-	preseek = preseek && interp && strcmp( interp, "nearest" );
-#endif
+	double speed = mlt_producer_get_speed(producer);
+	int preseek = must_decode && codec_context->has_b_frames && speed >= 0.0 && speed <= 1.0;
 	int paused = seek_video( self, position, req_position, preseek );
 
 	// Seek might have reopened the file
@@ -1906,6 +1919,8 @@ static int producer_get_image( mlt_frame frame, uint8_t **buffer, mlt_image_form
 						format, *width, *height, &alpha );
 					mlt_properties_set_int( frame_properties, "colorspace", yuv_colorspace );
 					self->top_field_first |= self->video_frame->top_field_first;
+					self->top_field_first |= codec_context->field_order == AV_FIELD_TT;
+					self->top_field_first |= codec_context->field_order == AV_FIELD_TB;
 					self->current_position = int_position;
 				}
 				else
@@ -1973,10 +1988,14 @@ exit_get_image:
 	pthread_mutex_unlock( &self->video_mutex );
 
 	// Set the progressive flag
-	if ( mlt_properties_get( properties, "force_progressive" ) )
+	if ( mlt_properties_get( properties, "force_progressive" ) ) {
 		mlt_properties_set_int( frame_properties, "progressive", !!mlt_properties_get_int( properties, "force_progressive" ) );
-	else if ( self->video_frame )
-		mlt_properties_set_int( frame_properties, "progressive", !self->video_frame->interlaced_frame );
+	} else if ( self->video_frame ) {
+		mlt_properties_set_int( frame_properties, "progressive",
+			!self->video_frame->interlaced_frame &&
+				(codec_context->field_order == AV_FIELD_PROGRESSIVE ||
+				 codec_context->field_order == AV_FIELD_UNKNOWN) );
+	}
 
 	// Set the field order property for this frame
 	if ( mlt_properties_get( properties, "force_tff" ) )
@@ -2315,6 +2334,7 @@ static void producer_set_up_video( producer_avformat self, mlt_frame frame )
 		mlt_properties_set_int( frame_properties, "color_trc", self->color_trc );
 		mlt_properties_set_int( frame_properties, "color_primaries", self->color_primaries );
 		mlt_properties_set_int( frame_properties, "full_luma", self->full_luma );
+		mlt_properties_set( properties, "meta.media.color_range", self->full_luma? "full" : "mpeg" );
 
 		// Add our image operation
 		mlt_frame_push_service( frame, self );

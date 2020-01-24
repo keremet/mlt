@@ -31,6 +31,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <sys/time.h>
+#include <stdatomic.h>
 
 /** Define this if you want an automatic deinterlace (if necessary) when the
  * consumer's producer is not running at normal speed.
@@ -46,7 +47,7 @@ pthread_mutex_t mlt_sdl_mutex = PTHREAD_MUTEX_INITIALIZER;
 typedef struct
 {
 	int real_time;
-	int ahead;
+	atomic_int ahead;
 	int preroll;
 	mlt_image_format image_format;
 	mlt_audio_format audio_format;
@@ -60,12 +61,13 @@ typedef struct
 	int put_active;
 	mlt_event event_listener;
 	mlt_position position;
+	pthread_mutex_t position_mutex;	
 	int is_purge;
 	int aud_counter;
 	double fps;
 	int channels;
 	int frequency;
-	int speed;
+	atomic_int speed;
 	/* additional fields added for the parallel work queue */
 	mlt_deque worker_threads;
 	pthread_mutex_t done_mutex;
@@ -73,7 +75,7 @@ typedef struct
 	int consecutive_dropped;
 	int consecutive_rendered;
 	int process_head;
-	int started;
+	atomic_int started;
 	pthread_t *threads; /**< used to deallocate all threads */
 }
 consumer_private;
@@ -124,6 +126,7 @@ int mlt_consumer_init( mlt_consumer self, void *child, mlt_profile profile )
 			mlt_properties_set_data( properties, "_profile", profile, 0, (mlt_destructor)mlt_profile_close, NULL );
 		}
 		apply_profile_properties( self, profile, properties );
+		mlt_properties_set( properties, "mlt_type", "consumer" );
 
 		// Default rescaler for all consumers
 		mlt_properties_set( properties, "rescale", "bilinear" );
@@ -164,6 +167,7 @@ int mlt_consumer_init( mlt_consumer self, void *child, mlt_profile profile )
 		pthread_mutex_init( &priv->put_mutex, NULL );
 		pthread_cond_init( &priv->put_cond, NULL );
 
+		pthread_mutex_init( &priv->position_mutex, NULL );
 	}
 	return error;
 }
@@ -372,8 +376,12 @@ static void mlt_consumer_frame_render( mlt_listener listener, mlt_properties own
 
 static void on_consumer_frame_show( mlt_properties owner, mlt_consumer consumer, mlt_frame frame )
 {
-	if ( frame )
-		( ( consumer_private*) consumer->local )->position = mlt_frame_get_position( frame );
+	if ( frame ) {
+		consumer_private* priv = consumer->local;
+		pthread_mutex_lock( &priv->position_mutex );
+		priv->position = mlt_frame_get_position( frame );
+		pthread_mutex_unlock( &priv->position_mutex );
+	}
 }
 
 /** Create a new consumer.
@@ -1224,15 +1232,9 @@ static void consumer_read_ahead_stop( mlt_consumer self )
 	consumer_private *priv = self->local;
 
 	// Make sure we're running
-// TODO improve support for atomic ops in general (see libavutil/atomic.h)
-#ifdef __GCC_HAVE_SYNC_COMPARE_AND_SWAP_4
-	if ( __sync_val_compare_and_swap( &priv->started, 1, 0 ) )
+	int expected = 1;
+	if ( atomic_compare_exchange_strong( &priv->started, &expected, 0 ) )
 	{
-#else
-	if ( priv->started )
-	{
-		priv->started = 0;
-#endif
 		// Inform thread to stop
 		priv->ahead = 0;
 		mlt_events_fire( MLT_CONSUMER_PROPERTIES(self), "consumer-stopping", NULL );
@@ -1269,14 +1271,9 @@ static void consumer_work_stop( mlt_consumer self )
 	consumer_private *priv = self->local;
 
 	// Make sure we're running
-#ifdef __GCC_HAVE_SYNC_COMPARE_AND_SWAP_4
-	if ( __sync_val_compare_and_swap( &priv->started, 1, 0 ) )
+	int expected = 1;
+	if ( atomic_compare_exchange_strong( &priv->started, &expected, 0 ) )
 	{
-#else
-	if ( priv->started )
-	{
-		priv->started = 0;
-#endif
 		// Inform thread to stop
 		priv->ahead = 0;
 		mlt_events_fire( MLT_CONSUMER_PROPERTIES(self), "consumer-stopping", NULL );
@@ -1737,6 +1734,8 @@ void mlt_consumer_close( mlt_consumer self )
 			pthread_mutex_destroy( &priv->put_mutex );
 			pthread_cond_destroy( &priv->put_cond );
 
+			pthread_mutex_destroy( &priv->position_mutex );
+
 			mlt_service_close( &self->parent );
 			free( priv );
 		}
@@ -1752,7 +1751,11 @@ void mlt_consumer_close( mlt_consumer self )
 
 mlt_position mlt_consumer_position( mlt_consumer consumer )
 {
-	return ( ( consumer_private* ) consumer->local )->position;
+	consumer_private* priv = consumer->local;
+	pthread_mutex_lock( &priv->position_mutex );
+	mlt_position result = priv->position;
+	pthread_mutex_unlock( &priv->position_mutex );
+	return result;
 }
 
 static void transmit_thread_create( mlt_listener listener, mlt_properties owner, mlt_service self, void **args )

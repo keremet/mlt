@@ -50,6 +50,7 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 
 	// Render the frame
 	*format = mlt_image_yuv422;
+	*width -= *width % 2;
 	if ( mlt_frame_get_image( frame, image, format, width, height, writable ) == 0 &&
 		 ( !use_luminance || !use_mix || (int) mix != 1 || invert == 255 ) )
 	{
@@ -161,12 +162,10 @@ static mlt_frame filter_process( mlt_filter filter, mlt_frame frame )
 				test = mlt_fopen( temp, "r" );
 			}
 
-			if ( test )
-				fclose( test ); 
-			else
-				strcpy( temp, "colour:0x00000080" );
-
-			resource = temp;
+			if ( test ) {
+				fclose( test );
+				resource = temp;
+			}
 		}
 
 		producer = mlt_factory_producer( profile, NULL, resource );
@@ -197,6 +196,7 @@ static mlt_frame filter_process( mlt_filter filter, mlt_frame frame )
 				mlt_properties_set_int( MLT_FRAME_PROPERTIES( frame ), "meta.mixdown", 1 );
 				mlt_properties_set_double( MLT_FRAME_PROPERTIES( frame ), "meta.volume", alpha_mix / 100.0 );
 			}
+			mlt_properties_set_int( MLT_FRAME_PROPERTIES( frame ), "always_scale", 1 );
 		}
 	}
 

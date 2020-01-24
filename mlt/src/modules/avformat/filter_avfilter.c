@@ -35,6 +35,7 @@
 
 #define PARAM_PREFIX "av."
 #define PARAM_PREFIX_LEN (sizeof(PARAM_PREFIX) - 1)
+#define MLT_SWS_FLAGS "bicubic+accurate_rnd+full_chroma_int+full_chroma_inp"
 
 typedef struct
 {
@@ -48,6 +49,8 @@ typedef struct
 	AVFrame* avinframe;
 	AVFrame* avoutframe;
 	int format;
+	int width;
+	int height;
 	int reset;
 } private_data;
 
@@ -289,6 +292,8 @@ static void init_image_filtergraph( mlt_filter filter, mlt_image_format format, 
 	int ret;
 
 	pdata->format = format;
+	pdata->width = width;
+	pdata->height = height;
 
 	// Set up formats
 	pixel_fmts[0] = mlt_to_av_image_format( format );
@@ -302,6 +307,7 @@ static void init_image_filtergraph( mlt_filter filter, mlt_image_format format, 
 		mlt_log_error( filter, "Cannot create filter graph\n" );
 		goto fail;
 	}
+	pdata->avfilter_graph->scale_sws_opts = av_strdup("flags=" MLT_SWS_FLAGS);
 
 	// Set thread count if supported.
 	if ( pdata->avfilter->flags & AVFILTER_FLAG_SLICE_THREADS ) {
@@ -438,7 +444,7 @@ static void init_image_filtergraph( mlt_filter filter, mlt_image_format format, 
 	}
 	opt = av_opt_find( pdata->scale_ctx->priv, "flags", 0, 0, 0 );
 	if ( opt ) {
-		ret = av_opt_set( pdata->scale_ctx->priv, opt->name, "bicubic+accurate_rnd+full_chroma_int+full_chroma_inp", 0 );
+		ret = av_opt_set( pdata->scale_ctx->priv, opt->name, MLT_SWS_FLAGS, 0 );
 		if ( ret < 0 ) {
 			mlt_log_error( filter, "Cannot set scale flags\n" );
 			goto fail;
@@ -530,12 +536,34 @@ fail:
 	avfilter_graph_free( &pdata->avfilter_graph );
 }
 
+mlt_position get_position(mlt_filter filter, mlt_frame frame)
+{
+	mlt_position position = mlt_frame_get_position(frame);
+	const char* pos_type = mlt_properties_get(MLT_FILTER_PROPERTIES(filter), "position");
+	if (pos_type) {
+		if (!strcmp("filter", pos_type)) {
+			position = mlt_filter_get_position(filter, frame);
+		} else if (!strcmp("source", pos_type)) {
+			position = mlt_frame_original_position(frame);
+		} else if (!strcmp("producer", pos_type)) {
+			mlt_producer producer = mlt_properties_get_data(MLT_FILTER_PROPERTIES(filter), "service", NULL);
+			if (producer)
+				position = mlt_producer_position(producer);
+		}
+	} else {
+		private_data* pdata = (private_data*)filter->child;
+		if (!strcmp("subtitles", pdata->avfilter->name))
+			position = mlt_frame_original_position(frame);
+	}
+	return position;
+}
+
 static int filter_get_audio( mlt_frame frame, void **buffer, mlt_audio_format *format, int *frequency, int *channels, int *samples )
 {
 	mlt_filter filter = mlt_frame_pop_audio( frame );
 	private_data* pdata = (private_data*)filter->child;
 	double fps = mlt_profile_fps( mlt_service_profile(MLT_FILTER_SERVICE(filter)) );
-	int64_t samplepos = mlt_sample_calculator_to_now( fps, *frequency, mlt_frame_get_position(frame) );
+	int64_t samplepos = mlt_sample_calculator_to_now( fps, *frequency, get_position(filter, frame) );
 	int bufsize = 0;
 	int ret;
 
@@ -634,18 +662,19 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 {
 	mlt_filter filter = mlt_frame_pop_service( frame );
 	private_data* pdata = (private_data*)filter->child;
-	int64_t pos = mlt_frame_get_position( frame );
+	int64_t pos = get_position( filter, frame );
 	mlt_profile profile = mlt_service_profile(MLT_FILTER_SERVICE(filter));
 	mlt_properties frame_properties = MLT_FRAME_PROPERTIES(frame);
 	int ret;
 
+	mlt_log_debug(MLT_FILTER_SERVICE(filter), "position %"PRId64"\n", pos);
 	*format = get_supported_image_format( *format );
 
 	mlt_frame_get_image( frame, image, format, width, height, 0 );
 
 	mlt_service_lock( MLT_FILTER_SERVICE( filter ) );
 
-	if( pdata->reset || pdata->format != *format )
+	if( pdata->reset || pdata->format != *format || pdata->width != *width || pdata->height != *height )
 	{
 		init_image_filtergraph( filter, *format, *width, *height );
 		pdata->reset = 0;
@@ -848,6 +877,8 @@ mlt_filter filter_avfilter_init( mlt_profile profile, mlt_service_type type, con
 		pdata->avinframe = av_frame_alloc();
 		pdata->avoutframe = av_frame_alloc();
 		pdata->format = -1;
+		pdata->width = -1;
+		pdata->height = -1;
 		pdata->reset = 1;
 
 		filter->close = filter_close;

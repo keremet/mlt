@@ -1,6 +1,7 @@
 /*
  * transition_frei0r.c -- frei0r transition
  * Copyright (c) 2008 Marco Gittler <g.marco@freenet.de>
+ * Copyright (C) 2009-2019 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -47,10 +48,15 @@ static int transition_get_image( mlt_frame a_frame, uint8_t **image, mlt_image_f
 	error = mlt_frame_get_image( b_frame, &images[1], format, width, height, 0 );
 	if ( error ) return error;
 
+	const char *service_name = mlt_properties_get(properties, "mlt_service");
+	int is_cairoblend = service_name && !strcmp("frei0r.cairoblend", service_name);
+	const char *blend_mode = mlt_properties_get(b_props, CAIROBLEND_MODE_PROPERTY);
+
 	// An optimization for cairoblend in normal (over) mode and opaque B frame.
-	if ( !strcmp( "frei0r.cairoblend", mlt_properties_get( properties, "mlt_service" ) )
-	     && ( !mlt_properties_get( properties, "0" ) || mlt_properties_get_double( properties, "0" ) == 1.0 )
-	     && ( !mlt_properties_get( properties, "1" ) || !strcmp( "normal", mlt_properties_get( properties, "1" ) ) )
+	if (is_cairoblend
+	    && ( !mlt_properties_get( properties, "0" ) || mlt_properties_get_double( properties, "0" ) == 1.0 )
+	    && ( !mlt_properties_get( properties, "1" ) || !strcmp( "normal", mlt_properties_get( properties, "1" ) ) )
+	    && ( !blend_mode || !strcmp("normal", blend_mode) )
 	    // Check if the alpha channel is entirely opaque.
 	    && is_opaque( images[1], *width, *height ) )
 	{
@@ -64,10 +70,16 @@ static int transition_get_image( mlt_frame a_frame, uint8_t **image, mlt_image_f
 		error = mlt_frame_get_image( a_frame, &images[0], format, width, height, 0 );
 		if ( error ) return error;
 
-		double position = mlt_transition_get_position( transition, a_frame );
+		mlt_position position = mlt_transition_get_position( transition, a_frame );
 		mlt_profile profile = mlt_service_profile( MLT_TRANSITION_SERVICE( transition ) );
-		double time = position / mlt_profile_fps( profile );
+		double time = (double) position / mlt_profile_fps( profile );
 		int length = mlt_transition_get_length( transition );
+
+		// Special cairoblend handling for an override from the cairoblend_mode filter.
+		if (is_cairoblend) {
+			mlt_properties_set(a_props, CAIROBLEND_MODE_PROPERTY, blend_mode);
+		}
+
 		process_frei0r_item( MLT_TRANSITION_SERVICE(transition), position, time, length, !invert ? a_frame : b_frame, images, width, height );
 
 		*width = mlt_properties_get_int( !invert ? a_props : b_props, "width" );

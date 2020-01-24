@@ -1,6 +1,7 @@
 /*
  * frei0r_helper.h -- frei0r helper
  * Copyright (c) 2008 Marco Gittler <g.marco@freenet.de>
+ * Copyright (C) 2009-2019 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,6 +19,7 @@
  */
 #include <framework/mlt.h>
 
-int process_frei0r_item( mlt_service, double position, double time, int length,
+int process_frei0r_item( mlt_service, mlt_position position, double time, int length,
 	mlt_frame, uint8_t **image, int *width, int *height );
 void destruct (mlt_properties prop );
+extern const char *CAIROBLEND_MODE_PROPERTY;

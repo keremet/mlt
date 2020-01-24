@@ -182,7 +182,7 @@ static void init_apply_data( mlt_filter filter, mlt_frame frame, VSPixelFormat v
 	}
 }
 
-void destory_analyze_data( vs_analyze* analyze_data )
+void	destory_analyze_data( vs_analyze* analyze_data )
 {
 	if ( analyze_data )
 	{
@@ -358,7 +358,8 @@ static int get_image( mlt_frame frame, uint8_t **image, mlt_image_format *format
 			apply_results( filter, frame, vs_image, vs_format, *width, *height );
 			vsimage_to_mltimage( vs_image, *image, *format, *width, *height );
 		}
-		else
+		else if (!mlt_properties_get(properties, "analyze") ||
+		         mlt_properties_get_int(properties, "analyze"))
 		{
 			analyze_image( filter, frame, vs_image, vs_format, *width, *height );
 			if( mlt_properties_get_int( properties, "show" ) == 1 )
@@ -422,7 +423,7 @@ mlt_filter filter_vidstab_init( mlt_profile profile, mlt_service_type type, cons
 		mlt_properties_set( properties, "accuracy", "4" );
 		mlt_properties_set( properties, "stepsize", "6" );
 		mlt_properties_set( properties, "algo", "1" );
-		mlt_properties_set( properties, "mincontrast", "0.3" );
+		mlt_properties_set_double( properties, "mincontrast", 0.3 );
 		mlt_properties_set( properties, "show", "0" );
 		mlt_properties_set( properties, "tripod", "0" );
 
@@ -435,7 +436,7 @@ mlt_filter filter_vidstab_init( mlt_profile profile, mlt_service_type type, cons
 		mlt_properties_set( properties, "relative", "1" );
 		mlt_properties_set( properties, "zoom", "0" );
 		mlt_properties_set( properties, "optzoom", "1" );
-		mlt_properties_set( properties, "zoomspeed", "0.25" );
+		mlt_properties_set_double( properties, "zoomspeed", 0.25 );
 		mlt_properties_set( properties, "reload", "0" );
 
 		mlt_properties_set( properties, "vid.stab.version", LIBVIDSTAB_VERSION );

@@ -1,6 +1,6 @@
 /*
  * melt.c -- MLT command line utility
- * Copyright (C) 2002-2018 Meltytech, LLC
+ * Copyright (C) 2002-2019 Meltytech, LLC
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -278,7 +278,7 @@ static mlt_consumer create_consumer( mlt_profile profile, char *id )
 	return consumer;
 }
 
-static void load_consumer( mlt_consumer *consumer, mlt_profile profile, int argc, char **argv )
+static int load_consumer( mlt_consumer *consumer, mlt_profile profile, int argc, char **argv )
 {
 	int i;
 	int multi = 0;
@@ -290,6 +290,13 @@ static void load_consumer( mlt_consumer *consumer, mlt_profile profile, int argc
 		// Seee if we need the qglsl variant of multi consumer.
 		if ( !strncmp( argv[i], "glsl.", 5 ) || !strncmp( argv[i], "movit.", 6 ) )
 			qglsl = 1;
+#if SDL_MAJOR_VERSION == 2
+		if ( !strcmp("sdl", argv[i]) || !strcmp("sdl_audio", argv[i]) || !strcmp("sdl_preview", argv[i]) || !strcmp("sdl_still", argv[i]) ) {
+			fprintf(stderr, 
+"Error: This program was linked against SDL2, which is incompatible with\nSDL1 consumers. Aborting.\n");
+			return EXIT_FAILURE;
+		}
+#endif
 	}
 	// Disable qglsl if xgl is being used!
 	for ( i = 1; qglsl && i < argc; i ++ )
@@ -348,6 +355,7 @@ static void load_consumer( mlt_consumer *consumer, mlt_profile profile, int argc
 			}
 		}
 	}
+	return EXIT_SUCCESS;
 }
 
 #if defined(SDL_MAJOR_VERSION)
@@ -361,7 +369,7 @@ static void event_handling( mlt_producer producer, mlt_consumer consumer )
 		switch( event.type )
 		{
 			case SDL_QUIT:
-				mlt_properties_set_int( MLT_PRODUCER_PROPERTIES( consumer ), "done", 1 );
+				mlt_properties_set_int( MLT_PRODUCER_PROPERTIES( producer ), "done", 1 );
 				break;
 
 			case SDL_KEYDOWN:
@@ -500,8 +508,6 @@ static void show_usage( char *program_name )
 "  -null-track | -hide-track                Add a hidden track\n"
 "  -profile name                            Set the processing settings\n"
 "  -progress                                Display progress along with position\n"
-"  -remove                                  Remove the most recent cut\n"
-"  -repeat times                            Repeat the last cut\n"
 "  -query                                   List all of the registered services\n"
 "  -query \"consumers\" | \"consumer\"=id       List consumers or show info about one\n"
 "  -query \"filters\" | \"filter\"=id           List filters or show info about one\n"
@@ -512,6 +518,9 @@ static void show_usage( char *program_name )
 "  -query \"formats\"                         List audio/video formats\n"
 "  -query \"audio_codecs\"                    List audio codecs\n"
 "  -query \"video_codecs\"                    List video codecs\n"
+"  -remove                                  Remove the most recent cut\n"
+"  -repeat times                            Repeat the last cut\n"
+"  -repository path                         Set the directory of MLT modules\n"
 "  -serialise [filename]                    Write the commands to a text file\n"
 "  -silent                                  Do not display position/transport\n"
 "  -split relative-frame                    Split the last cut into two cuts\n"
@@ -731,14 +740,13 @@ int main( int argc, char **argv )
 	int is_getc = 0;
 	int error = 0;
 	mlt_profile backup_profile;
+	mlt_repository repo = NULL;
+	const char* repo_path = NULL;
 
 	// Handle abnormal exit situations.
 	signal( SIGSEGV, abnormal_exit_handler );
 	signal( SIGILL, abnormal_exit_handler );
 	signal( SIGABRT, abnormal_exit_handler );
-
-	// Construct the factory
-	mlt_repository repo = mlt_factory_init( NULL );
 
 	for ( i = 1; i < argc; i ++ )
 	{
@@ -758,6 +766,10 @@ int main( int argc, char **argv )
 		// Look for the profile option
 		else if ( !strcmp( argv[ i ], "-profile" ) )
 		{
+			// Construct the factory
+			if ( !repo )
+				repo = mlt_factory_init( repo_path );
+
 			const char *pname = argv[ ++ i ];
 			if ( pname && pname[0] != '-' )
 				profile = mlt_profile_init( pname );
@@ -773,6 +785,10 @@ int main( int argc, char **argv )
 		// Look for the query option
 		else if ( !strcmp( argv[ i ], "-query" ) )
 		{
+			// Construct the factory
+			if ( !repo )
+				repo = mlt_factory_init( repo_path );
+		
 			const char *pname = argv[ ++ i ];
 			if ( pname && pname[0] != '-' )
 			{
@@ -857,9 +873,18 @@ query_all:
 		{
 			is_getc = 1;
 		}
+		else if ( !repo && !strcmp( argv[ i ], "-repository" ) )
+		{
+			if ( i+1 < argc && argv[i+1][0] != '-' )
+				repo_path = argv[++i];
+		}
 	}
 	if ( !is_silent && !isatty( STDIN_FILENO ) && !is_progress )
 		is_progress = 1;
+
+	// Construct the factory
+	if ( !repo )
+		repo = mlt_factory_init( repo_path );
 
 	// Create profile if not set explicitly
 	if ( getenv( "MLT_PROFILE" ) )
@@ -871,7 +896,8 @@ query_all:
 
 	// Look for the consumer option to load profile settings from consumer properties
 	backup_profile = mlt_profile_clone( profile );
-	load_consumer( &consumer, profile, argc, argv );
+	if ( load_consumer( &consumer, profile, argc, argv ) != EXIT_SUCCESS )
+		goto exit_factory;
 
 	// If the consumer changed the profile, then it is explicit.
 	if ( backup_profile && !profile->is_explicit && (

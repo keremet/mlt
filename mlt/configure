@@ -1,6 +1,6 @@
 #!/bin/sh
 
-export version=6.16.0
+export version=6.18.0
 export soversion=6
 
 show_help()
@@ -123,6 +123,13 @@ build_config()
 		echo "SHFLAGS=-shared"
 		echo "RDYNAMIC=-rdynamic"
 		echo "LDFLAGS+=-Wl,--no-undefined -Wl,--as-needed"
+		;;
+		OpenBSD)
+		echo "CFLAGS+=-fPIC"
+		echo "CXXFLAGS+=-fPIC"
+		echo "SHFLAGS=-shared"
+		echo "RDYNAMIC=-rdynamic"
+		echo "LDFLAGS+=-Wl,--as-needed"
 		;;
 		MinGW)
 		[ "$windeploy" = false ] &&
