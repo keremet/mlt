@@ -1,6 +1,6 @@
 /*
  * melt.c -- MLT command line utility
- * Copyright (C) 2002-2019 Meltytech, LLC
+ * Copyright (C) 2002-2020 Meltytech, LLC
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -727,6 +727,20 @@ static void on_fatal_error( mlt_properties owner, mlt_consumer consumer )
 	mlt_properties_set_int( MLT_CONSUMER_PROPERTIES(consumer), "melt_error", 1 );
 }
 
+static void set_preview_scale(mlt_profile *profile, mlt_profile *backup_profile, double scale)
+{
+	*backup_profile = mlt_profile_clone(*profile);
+	if (*backup_profile) {
+		mlt_profile temp = *profile;
+		*profile = *backup_profile;
+		*backup_profile = temp;
+		(*profile)->width *= scale;
+		(*profile)->width -= (*profile)->width % 2;
+		(*profile)->height *= scale;
+		(*profile)->height -= (*profile)->height % 2;
+	}
+}
+
 int main( int argc, char **argv )
 {
 	int i;
@@ -854,7 +868,7 @@ query_all:
 		else if ( !strcmp( argv[ i ], "-version" ) || !strcmp( argv[ i ], "--version" ) )
 		{
 			fprintf( stdout, "%s " VERSION "\n"
-				"Copyright (C) 2002-2019 Meltytech, LLC\n"
+				"Copyright (C) 2002-2020 Meltytech, LLC\n"
 				"<https://www.mltframework.org/>\n"
 				"This is free software; see the source for copying conditions.  There is NO\n"
 				"warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n",
@@ -910,6 +924,7 @@ query_all:
 	     profile->colorspace != backup_profile->colorspace ) )
 		profile->is_explicit = 1;
 	mlt_profile_close( backup_profile );
+	backup_profile = NULL;
 
 	// Get melt producer
 	if ( argc > 1 )
@@ -923,6 +938,11 @@ query_all:
 			mlt_profile_from_producer( profile, melt );
 			mlt_producer_close( melt );
 			melt = mlt_factory_producer( profile, "melt", &argv[ 1 ] );
+		}
+
+		double scale = mlt_properties_get_double(MLT_CONSUMER_PROPERTIES(consumer), "scale");
+		if (scale > 0.0) {
+			set_preview_scale(&profile, &backup_profile, scale);
 		}
 		
 		// Reload the consumer with the fully qualified profile.
@@ -1066,6 +1086,7 @@ query_all:
 
 	// Close the factory
 	mlt_profile_close( profile );
+	mlt_profile_close( backup_profile );
 
 exit_factory:
 

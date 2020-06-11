@@ -1,6 +1,10 @@
 CFLAGS += -I../..
 LDFLAGS += -L../../framework -lmlt -lpthread -lm
 
+ifneq (, $(shell $(CC) --version | grep -is -e 'Free Software Foundation'))
+	LDFLAGS += -latomic
+endif
+
 include ../../../config.mak
 include config.mak
 

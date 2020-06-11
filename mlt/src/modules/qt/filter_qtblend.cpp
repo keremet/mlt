@@ -21,6 +21,7 @@
 #include <framework/mlt.h>
 #include <stdlib.h> // calloc(), free()
 #include <math.h>   // sin()
+#include <string.h> // strchr()
 #include <QPainter>
 #include <QTransform>
 #include <QImage>
@@ -58,9 +59,7 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 	double consumer_ar = mlt_profile_sar( profile );
 
 	// Destination rect
-	mlt_rect rect;
-	rect.w = normalised_width;
-	rect.h = normalised_height;
+	mlt_rect rect = {0, 0, normalised_width * mlt_profile_scale_width(profile, *width), normalised_height * mlt_profile_scale_height(profile, *height), 1.0};
 	int b_width = mlt_properties_get_int( frame_properties, "meta.media.width" );
 	int b_height = mlt_properties_get_int( frame_properties, "meta.media.height" );
 	if ( b_height == 0 )
@@ -70,11 +69,30 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 	}
 	double b_ar = mlt_frame_get_aspect_ratio( frame );
 	double b_dar = b_ar * b_width / b_height;
-
 	double opacity = 1.0;
+	bool consumerScaling = false;
+
 	if ( mlt_properties_get( properties, "rect" ) )
 	{
 		rect = mlt_properties_anim_get_rect( properties, "rect", position, length );
+		if (mlt_properties_get(properties, "rect") && ::strchr(mlt_properties_get(properties, "rect"), '%')) {
+			rect.x *= normalised_width;
+			rect.y *= normalised_height;
+			rect.w *= normalised_width;
+			rect.h *= normalised_height;
+		}
+		double scale = mlt_profile_scale_width(profile, *width);
+		if ( scale != 1.0 ) {
+			consumerScaling = true;
+		}
+		rect.x *= scale;
+		rect.w *= scale;
+		scale = mlt_profile_scale_height(profile, *height);
+		if ( !consumerScaling && scale != 1.0 ) {
+			consumerScaling = true;
+		}
+		rect.y *= scale;
+		rect.h *= scale;
 		transform.translate(rect.x, rect.y);
 		opacity = rect.o;
 		hasAlpha = true;
@@ -83,18 +101,20 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 	if ( mlt_properties_get( properties, "rotation" ) )
 	{
 		double angle = mlt_properties_anim_get_double( properties, "rotation", position, length );
-		if ( mlt_properties_get_int( properties, "rotate_center" ) )
-		{
-			transform.translate( rect.w / 2.0, rect.h / 2.0 );
-			transform.rotate( angle );
-			transform.translate( -rect.w / 2.0, -rect.h / 2.0 );
+		if (angle != 0.0) {
+			if ( mlt_properties_get_int( properties, "rotate_center" ) )
+			{
+				transform.translate( rect.w / 2.0, rect.h / 2.0 );
+				transform.rotate( angle );
+				transform.translate( -rect.w / 2.0, -rect.h / 2.0 );
+			}
+			else
+			{
+				// old style rotation (from top left corner) to keep compatibility
+				transform.rotate( angle );
+			}
+			hasAlpha = true;
 		}
-		else
-		{
-			// old style rotation (from top left corner) to keep compatibility
-			transform.rotate( angle );
-		}
-		hasAlpha = true;
 	}
 
 	if ( !hasAlpha && ( mlt_properties_get_int( properties, "compositing" ) != 0 || b_width < *width || b_height < *height || b_width < normalised_width || b_height  < normalised_height ) )
@@ -110,6 +130,8 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 		} else {
 			// Prepare output image
 			*image = src_image;
+			*width = b_width;
+			*height = b_height;
 			return 0;
 		}
 	}
@@ -117,6 +139,14 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 	// fetch image
 	*format = mlt_image_rgb24a;
 	uint8_t *src_image = NULL;
+	
+	// Adjust if consumer is scaling
+	if ( consumerScaling )
+	{
+		// Scale request of b frame image to consumer scale maintaining its aspect ratio.
+		b_height = *height;
+		b_width = b_height * b_dar / b_ar;
+	}
 
 	error = mlt_frame_get_image( frame, &src_image, format, &b_width, &b_height, 0 );
 
@@ -133,25 +163,20 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 	}
 	else
 	{
-		// Take the smaller scale between horizontal and vertical
-		float scale_x = MIN( rect.w / b_width, rect.h / b_height );
-		float scale_y = scale_x;
-
 		// Determine scale with respect to aspect ratio.
-		double consumer_dar = consumer_ar * normalised_width / normalised_height;
-		if ( b_dar > consumer_dar )
+		double geometry_dar = rect.w * consumer_ar / rect.h;
+		double scale;
+		if ( b_dar > geometry_dar )
 		{
-			scale_y = scale_x;
-			scale_y *= consumer_ar / b_ar;
+			scale = rect.w / b_width;
 		}
 		else
 		{
-			scale_x = scale_y;
-			scale_x *= b_ar / consumer_ar;
+			scale = rect.h / b_height * b_ar;
 		}
 		// Center image in rect
-		transform.translate( ( rect.w - ( b_width * scale_x ) ) / 2.0, ( rect.h - ( b_height * scale_y ) ) / 2.0 );
-		transform.scale( scale_x, scale_y );
+		transform.translate( ( rect.w - ( b_width * scale ) ) / 2.0, ( rect.h - ( b_height * scale ) ) / 2.0 );
+		transform.scale( scale, scale );
 	}
 
 	uint8_t *dest_image = NULL;

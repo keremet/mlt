@@ -78,7 +78,7 @@ static void property_changed( mlt_service owner, mlt_filter filter, char *name )
 	else if ( !strcmp( name, "algo" ) )
 	{
 		char *algo = mlt_properties_get( filter_properties, "algo" );
-		if ( strcmp( algo, pdata->algo ) )
+		if ( pdata->algo && *pdata->algo != '\0' && strcmp( algo, pdata->algo ) )
 		{
 			pdata->playback = false;
 			pdata->initialized = false;
@@ -115,6 +115,16 @@ static void analyze( mlt_filter filter, cv::Mat cvFrame, private_data* data, int
 		{
 			data->tracker = cv::TrackerKCF::create();
 		}
+#if CV_VERSION_MAJOR > 3 || (CV_VERSION_MAJOR == 3 && CV_VERSION_MINOR >= 4 && CV_VERSION_REVISION >= 2)
+		else if ( !strcmp(data->algo, "CSRT" ) )
+		{
+			data->tracker = cv::TrackerCSRT::create();
+		}
+		else if ( !strcmp(data->algo, "MOSSE" ) )
+		{
+			data->tracker = cv::TrackerMOSSE::create();
+		}
+#endif
 		else if ( !strcmp(data->algo, "MIL" ) )
 		{
 			data->tracker = cv::TrackerMIL::create();
@@ -228,6 +238,14 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 	int shape_width = mlt_properties_get_int( filter_properties, "shape_width" );
 	int blur = mlt_properties_get_int( filter_properties, "blur" );
 	cv::Mat cvFrame;
+	mlt_profile profile = mlt_service_profile(MLT_FILTER_SERVICE(filter));
+
+	// Disable consumer scaling
+	if (profile && profile->width && profile->height) {
+		*width = profile->width;
+		*height = profile->height;
+	}
+
 	if ( shape_width == 0 && blur == 0 ) {
 		error = mlt_frame_get_image( frame, image, format, width, height, 1 );
 	}

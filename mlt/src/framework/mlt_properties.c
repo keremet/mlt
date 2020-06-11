@@ -3,7 +3,7 @@
  * \brief Properties class definition
  * \see mlt_properties_s
  *
- * Copyright (C) 2003-2019 Meltytech, LLC
+ * Copyright (C) 2003-2020 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -221,7 +221,8 @@ static int load_properties( mlt_properties self, const char *filename )
 			if ( temp[ 0 ] == '.' )
 			{
 				char temp2[ 1024 ];
-				sprintf( temp2, "%s%s", last, temp );
+				strcpy( temp2, last );
+				strncat( temp2, temp, sizeof(temp2) - strlen(temp2) - 1 );
 				strcpy( temp, temp2 );
 			}
 			else if ( strchr( temp, '=' ) )
@@ -656,6 +657,32 @@ int mlt_properties_pass_list( mlt_properties self, mlt_properties that, const ch
 	return 0;
 }
 
+static int is_valid_expression(mlt_properties self, const char* value)
+{
+	int result = *value != '\0';
+	char id[255];
+
+	while (*value != '\0') {
+		size_t length = strcspn(value, "+-*/");
+
+		// Get the identifier
+		length = MIN(sizeof(id) - 1, length);
+		strncpy(id, value, length);
+		id[length] = '\0';
+		value += length;
+
+		// Determine if the property exists
+		if (!isdigit(id[0]) && !mlt_properties_get(self, id)) {
+			result = 0;
+			break;
+		}
+
+		// Get the next op
+		if (value[0] != '\0')
+			++value;
+	}
+	return result;
+}
 
 /** Set a property to a string.
  *
@@ -691,14 +718,7 @@ int mlt_properties_set( mlt_properties self, const char *name, const char *value
 		error = mlt_property_set_string( property, value );
 		mlt_properties_do_mirror( self, name );
 	}
-	else if ( *value != '@' )
-	{
-		error = mlt_property_set_string( property, value );
-		mlt_properties_do_mirror( self, name );
-		if ( !strcmp( name, "properties" ) )
-			mlt_properties_preset( self, value );
-	}
-	else if ( value[ 0 ] == '@' )
+	else if ( value[ 0 ] == '@' && is_valid_expression(self, &value[1]) )
 	{
 		double total = 0;
 		double current = 0;
@@ -709,9 +729,10 @@ int mlt_properties_set( mlt_properties self, const char *name, const char *value
 
 		while ( *value != '\0' )
 		{
-			int length = strcspn( value, "+-*/" );
+			size_t length = strcspn( value, "+-*/" );
 
 			// Get the identifier
+			length = MIN(sizeof(id) - 1, length);
 			strncpy( id, value, length );
 			id[ length ] = '\0';
 			value += length;
@@ -756,6 +777,13 @@ int mlt_properties_set( mlt_properties self, const char *name, const char *value
 		error = mlt_property_set_double( property, total );
 		mlt_properties_do_mirror( self, name );
 	}
+	else
+	{
+		error = mlt_property_set_string( property, value );
+		mlt_properties_do_mirror( self, name );
+		if ( !strcmp( name, "properties" ) )
+			mlt_properties_preset( self, value );
+	}
 
 	mlt_events_fire( self, "property-changed", name, NULL );
 
@@ -776,6 +804,52 @@ int mlt_properties_set( mlt_properties self, const char *name, const char *value
 int mlt_properties_set_or_default( mlt_properties self, const char *name, const char *value, const char *def )
 {
 	return mlt_properties_set( self, name, value == NULL ? def : value );
+}
+
+/** Set a property to a string.
+ *
+ * Unlike \mlt_properties_set this function does not attempt to interpret an expression.
+ * The property name "properties" is reserved to load the preset in \p value.
+ * The event "property-changed" is fired after the property has been set.
+ *
+ * This makes a copy of the string value you supply.
+ * \public \memberof mlt_properties_s
+ * \param self a properties list
+ * \param name the property to set
+ * \param value the property's new value
+ * \return true if error
+ */
+
+int mlt_properties_set_string( mlt_properties self, const char *name, const char *value )
+{
+	int error = 1;
+
+	if ( !self || !name ) return error;
+
+	// Fetch the property to work with
+	mlt_property property = mlt_properties_fetch( self, name );
+
+	// Set it if not NULL
+	if ( property == NULL )
+	{
+		mlt_log( NULL, MLT_LOG_FATAL, "Whoops - %s not found (should never occur)\n", name );
+	}
+	else if ( value == NULL )
+	{
+		error = mlt_property_set_string( property, value );
+		mlt_properties_do_mirror( self, name );
+	}
+	else
+	{
+		error = mlt_property_set_string( property, value );
+		mlt_properties_do_mirror( self, name );
+		if ( !strcmp( name, "properties" ) )
+			mlt_properties_preset( self, value );
+	}
+
+	mlt_events_fire( self, "property-changed", name, NULL );
+
+	return error;
 }
 
 /** Get a string value by name.

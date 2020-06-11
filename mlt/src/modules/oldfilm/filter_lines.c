@@ -19,6 +19,7 @@
 
 #include <framework/mlt_filter.h>
 #include <framework/mlt_frame.h>
+#include <framework/mlt_profile.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -46,6 +47,11 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 
 		char buf[256];
 		char typebuf[256];
+
+		mlt_profile profile = mlt_service_profile(MLT_FILTER_SERVICE(filter));
+		double scale = mlt_profile_scale_width(profile, *width);
+		if (line_width > 1 && scale > 0.0)
+			line_width = MAX(2, lrint(line_width * scale));
 		
 		if ( line_width < 1 )
 			return 0;

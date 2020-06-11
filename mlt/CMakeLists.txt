@@ -1,5 +1,5 @@
 project(MLT)
-set(MLT_VERSION 6.17.0)
+set(MLT_VERSION 6.19.0)
 cmake_minimum_required(VERSION 3.0)
 find_package(PkgConfig REQUIRED)
 include(GNUInstallDirs)
@@ -38,6 +38,7 @@ set(modules
     src/modules/plus
     src/modules/plusgpl
     src/modules/qt
+    src/modules/rubberband
     src/modules/rtaudio
     src/modules/sdl2
     src/modules/vid.stab

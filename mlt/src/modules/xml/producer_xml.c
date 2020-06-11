@@ -1,6 +1,6 @@
 /*
  * producer_xml.c -- a libxml2 parser of mlt service networks
- * Copyright (C) 2003-2019 Meltytech, LLC
+ * Copyright (C) 2003-2020 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -80,6 +80,7 @@ struct deserialise_context_s
 	const xmlChar *systemId;
 	mlt_properties params;
 	mlt_profile profile;
+	mlt_profile consumer_profile;
 	int pass;
 	char *lc_numeric;
 	mlt_consumer consumer;
@@ -1165,6 +1166,17 @@ static void on_start_consumer( deserialise_context context, const xmlChar *name,
 	}
 }
 
+static void set_preview_scale(mlt_profile *consumer_profile, mlt_profile *profile, double scale)
+{
+	*consumer_profile = mlt_profile_clone(*profile);
+	if (*consumer_profile) {
+		(*consumer_profile)->width *= scale;
+		(*consumer_profile)->width -= (*consumer_profile)->width % 2;
+		(*consumer_profile)->height *= scale;
+		(*consumer_profile)->height -= (*consumer_profile)->height % 2;
+	}
+}
+
 static void on_end_consumer( deserialise_context context, const xmlChar *name )
 {
 	if ( context->pass == 1 )
@@ -1223,14 +1235,24 @@ static void on_end_consumer( deserialise_context context, const xmlChar *name )
 			}
 			else
 			{
+				double scale = mlt_properties_get_double(properties, "scale");
+				if (scale > 0.0) {
+					set_preview_scale(&context->consumer_profile, &context->profile, scale);
+				}
 				// Instantiate the consumer
 				char *id = trim( mlt_properties_get( properties, "mlt_service" ) );
-				context->consumer = mlt_factory_consumer( context->profile, id, resource );
+				mlt_profile profile = context->consumer_profile? context->consumer_profile : context->profile;
+				context->consumer = mlt_factory_consumer( profile, id, resource );
 				if ( context->consumer )
 				{
 					// Track this consumer
 					track_service( context->destructors, MLT_CONSUMER_SERVICE(context->consumer), (mlt_destructor) mlt_consumer_close );
 					mlt_properties_set_lcnumeric( MLT_CONSUMER_PROPERTIES(context->consumer), context->lc_numeric );
+					if (context->consumer_profile) {
+						mlt_properties_set_data(MLT_CONSUMER_PROPERTIES(context->consumer),
+							"_profile", context->consumer_profile, sizeof(*context->consumer_profile),
+							(mlt_destructor) mlt_profile_close, NULL);
+					}
 
 					// Do not let XML overwrite these important properties set by mlt_factory.
 					mlt_properties_set( properties, "mlt_type", NULL );

@@ -15,7 +15,7 @@ description: >
 parameters:
   - identifier: rect
     title: Rectangle
-    type: geometry
+    type: rect
     description: >
       Keyframable rectangle specification.
     mutable: yes
@@ -42,6 +42,7 @@ parameters:
     maximum: 360
     mutable: yes
     widget: spinner
+    unit: degrees
 
   - identifier: rotate_center
     title: Rotate from center
