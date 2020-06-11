@@ -22,7 +22,7 @@ Version: 6.20.0
 Release: alt1
 
 Summary: Multimedia framework designed for television broadcasting
-License: GPLv3
+License: GPL-3.0-or-later
 Group: Video
 Url: https://www.mltframework.org/
 
