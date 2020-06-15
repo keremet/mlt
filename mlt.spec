@@ -28,7 +28,7 @@ Url: https://www.mltframework.org/
 
 Packager: Maxim Ivanov <redbaron@altlinux.org>
 
-Source: %name-%version.tar.gz
+Source: %name-%version.tar
 Source1: mlt++-config.h
 # FC
 # SuSE
