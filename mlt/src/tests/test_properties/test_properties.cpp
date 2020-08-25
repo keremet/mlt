@@ -218,6 +218,25 @@ private Q_SLOTS:
         QCOMPARE(p.get_time("key", mlt_time_smpte_df), timeString);
     }
 
+    void SetAndGetTimeCode5994Fps()
+    {
+        Profile profile("atsc_720p_5994");
+        Properties p;
+        p.set("_profile", profile.get_profile(), 0);
+        const char *timeString = "00:01:00;04";
+        int frames = 3600;
+        p.set("key", timeString);
+        QCOMPARE(p.get_int("key"), frames);
+        p.set("key", frames);
+        QCOMPARE(p.get_time("key", mlt_time_smpte_df), timeString);
+        timeString = "00:10:00;01";
+        frames = 36001 - 9 * 4;
+        p.set("key", timeString);
+        QCOMPARE(p.get_int("key"), frames);
+        p.set("key", frames);
+        QCOMPARE(p.get_time("key", mlt_time_smpte_df), timeString);
+    }
+
     void SetAndGetTimeCodeNonIntFps()
     {
         Profile profile("atsc_720p_2398");
@@ -1112,6 +1131,19 @@ private Q_SLOTS:
         QCOMPARE(p.get_data("key"), (void*) 0);
         QCOMPARE(p.get_animation("key"), mlt_animation(0));
         QCOMPARE(p.get_int("key"), 0);
+    }
+
+    void PropertyExists()
+    {
+        Properties p;
+        // Never set should return false
+        QCOMPARE(p.property_exists("key"), false);
+        // Set should return true
+        p.set("key", 1);
+        QCOMPARE(p.property_exists("key"), true);
+        // Cleared should return false
+        p.clear("key");
+        QCOMPARE(p.property_exists("key"), false);
     }
 
     void SetString()

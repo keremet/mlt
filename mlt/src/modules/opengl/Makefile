@@ -34,6 +34,10 @@ CFLAGS += -Wno-deprecated
 CFLAGS += $(shell pkg-config --cflags movit 2> /dev/null)
 CXXFLAGS += $(CFLAGS)
 
+ifneq (, $(shell $(CXX) --version | grep -is -e g++ -e clang))
+    CXXFLAGS += -std=c++11
+endif
+
 SHADERDIR = $(shell pkg-config --variable=shaderdir movit)
 CXXFLAGS += -DSHADERDIR=\"$(SHADERDIR)\"
 

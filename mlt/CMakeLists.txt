@@ -1,6 +1,6 @@
 project(MLT)
-set(MLT_VERSION 6.19.0)
-cmake_minimum_required(VERSION 3.0)
+set(MLT_VERSION 6.22.1)
+cmake_minimum_required(VERSION 3.10)
 find_package(PkgConfig REQUIRED)
 include(GNUInstallDirs)
 option(GPL "Enable GPLv2 modules" ON)
@@ -10,7 +10,9 @@ if(WIN32)
 endif()
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(AMD64)")
     set(X86_64 ON)
-    add_compile_definitions(USE_MMX USE_SSE USE_SSE2 ARCH_X86_64)
+    if(NOT MSVC)
+        add_definitions(-DUSE_MMX -DUSE_SSE -DUSE_SSE2 -DARCH_X86_64)
+    endif()
 endif()
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(-ffast-math)
@@ -18,6 +20,14 @@ elseif(MSVC)
     add_compile_options(/fp:fast)
 endif()
 find_package(Threads REQUIRED)
+find_package(FFTW QUIET)
+if(NOT FFTW_FOUND)
+    pkg_check_modules(FFTW fftw3)
+endif()
+if(NOT FFTW_FOUND)
+    pkg_check_modules(FFTW fftw)
+endif()
+pkg_check_modules(xml IMPORTED_TARGET libxml-2.0)
 add_subdirectory(src/framework)
 add_subdirectory(src/melt)
 add_subdirectory(src/mlt++)
@@ -29,23 +39,31 @@ set(modules
     src/modules/decklink
     src/modules/frei0r
     src/modules/feeds
-    src/modules/gtk2
+    src/modules/gdk
+    src/modules/jackrack
     src/modules/kdenlive
     src/modules/motion_est
     src/modules/normalize
     src/modules/oldfilm
     src/modules/opencv
+    src/modules/opengl
     src/modules/plus
     src/modules/plusgpl
     src/modules/qt
+    src/modules/resample
     src/modules/rubberband
     src/modules/rtaudio
     src/modules/sdl2
+    src/modules/sox
     src/modules/vid.stab
     src/modules/vmfx
+    src/modules/vorbis
     src/modules/xine
     src/modules/xml
+    src/modules/lumas
 )
 foreach(module ${modules})
     add_subdirectory(${module})
 endforeach()
+install(DIRECTORY profiles DESTINATION ${CMAKE_INSTALL_DATADIR}/mlt)
+install(DIRECTORY presets DESTINATION ${CMAKE_INSTALL_DATADIR}/mlt)

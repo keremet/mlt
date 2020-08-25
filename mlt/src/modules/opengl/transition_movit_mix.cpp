@@ -23,10 +23,10 @@
 #include <assert.h>
 
 #include "filter_glsl_manager.h"
-#include <movit/init.h>
-#include <movit/effect_chain.h>
-#include <movit/util.h>
-#include <movit/mix_effect.h>
+#include <init.h>
+#include <effect_chain.h>
+#include <util.h>
+#include <mix_effect.h>
 #include "mlt_movit_input.h"
 #include "mlt_flip_effect.h"
 
@@ -67,6 +67,11 @@ static int get_image( mlt_frame a_frame, uint8_t **image, mlt_image_format *form
 	*format = mlt_image_glsl;
 	error = mlt_frame_get_image( a_frame, &a_image, format, width, height, writable );
 	error = mlt_frame_get_image( b_frame, &b_image, format, width, height, writable );
+
+	if (*width < 1 || *height < 1) {
+		mlt_log_error( service, "Invalid size for get_image: %dx%d", *width, *height);
+		return error;
+	}
 
 	GlslManager::set_effect_input( service, a_frame, (mlt_service) a_image );
 	GlslManager::set_effect_secondary_input( service, a_frame, (mlt_service) b_image, b_frame );

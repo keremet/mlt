@@ -518,6 +518,7 @@ static void show_usage( char *program_name )
 "  -query \"formats\"                         List audio/video formats\n"
 "  -query \"audio_codecs\"                    List audio codecs\n"
 "  -query \"video_codecs\"                    List video codecs\n"
+"  -quiet                                   Set the logging level to quiet\n"
 "  -remove                                  Remove the most recent cut\n"
 "  -repeat times                            Repeat the last cut\n"
 "  -repository path                         Set the directory of MLT modules\n"
@@ -756,6 +757,7 @@ int main( int argc, char **argv )
 	mlt_profile backup_profile;
 	mlt_repository repo = NULL;
 	const char* repo_path = NULL;
+	int is_consumer_explicit = 0;
 
 	// Handle abnormal exit situations.
 	signal( SIGSEGV, abnormal_exit_handler );
@@ -857,6 +859,11 @@ query_all:
 		{
 			is_silent = 1;
 		}
+		else if ( !strcmp( argv[ i ], "-quiet" ) )
+		{
+			is_silent = 1;
+			mlt_log_set_level( MLT_LOG_QUIET );
+		}
 		else if ( !strcmp( argv[ i ], "-verbose" ) )
 		{
 			mlt_log_set_level( MLT_LOG_VERBOSE );
@@ -891,6 +898,10 @@ query_all:
 		{
 			if ( i+1 < argc && argv[i+1][0] != '-' )
 				repo_path = argv[++i];
+		}
+		else if ( !strcmp( argv[ i ], "-consumer" ) )
+		{
+			is_consumer_explicit = 1;
 		}
 	}
 	if ( !is_silent && !isatty( STDIN_FILENO ) && !is_progress )
@@ -1015,13 +1026,14 @@ query_all:
 		{
 			// Get melt's properties
 			mlt_properties melt_props = MLT_PRODUCER_PROPERTIES( melt );
-	
-			// Get the last group
-			mlt_properties group = mlt_properties_get_data( melt_props, "group", 0 );
-
-			// Apply group settings
 			mlt_properties properties = MLT_CONSUMER_PROPERTIES( consumer );
-			mlt_properties_inherit( properties, group );
+	
+			if (is_consumer_explicit) {
+				// Apply group settings
+				mlt_properties group = mlt_properties_get_data( melt_props, "group", 0 );
+				mlt_properties_inherit( properties, group );
+			}
+
 			int in = mlt_properties_get_int( properties, "in" );
 			int out = mlt_properties_get_int( properties, "out" );
 			if ( in > 0 || out > 0 ) {

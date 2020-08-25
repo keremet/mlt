@@ -23,6 +23,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <string.h>
+
+#define MLT_AFFINE_COUNT_PROPERTY "filter_affine.count"
 
 /** Do it :-).
 */
@@ -44,12 +47,14 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 	mlt_transition transition = mlt_properties_get_data( properties, "transition", NULL );
 	mlt_frame a_frame = NULL;
 	mlt_profile profile = mlt_service_profile( MLT_FILTER_SERVICE( filter ) );
+	char *background = mlt_properties_get( properties, "background" );
+	char *previous = mlt_properties_get( properties, "_background" );
 
-	if ( producer == NULL )
+	if ( producer == NULL || (background && previous && strcmp(background, previous)) )
 	{
-		char *background = mlt_properties_get( properties, "background" );
 		producer = mlt_factory_producer( profile, NULL, background );
 		mlt_properties_set_data( properties, "producer", producer, 0, (mlt_destructor)mlt_producer_close, NULL );
+		mlt_properties_set(properties, "_background", background);
 	}
 
 	if ( transition == NULL )
@@ -88,7 +93,6 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 			mlt_frame_set_aspect_ratio( a_frame, consumer_ar );
 
 		// Add the affine transition onto the frame stack
-		mlt_service_unlock( MLT_FILTER_SERVICE( filter ) );
 		mlt_transition_process( transition, a_frame, frame );
 
 		if ( mlt_properties_get_int( properties, "use_normalised" ) )
@@ -99,10 +103,16 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 			*height = profile->height;
 		}
 
+		// Prescale the image before applying affine filters if more than 1
+		if (mlt_properties_get_int(frame_properties, MLT_AFFINE_COUNT_PROPERTY) > 1) {
+			mlt_properties_set_int(frame_properties, "always_scale", 1);
+		}
+
 		mlt_frame_get_image( a_frame, image, format, width, height, writable );
 		mlt_properties_set_data( frame_properties, "affine_frame", a_frame, 0, (mlt_destructor)mlt_frame_close, NULL );
 		mlt_frame_set_image( frame, *image, *width * *height * 4, NULL );
 		mlt_frame_set_alpha( frame, mlt_frame_get_alpha_mask( a_frame ), *width * *height, NULL );
+		mlt_service_unlock( MLT_FILTER_SERVICE( filter ) );
 	}
 	else
 	{
@@ -120,6 +130,14 @@ static mlt_frame filter_process( mlt_filter filter, mlt_frame frame )
 	// Push the frame filter
 	mlt_frame_push_service( frame, filter );
 	mlt_frame_push_get_image( frame, filter_get_image );
+
+	// Count the number of affine filters on this frame
+	if (mlt_properties_get_int(MLT_FRAME_PROPERTIES(frame), MLT_AFFINE_COUNT_PROPERTY)) {
+		int count = mlt_properties_get_int(MLT_FRAME_PROPERTIES(frame), MLT_AFFINE_COUNT_PROPERTY);
+		mlt_properties_set_int(MLT_FRAME_PROPERTIES(frame), MLT_AFFINE_COUNT_PROPERTY, count + 1);
+	} else {
+		mlt_properties_set_int(MLT_FRAME_PROPERTIES(frame), MLT_AFFINE_COUNT_PROPERTY, 1);
+	}
 
 	return frame;
 }

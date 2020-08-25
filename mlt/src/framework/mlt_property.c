@@ -3,7 +3,7 @@
  * \brief Property class definition
  * \see mlt_property_s
  *
- * Copyright (C) 2003-2019 Meltytech, LLC
+ * Copyright (C) 2003-2020 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -140,6 +140,25 @@ void mlt_property_clear( mlt_property self )
 	pthread_mutex_lock( &self->mutex );
 	clear_property( self );
 	pthread_mutex_unlock( &self->mutex );
+}
+
+/** Check if a property is cleared.
+ *
+ * \public \memberof mlt_property_s
+ * \param self a property
+ * \return true if a property is clear. false if it has been set.
+ */
+
+int mlt_property_is_clear( mlt_property self )
+{
+	int result = 1;
+	if ( self )
+	{
+		pthread_mutex_lock( &self->mutex );
+		result = self->types == 0;
+		pthread_mutex_unlock( &self->mutex );
+	}
+	return result;
 }
 
 /** Set the property to an integer value.
@@ -946,6 +965,20 @@ static void time_smpte_from_frames( int frames, double fps, char *s, int drop )
 			{
 				if ( i % 18000 )
 					frames += 2;
+			}
+			frame_sep = ';';
+		}
+	}
+	else if ( fps == 60000.0/1001.0 )
+	{
+		fps = 60.0;
+		if ( drop )
+		{
+			int i;
+			for ( i = 3600; i <= frames; i += 3600 )
+			{
+				if ( i % 36000 )
+					frames += 4;
 			}
 			frame_sep = ';';
 		}

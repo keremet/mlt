@@ -21,6 +21,7 @@
 #include <framework/mlt.h>
 #include <framework/mlt_log.h>
 #include <QPainter>
+#include <QPainterPath>
 #include <QString>
 
 static QRectF get_text_path( QPainterPath* qpath, mlt_properties filter_properties, const char* text, double scale )
@@ -296,9 +297,7 @@ static int filter_get_image( mlt_frame frame, uint8_t **image, mlt_image_format 
 static mlt_frame filter_process( mlt_filter filter, mlt_frame frame )
 {
 	mlt_properties properties = get_filter_properties( filter, frame );
-	mlt_position position = mlt_filter_get_position( filter, frame );
-	mlt_position length = mlt_filter_get_length2( filter, frame );
-	char* argument = mlt_properties_anim_get( properties, "argument", position, length );
+	char* argument = mlt_properties_get( properties, "argument" );
 	if ( !argument || !strcmp( "", argument ) )
 		return frame;
 
@@ -335,19 +334,19 @@ mlt_filter filter_qtext_init( mlt_profile profile, mlt_service_type type, const 
 
 	mlt_properties filter_properties = MLT_FILTER_PROPERTIES( filter );
 	// Assign default values
-	mlt_properties_set( filter_properties, "argument", arg ? arg: "text" );
-	mlt_properties_set( filter_properties, "geometry", "0%/0%:100%x100%:100%" );
-	mlt_properties_set( filter_properties, "family", "Sans" );
-	mlt_properties_set( filter_properties, "size", "48" );
-	mlt_properties_set( filter_properties, "weight", "400" );
-	mlt_properties_set( filter_properties, "style", "normal" );
-	mlt_properties_set( filter_properties, "fgcolour", "0x000000ff" );
-	mlt_properties_set( filter_properties, "bgcolour", "0x00000020" );
-	mlt_properties_set( filter_properties, "olcolour", "0x00000000" );
-	mlt_properties_set( filter_properties, "pad", "0" );
-	mlt_properties_set( filter_properties, "halign", "left" );
-	mlt_properties_set( filter_properties, "valign", "top" );
-	mlt_properties_set( filter_properties, "outline", "0" );
+	mlt_properties_set_string( filter_properties, "argument", arg ? arg: "text" );
+	mlt_properties_set_string( filter_properties, "geometry", "0%/0%:100%x100%:100%" );
+	mlt_properties_set_string( filter_properties, "family", "Sans" );
+	mlt_properties_set_string( filter_properties, "size", "48" );
+	mlt_properties_set_string( filter_properties, "weight", "400" );
+	mlt_properties_set_string( filter_properties, "style", "normal" );
+	mlt_properties_set_string( filter_properties, "fgcolour", "0x000000ff" );
+	mlt_properties_set_string( filter_properties, "bgcolour", "0x00000020" );
+	mlt_properties_set_string( filter_properties, "olcolour", "0x00000000" );
+	mlt_properties_set_string( filter_properties, "pad", "0" );
+	mlt_properties_set_string( filter_properties, "halign", "left" );
+	mlt_properties_set_string( filter_properties, "valign", "top" );
+	mlt_properties_set_string( filter_properties, "outline", "0" );
 	mlt_properties_set_int( filter_properties, "_filter_private", 1 );
 
 	return filter;

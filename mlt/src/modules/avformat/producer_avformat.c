@@ -290,6 +290,21 @@ static int first_video_index( producer_avformat self )
 	return i;
 }
 
+#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(56, 1, 0)
+
+#include <libavutil/spherical.h>
+
+static const char* get_projection(AVStream *st)
+{
+	const AVSphericalMapping *spherical = av_stream_get_side_data(st, AV_PKT_DATA_SPHERICAL, NULL);
+
+	if (spherical)
+		return av_spherical_projection_name(spherical->projection);
+	return NULL;
+}
+
+#endif
+
 #include <libavutil/display.h>
 
 static double get_rotation(AVStream *st)
@@ -392,6 +407,13 @@ static mlt_properties find_default_streams( producer_avformat self )
 				double ffmpeg_fps = av_q2d( context->streams[ i ]->avg_frame_rate );
 				mlt_properties_set_double( meta_media, key, ffmpeg_fps );
 
+#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(56, 1, 0)
+				const char *projection = get_projection(context->streams[i]);
+				if (projection) {
+					snprintf(key, sizeof(key), "meta.media.%d.stream.projection", i);
+					mlt_properties_set_string(meta_media, key, projection);
+				}
+#endif
 				snprintf( key, sizeof(key), "meta.media.%d.stream.sample_aspect_ratio", i );
 				mlt_properties_set_double( meta_media, key, av_q2d( context->streams[ i ]->sample_aspect_ratio ) );
 				snprintf( key, sizeof(key), "meta.media.%d.codec.width", i );
@@ -535,7 +557,8 @@ static char* parse_url( mlt_profile profile, const char* URL, AVInputFormat **fo
 			char *height = NULL;
 
 			// Parse out params
-			url = strchr( url, '?' );
+			char* query = strchr( url, '?' );
+			url = (query && query > url && query[-1] != '\\')? query : NULL;
 			while ( url )
 			{
 				url[0] = 0;
@@ -2033,7 +2056,7 @@ static void apply_properties( void *obj, mlt_properties properties, int flags )
 		const char *opt_name = mlt_properties_get_name( properties, i );
 		int search_flags = AV_OPT_SEARCH_CHILDREN;
 		const AVOption *opt = av_opt_find( obj, opt_name, NULL, flags, search_flags );
-		if ( opt_name && mlt_properties_get( properties, opt_name ) )
+		if ( opt_name && mlt_properties_get( properties, opt_name ) && strcmp(opt_name, "seekable") )
 		{
 			if ( opt )
 				av_opt_set( obj, opt_name, mlt_properties_get( properties, opt_name), search_flags );
@@ -2596,7 +2619,7 @@ static int producer_get_audio( mlt_frame frame, void **buffer, mlt_audio_format 
 		index = 0;
 		index_max = FFMIN( MAX_AUDIO_STREAMS, context->nb_streams );
 		*channels = self->total_channels;
-		*samples = mlt_sample_calculator( fps, self->max_frequency, position );
+		*samples = mlt_audio_calculate_frame_samples( fps, self->max_frequency, position );
 		*frequency = self->max_frequency;
 	}
 
@@ -2633,7 +2656,7 @@ static int producer_get_audio( mlt_frame frame, void **buffer, mlt_audio_format 
 		
 		// Caller requested number samples based on requested sample rate.
 		if ( self->audio_index != INT_MAX )
-			*samples = mlt_sample_calculator( fps, self->audio_codec[ self->audio_index ]->sample_rate, position );
+			*samples = mlt_audio_calculate_frame_samples( fps, self->audio_codec[ self->audio_index ]->sample_rate, position );
 
 		while ( ret >= 0 && !got_audio )
 		{
@@ -2738,7 +2761,7 @@ static int producer_get_audio( mlt_frame frame, void **buffer, mlt_audio_format 
 					break;
 				}
 		}
-		mlt_properties_set( MLT_FRAME_PROPERTIES(frame), "channel_layout", mlt_channel_layout_name( layout ) );
+		mlt_properties_set( MLT_FRAME_PROPERTIES(frame), "channel_layout", mlt_audio_channel_layout_name( layout ) );
 
 		// Allocate and set the frame's audio buffer
 		int size = mlt_audio_format_size( *format, *samples, *channels );
@@ -2774,6 +2797,7 @@ static int producer_get_audio( mlt_frame frame, void **buffer, mlt_audio_format 
 		else
 		{
 			index = self->audio_index;
+			uint8_t silence = *format == mlt_audio_u8 ? 0x80 : 0;
 
 			// Now handle the audio if we have enough
 			if ( self->audio_used[ index ] > 0 )
@@ -2784,7 +2808,7 @@ static int producer_get_audio( mlt_frame frame, void **buffer, mlt_audio_format 
 				memcpy( *buffer, src, size * *channels * sizeof_sample );
 				// supply the remaining requested samples as silence
 				if ( *samples > self->audio_used[ index ] )
-					memset( *buffer + size * *channels * sizeof_sample, 0, ( *samples - self->audio_used[ index ] ) * *channels * sizeof_sample );
+					memset( *buffer + size * *channels * sizeof_sample, silence, ( *samples - self->audio_used[ index ] ) * *channels * sizeof_sample );
 				// reposition the samples within audio_buffer
 				self->audio_used[ index ] -= size;
 				memmove( src, src + size * *channels * sizeof_sample, self->audio_used[ index ] * *channels * sizeof_sample );
@@ -2792,7 +2816,7 @@ static int producer_get_audio( mlt_frame frame, void **buffer, mlt_audio_format 
 			else
 			{
 				// Otherwise fill with silence
-				memset( *buffer, 0, *samples * *channels * sizeof_sample );
+				memset( *buffer, silence, *samples * *channels * sizeof_sample );
 			}
 		}
 	}
@@ -2839,6 +2863,7 @@ static int audio_codec_init( producer_avformat self, int index, mlt_properties p
 			if ( self->audio_codec[ index ] )
 				avcodec_close( self->audio_codec[ index ] );
 			self->audio_codec[ index ] = codec_context;
+			self->audio_index = index;
 		}
 		else
 		{
@@ -2909,18 +2934,18 @@ static void producer_set_up_audio( producer_avformat self, mlt_frame frame )
 	}
 
 	// Update the audio properties if the index changed
-	if ( context && self->audio_index < context->nb_streams && index > -1 && self->audio_index > -1 && index != self->audio_index )
+	if ( context && self->audio_index > -1 && index != self->audio_index )
 	{
 		pthread_mutex_lock( &self->open_mutex );
-		if ( self->audio_codec[ self->audio_index ] )
-			avcodec_close( self->audio_codec[ self->audio_index ] );
-		self->audio_codec[ self->audio_index ] = NULL;
+		unsigned i = 0;
+		for (i = 0; i < context->nb_streams; i++) {
+			if (self->audio_codec[i]) {
+				avcodec_close(self->audio_codec[i]);
+				self->audio_codec[i] = NULL;
+			}
+		}
 		pthread_mutex_unlock( &self->open_mutex );
 	}
-	if ( self->audio_index != -1 )
-		self->audio_index = index;
-	else
-		index = -1;
 
 	// Get the codec(s)
 	if ( context && index == INT_MAX )
@@ -2932,6 +2957,7 @@ static void producer_set_up_audio( producer_avformat self, mlt_frame frame )
 			if ( context->streams[ index ]->codec->codec_type == AVMEDIA_TYPE_AUDIO )
 				audio_codec_init( self, index, properties );
 		}
+		self->audio_index = INT_MAX;
 	}
 	else if ( context && index > -1 && index < MAX_AUDIO_STREAMS &&
 		audio_codec_init( self, index, properties ) )

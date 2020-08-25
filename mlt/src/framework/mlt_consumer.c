@@ -3,7 +3,7 @@
  * \brief abstraction for all consumer services
  * \see mlt_consumer_s
  *
- * Copyright (C) 2003-2019 Meltytech, LLC
+ * Copyright (C) 2003-2020 Meltytech, LLC
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -514,6 +514,10 @@ static void set_image_format( mlt_consumer self )
 
 int mlt_consumer_start( mlt_consumer self )
 {
+	if (!self) {
+		return 1;
+	}
+
 	int error = 0;
 
 	if ( !mlt_consumer_is_stopped( self ) )
@@ -817,7 +821,7 @@ static void *consumer_read_ahead_thread( void *arg )
 		// Get the audio of the first frame
 		if ( !audio_off )
 		{
-			samples = mlt_sample_calculator( priv->fps, priv->frequency, priv->aud_counter++ );
+			samples = mlt_audio_calculate_frame_samples( priv->fps, priv->frequency, priv->aud_counter++ );
 			mlt_frame_get_audio( frame, &audio, &priv->audio_format, &priv->frequency, &priv->channels, &samples );
 		}
 
@@ -878,7 +882,7 @@ static void *consumer_read_ahead_thread( void *arg )
 		// Always process audio
 		if ( !audio_off )
 		{
-			samples = mlt_sample_calculator( priv->fps, priv->frequency, priv->aud_counter++ );
+			samples = mlt_audio_calculate_frame_samples( priv->fps, priv->frequency, priv->aud_counter++ );
 			mlt_frame_get_audio( frame, &audio, &priv->audio_format, &priv->frequency, &priv->channels, &samples );
 		}
 
@@ -1411,7 +1415,7 @@ static mlt_frame worker_get_frame( mlt_consumer self, mlt_properties properties 
 				// Process the audio
 				if ( !audio_off )
 				{
-					samples = mlt_sample_calculator( priv->fps, priv->frequency, priv->aud_counter++ );
+					samples = mlt_audio_calculate_frame_samples( priv->fps, priv->frequency, priv->aud_counter++ );
 					mlt_frame_get_audio( frame, &audio, &priv->audio_format, &priv->frequency, &priv->channels, &samples );
 				}
 				pthread_mutex_lock( &priv->queue_mutex );
@@ -1445,7 +1449,7 @@ static mlt_frame worker_get_frame( mlt_consumer self, mlt_properties properties 
 			// Process the audio
 			if ( !audio_off )
 			{
-				samples = mlt_sample_calculator( priv->fps, priv->frequency, priv->aud_counter++ );
+				samples = mlt_audio_calculate_frame_samples( priv->fps, priv->frequency, priv->aud_counter++ );
 				mlt_frame_get_audio( frame, &audio, &priv->audio_format, &priv->frequency, &priv->channels, &samples );
 			}
 			pthread_mutex_lock( &priv->queue_mutex );
@@ -1639,6 +1643,10 @@ void mlt_consumer_stopped( mlt_consumer self )
 
 int mlt_consumer_stop( mlt_consumer self )
 {
+	if (!self) {
+		return 1;
+	}
+
 	// Get the properties
 	mlt_properties properties = MLT_CONSUMER_PROPERTIES( self );
 	consumer_private *priv = self->local;

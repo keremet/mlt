@@ -1,23 +1,23 @@
-ubuntu-daily:
-    image: ubuntu:disco
-    script:
-        - sed -i '/^#\sdeb-src /s/^#//' "/etc/apt/sources.list"
-        - DEBIAN_FRONTEND=noninteractive apt-get -qq update
-        - apt-get -yqq build-dep mlt
-        - ./configure --enable-gpl --enable-gpl3 && make && make install
-            # there's no `check` or `test` `make` target
-
 ubuntu-latest:
-    image: ubuntu:cosmic
+    image: ubuntu:latest
     script:
         - sed -i '/^#\sdeb-src /s/^#//' "/etc/apt/sources.list"
         - DEBIAN_FRONTEND=noninteractive apt-get -qq update
-        - apt-get -yqq build-dep mlt
+        - DEBIAN_FRONTEND=noninteractive apt-get -yqq build-dep mlt
         - ./configure --enable-gpl --enable-gpl3 && make && make install
             # there's no `check` or `test` `make` target
 
 ubuntu-lts-3:
-    image: ubuntu:bionic
+    image: ubuntu:20.04
+    script:
+        - sed -i '/^#\sdeb-src /s/^#//' "/etc/apt/sources.list"
+        - DEBIAN_FRONTEND=noninteractive apt-get -qq update
+        - DEBIAN_FRONTEND=noninteractive apt-get -yqq build-dep mlt
+        - ./configure --enable-gpl --enable-gpl3 && make && make install
+            # there's no `check` or `test` `make` target
+
+ubuntu-lts-2:
+    image: ubuntu:18.04
     script:
         - sed -i '/^#\sdeb-src /s/^#//' "/etc/apt/sources.list"
         - DEBIAN_FRONTEND=noninteractive apt-get -qq update
@@ -25,8 +25,8 @@ ubuntu-lts-3:
         - ./configure --enable-gpl --enable-gpl3 && make && make install
             # there's no `check` or `test` `make` target
 
-ubuntu-lts-2:
-    image: ubuntu:xenial
+ubuntu-lts-1:
+    image: ubuntu:16.04
     script:
         - sed -i '/^#\sdeb-src /s/^#//' "/etc/apt/sources.list"
         - apt-get -qq update
@@ -34,8 +34,17 @@ ubuntu-lts-2:
         - ./configure --enable-gpl --enable-gpl3 && make && make install
             # there's no `check` or `test` `make` target
 
+debian-unstable:
+    image: debian:unstable
+    script:
+        - echo -e 'deb-src http://deb.debian.org/debian buster main\ndeb-src http://deb.debian.org/debian buster-updates main\ndeb-src http://security.debian.org buster/updates main' >> /etc/apt/sources.list
+        - apt-get -qq update
+        - apt-get -yqq build-dep mlt
+        - ./configure --enable-gpl --enable-gpl3 && make && make install
+            # there's no `check` or `test` `make` target
+
 debian-testing:
-    image: debian:buster
+    image: debian:testing
     script:
         - echo -e 'deb-src http://deb.debian.org/debian buster main\ndeb-src http://deb.debian.org/debian buster-updates main\ndeb-src http://security.debian.org buster/updates main' >> /etc/apt/sources.list
         - apt-get -qq update
@@ -44,13 +53,29 @@ debian-testing:
             # there's no `check` or `test` `make` target
 
 debian-stable:
-    image: debian:stretch
+    image: debian:stable
     script:
         - echo -e 'deb-src http://deb.debian.org/debian stretch main\ndeb-src http://deb.debian.org/debian stretch-updates main\ndeb-src http://security.debian.org stretch/updates main' >> /etc/apt/sources.list
         - apt-get -qq update
         - apt-get -yqq build-dep mlt
         - ./configure --enable-gpl --enable-gpl3 && make && make install
             # there's no `check` or `test` `make` target
+
+fedora-31:
+    image: fedora:31
+    script:
+        - yum --assumeyes groupinstall "Development Tools"
+        - yum --assumeyes install yasm gavl-devel libsamplerate-devel libxml2-devel ladspa-devel jack-audio-connection-kit-devel sox-devel SDL-devel gtk2-devel qt-devel libexif-devel libtheora-devel libvorbis-devel libvdpau-devel libsoup-devel liboil-devel python-devel alsa-lib pulseaudio-libs-devel gcc-c++
+            # unclear why `gcc-c++` isn't in `Development Tools`
+        - ./configure --enable-gpl --enable-gpl3 && make && make install
+
+fedora-30:
+    image: fedora:30
+    script:
+        - yum --assumeyes groupinstall "Development Tools"
+        - yum --assumeyes install yasm gavl-devel libsamplerate-devel libxml2-devel ladspa-devel jack-audio-connection-kit-devel sox-devel SDL-devel gtk2-devel qt-devel libexif-devel libtheora-devel libvorbis-devel libvdpau-devel libsoup-devel liboil-devel python-devel alsa-lib pulseaudio-libs-devel gcc-c++
+            # unclear why `gcc-c++` isn't in `Development Tools`
+        - ./configure --enable-gpl --enable-gpl3 && make && make install
 
 fedora-29:
     image: fedora:29
@@ -62,22 +87,6 @@ fedora-29:
 
 fedora-28:
     image: fedora:28
-    script:
-        - yum --assumeyes groupinstall "Development Tools"
-        - yum --assumeyes install yasm gavl-devel libsamplerate-devel libxml2-devel ladspa-devel jack-audio-connection-kit-devel sox-devel SDL-devel gtk2-devel qt-devel libexif-devel libtheora-devel libvorbis-devel libvdpau-devel libsoup-devel liboil-devel python-devel alsa-lib pulseaudio-libs-devel gcc-c++
-            # unclear why `gcc-c++` isn't in `Development Tools`
-        - ./configure --enable-gpl --enable-gpl3 && make && make install
-
-fedora-27:
-    image: fedora:27
-    script:
-        - yum --assumeyes groupinstall "Development Tools"
-        - yum --assumeyes install yasm gavl-devel libsamplerate-devel libxml2-devel ladspa-devel jack-audio-connection-kit-devel sox-devel SDL-devel gtk2-devel qt-devel libexif-devel libtheora-devel libvorbis-devel libvdpau-devel libsoup-devel liboil-devel python-devel alsa-lib pulseaudio-libs-devel gcc-c++
-            # unclear why `gcc-c++` isn't in `Development Tools`
-        - ./configure --enable-gpl --enable-gpl3 && make && make install
-
-fedora-26:
-    image: fedora:26
     script:
         - yum --assumeyes groupinstall "Development Tools"
         - yum --assumeyes install yasm gavl-devel libsamplerate-devel libxml2-devel ladspa-devel jack-audio-connection-kit-devel sox-devel SDL-devel gtk2-devel qt-devel libexif-devel libtheora-devel libvorbis-devel libvdpau-devel libsoup-devel liboil-devel python-devel alsa-lib pulseaudio-libs-devel gcc-c++

@@ -39,20 +39,6 @@ typedef struct
 
 static const size_t MAX_CHANNELS = 10;
 
-static void collapse_channels( int channels, int allocated_samples, int used_samples, float* buffer )
-{
-	if ( allocated_samples != used_samples && used_samples != 0 )
-	{
-		// The first channel will always be in the correct place (0).
-		for ( int p = 1; p < channels; p++ )
-		{
-			float* src = buffer + ( p * allocated_samples );
-			float* dst = buffer + ( p * used_samples );
-			memmove( dst, src, used_samples * sizeof(float) );
-		}
-	}
-}
-
 static int rbpitch_get_audio( mlt_frame frame, void **buffer, mlt_audio_format *format, int *frequency, int *channels, int *samples )
 {
 	mlt_filter filter = static_cast<mlt_filter>(mlt_frame_pop_audio( frame ));
@@ -85,14 +71,6 @@ static int rbpitch_get_audio( mlt_frame frame, void **buffer, mlt_audio_format *
 		frame->convert_audio( frame, buffer, format, mlt_audio_float );
 	}
 
-	// Detect the last frame
-	bool last_frame = false;
-	if ( mlt_filter_get_position( filter, frame ) + 1 == mlt_filter_get_length2( filter, frame ) )
-	{
-		// This is the last mlt frame. Drain the rest of the stretcher
-		last_frame = true;
-	}
-
 	// Sanity check parameters
 	// rubberband library crashes have been seen with a very large scale factor
 	// or very small sampling frequency. Very small scale factor and very high
@@ -123,62 +101,58 @@ static int rbpitch_get_audio( mlt_frame frame, void **buffer, mlt_audio_format *
 	}
 	s->setPitchScale(pitchscale);
 
-	// Calculate the buffer size.
-	int in_samples = *samples;
+	// Configure input and output buffers and counters.
 	int consumed_samples = 0;
-	int out_samples = 0;
-	int alloc_samples = in_samples;
-	if ( last_frame )
-	{
-		// Allocate enough space for the rest of the samples in the stretcher.
-		alloc_samples += pdata->in_samples - pdata->out_samples;
-	}
-	int size = mlt_audio_format_size( *format, alloc_samples, *channels );
-	float* out_buffer = (float*)mlt_pool_alloc( size );
+	int total_consumed_samples = 0;
+	int received_samples = 0;
+	struct mlt_audio_s in;
+	struct mlt_audio_s out;
+	mlt_audio_set_values( &in, *buffer, *frequency, *format, *samples, *channels );
+	mlt_audio_set_values( &out, NULL, *frequency, *format, *samples, *channels );
+	mlt_audio_alloc_data( &out );
 
 	// Process all input samples
 	while ( true )
 	{
 		// Send more samples to the stretcher
-		int required_samples = (int)s->getSamplesRequired();
-		int remaining_in_samples = in_samples - consumed_samples;
-		int process_samples = std::min( remaining_in_samples, required_samples );
+		if ( consumed_samples == in.samples )
+		{
+			// Continue to repeat input samples into the stretcher until it
+			// provides the desired number of samples out.
+			consumed_samples = 0;
+			mlt_log_debug( MLT_FILTER_SERVICE(filter), "Repeat samples\n");
+		}
+		int process_samples = std::min( in.samples - consumed_samples, (int)s->getSamplesRequired() );
 		if ( process_samples > 0 )
 		{
 			float* in_planes[MAX_CHANNELS];
-			for ( int i = 0; i < *channels; i++ )
+			for ( int i = 0; i < in.channels; i++ )
 			{
-				in_planes[i] = ((float*)*buffer) + (in_samples * i) + consumed_samples;
+				in_planes[i] = ((float*)in.data) + (in.samples * i) + consumed_samples;
 			}
-			if ( last_frame && process_samples == remaining_in_samples )
-			{
-				// This will be the last call to process.
-				s->process( in_planes, process_samples, true );
-				mlt_log_debug( MLT_FILTER_SERVICE(filter), "Last call to Process()\n" );
-			}
-			else
-			{
-				s->process( in_planes, process_samples, false );
-			}
+			s->process( in_planes, process_samples, false );
 			consumed_samples += process_samples;
+			total_consumed_samples += process_samples;
+			pdata->in_samples += process_samples;
 		}
 
 		// Receive samples from the stretcher
-		int retrieve_samples = std::min( alloc_samples - out_samples, s->available() );
+		int retrieve_samples = std::min( out.samples - received_samples, s->available() );
 		if ( retrieve_samples > 0 )
 		{
 			float* out_planes[MAX_CHANNELS];
-			for ( int i = 0; i < *channels; i++ )
+			for ( int i = 0; i < out.channels; i++ )
 			{
-				out_planes[i] = out_buffer + (alloc_samples * i) + out_samples;
+				out_planes[i] = ((float*)out.data) + (out.samples * i) + received_samples;
 			}
 			retrieve_samples = (int)s->retrieve( out_planes, retrieve_samples );
-			out_samples += retrieve_samples;
+			received_samples += retrieve_samples;
+			pdata->out_samples += retrieve_samples;
 		}
 
 		mlt_log_debug( MLT_FILTER_SERVICE(filter), "Process: %d\t Retrieve: %d\n", process_samples, retrieve_samples );
 
-		if ( process_samples <= 0 && retrieve_samples <= 0 )
+		if ( received_samples == out.samples && total_consumed_samples >= in.samples )
 		{
 			// There is nothing more to do;
 			break;
@@ -186,13 +160,9 @@ static int rbpitch_get_audio( mlt_frame frame, void **buffer, mlt_audio_format *
 	}
 
 	// Save the processed samples.
-	collapse_channels( *channels, alloc_samples, out_samples, out_buffer );
-	mlt_frame_set_audio( frame, static_cast<void*>(out_buffer), *format, size, mlt_pool_release );
-	*buffer = static_cast<void*>(out_buffer);
-	*samples = out_samples;
-
-	pdata->in_samples += in_samples;
-	pdata->out_samples += out_samples;
+	mlt_audio_shrink( &out, received_samples );
+	mlt_frame_set_audio( frame, out.data, out.format, 0, out.release_data );
+	mlt_audio_get_values( &out, buffer, frequency, format, samples, channels );
 
 	// Report the latency.
 	double latency = (double)(pdata->in_samples - pdata->out_samples) * 1000.0 / (double)*frequency;
@@ -200,7 +170,7 @@ static int rbpitch_get_audio( mlt_frame frame, void **buffer, mlt_audio_format *
 
 	mlt_service_unlock( MLT_FILTER_SERVICE(filter) );
 
-	mlt_log_debug( MLT_FILTER_SERVICE(filter), "Requested: %d\tReceived: %d\tSent: %d\tLatency: %f\n", requested_samples, in_samples, out_samples, latency );
+	mlt_log_debug( MLT_FILTER_SERVICE(filter), "Requested: %d\tReceived: %d\tSent: %d\tLatency: %d(%fms)\n", requested_samples, in.samples, out.samples, (pdata->in_samples - pdata->out_samples), latency );
 	return error;
 }
 
@@ -212,7 +182,7 @@ static mlt_frame filter_process( mlt_filter filter, mlt_frame frame )
 
 	// Determine the pitchscale
 	double pitchscale = 1.0;
-	if ( mlt_properties_get( filter_properties, "pitchscale" ) != NULL )
+	if ( mlt_properties_exists( filter_properties, "pitchscale" ) )
 	{
 		pitchscale = mlt_properties_anim_get_double( filter_properties, "pitchscale", position, length );
 	}

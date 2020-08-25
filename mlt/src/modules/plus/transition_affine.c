@@ -473,6 +473,15 @@ static int transition_get_image( mlt_frame a_frame, uint8_t **image, mlt_image_f
 	if ( mirror && position > length / 2 )
 		position = abs( position - length );
 
+	// Preview scaling is not working correctly when offsets are active. I have
+	// not figured out the math; so, disable preview scaling for now.
+	double ox = mlt_properties_anim_get_double( properties, "ox", position, length );
+	double oy = mlt_properties_anim_get_double( properties, "oy", position, length );
+	if (ox != 0.0 || oy != 0.0) {
+		*width = normalised_width;
+		*height = normalised_height;
+	}
+	
 	// Fetch the a frame image
 	*format = mlt_image_rgb24a;
 	int error = mlt_frame_get_image( a_frame, image, format, width, height, 1 );
@@ -518,7 +527,12 @@ static int transition_get_image( mlt_frame a_frame, uint8_t **image, mlt_image_f
 		}
 		result.o = (result.o == DBL_MIN)? 1.0 : MIN(result.o, 1.0);
 	}
-	mlt_service_unlock( MLT_TRANSITION_SERVICE( transition ) );
+
+	int threads = mlt_properties_get_int(properties, "threads");
+	threads = CLAMP(threads, 0, mlt_slices_count_normal());
+	if (threads == 1)
+		mlt_service_unlock( MLT_TRANSITION_SERVICE( transition ) );
+
 	result.x *= scale_width;
 	result.y *= scale_height;
 	result.w *= scale_width;
@@ -562,8 +576,16 @@ static int transition_get_image( mlt_frame a_frame, uint8_t **image, mlt_image_f
 		mlt_properties_set_int( b_props, "rescale_width", b_width );
 		mlt_properties_set_int( b_props, "rescale_height", b_height );
 
-		// Suppress padding and aspect normalization.
-		mlt_properties_set( b_props, "rescale.interp", "none" );
+		const char* b_resource = mlt_properties_get(
+			MLT_PRODUCER_PROPERTIES(mlt_frame_get_original_producer(b_frame)), "resource");
+		// Check if we are applied as a filter inside a transition
+		if (b_resource && !strcmp("<track>", b_resource)) {
+			// Set the rescale interpolation to match the frame
+			mlt_properties_set( b_props, "rescale.interp", mlt_properties_get( a_props, "rescale.interp" ) );
+		} else {
+			// Suppress padding and aspect normalization.
+			mlt_properties_set( b_props, "rescale.interp", "none" );
+		}
 	}
 
 	// This is not a field-aware transform.
@@ -573,6 +595,8 @@ static int transition_get_image( mlt_frame a_frame, uint8_t **image, mlt_image_f
 	if (error || !b_image) {
 		// Remove potentially large image on the B frame. 
 		mlt_frame_set_image( b_frame, NULL, 0, NULL );
+		if (threads != 1)
+			mlt_service_unlock( MLT_TRANSITION_SERVICE( transition ) );		
 		return error;
 	}
 
@@ -622,8 +646,11 @@ static int transition_get_image( mlt_frame a_frame, uint8_t **image, mlt_image_f
 		// Compute the affine transform
 		get_affine( &desc.affine, transition, ( double )position, length, scale_width, scale_height );
 		desc.dz = MapZ( desc.affine.matrix, 0, 0 );
-		if ( (int) fabs( desc.dz * 1000 ) < 25 )
+		if ( (int) fabs( desc.dz * 1000 ) < 25 ) {
+			if (threads != 1)
+				mlt_service_unlock( MLT_TRANSITION_SERVICE( transition ) );		
 			return 0;
+		}
 
 		if (mlt_properties_get_int(properties, "invert_scale")) {
 			scale_x = 1.0 / scale_x;
@@ -695,8 +722,6 @@ static int transition_get_image( mlt_frame a_frame, uint8_t **image, mlt_image_f
 		free( interps );
 
 		// Do the transform with interpolation
-		int threads = mlt_properties_get_int(properties, "threads");
-		threads = CLAMP(threads, 0, mlt_slices_count_normal());
 		if (threads == 1)
 			sliced_proc(0, 0, 1, &desc);
 		else
@@ -705,7 +730,8 @@ static int transition_get_image( mlt_frame a_frame, uint8_t **image, mlt_image_f
 		// Remove potentially large image on the B frame. 
 		mlt_frame_set_image( b_frame, NULL, 0, NULL );
 	}
-
+	if (threads != 1)
+		mlt_service_unlock( MLT_TRANSITION_SERVICE( transition ) );		
 	return 0;
 }
 
