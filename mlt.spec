@@ -46,7 +46,7 @@ Patch103: alt-libav.patch
 #BuildRequires: frei0r-devel ladspa_sdk libSDL_image-devel libalsa-devel libavdevice-devel libavformat-devel libexif-devel libfftw3-devel libjack-devel libpulseaudio-devel libsamplerate-devel libsox-devel libswfdec-devel libswscale-devel libxml2-devel python-module-google python3-dev qt5-svg-devel rpm-build-ruby swig
 BuildRequires(pre): rpm-build-kf5 rpm-build-python3 libavformat-devel
 BuildRequires: qt5-svg-devel
-BuildRequires: frei0r-devel libSDL2-devel libSDL2_image-devel libalsa-devel libexif-devel
+BuildRequires: frei0r-devel libSDL-devel libSDL_image-devel libSDL2-devel libSDL2_image-devel libalsa-devel libexif-devel
 BuildRequires: libavfilter-devel libswscale-devel libavdevice-devel libavformat-devel
 %if %is_ffmpeg
 BuildRequires: libswresample-devel
